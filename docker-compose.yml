@@ -1,0 +1,51 @@
+services:
+  # Базовый профиль CPU (ONNX Runtime CPU AVX2)
+  fall-guard:
+    build:
+      context: .
+      args:
+        COMPUTE_PROFILE: cpu
+    image: fall-guard:cpu
+    container_name: fall-guard
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/app/data
+      - MODELS_DIR=/app/data/models
+      - TZ=${TZ:-UTC}
+    ports:
+      - "${WEB_PORT:-8090}:8090"
+    volumes:
+      - ./data:/app/data
+
+  # Профиль для будущего переноса на компьютер с видеокартой NVIDIA:
+  # запуск одной командой: docker compose --profile gpu up -d --build fall-guard-gpu
+  fall-guard-gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      args:
+        COMPUTE_PROFILE: gpu
+    image: fall-guard:gpu
+    container_name: fall-guard-gpu
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/app/data
+      - MODELS_DIR=/app/data/models
+      - DEVICE=cuda
+      - INFER_FPS=12.0
+      - TZ=${TZ:-UTC}
+    ports:
+      - "${WEB_PORT:-8090}:8090"
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

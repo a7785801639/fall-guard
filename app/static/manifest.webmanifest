@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "FallGuard — Уход и безопасность",
+  "short_name": "FallGuard",
+  "description": "Система послеинсультного ухода и безопасности: предупреждение подъёма, детекция падения и вызова рукой.",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111317",
+  "theme_color": "#111317",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
