@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FallGuard</string>
+    <string name="settings_title">Настройки приложения</string>
+    <string name="ch_alarm">Тревога: падение</string>
+    <string name="ch_alarm_desc">Громкий сигнал на весь экран при падении или сползании</string>
+    <string name="ch_events">Другие события</string>
+    <string name="ch_events_desc">Посадка, выход из кровати, жест рукой</string>
+    <string name="ch_link">Связь с сервером</string>
+    <string name="ch_link_desc">Постоянное уведомление о том, что приложение на связи</string>
+</resources>

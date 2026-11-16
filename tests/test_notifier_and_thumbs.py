@@ -249,11 +249,11 @@ def test_notifier_multi_user_mute_unmute_and_persistent_reply_keyboard(tmp_path:
     assert kb_on["resize_keyboard"] is True
     assert kb_on["is_persistent"] is True
     assert kb_on["keyboard"] == [
-        [{"text": BTN_MUTE_TEXT}],
+        [{"text": BTN_MUTE_TEXT}, {"text": "🚨 Только падения"}],
         [{"text": BTN_PHOTO_TEXT}, {"text": BTN_STATUS_TEXT}],
     ]
-    kb_off = json.loads(_build_reply_keyboard(enabled=False))
-    assert kb_off["keyboard"][0] == [{"text": BTN_UNMUTE_TEXT}]
+    kb_off = json.loads(_build_reply_keyboard(enabled=False, mode="falls"))
+    assert kb_off["keyboard"][0] == [{"text": BTN_UNMUTE_TEXT}, {"text": "📣 Все события"}]
 
     with httpx.Client(transport=transport) as client:
         # Подключаются Анна (2002) и Борис (3003) через /start

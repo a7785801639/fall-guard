@@ -87,6 +87,7 @@ def default_runtime_prefs() -> dict[str, Any]:
         "night_strict_mode": True,
         "night_start_hour": 22,
         "night_end_hour": 7,
+        "floor_safety_net": True,
     }
 
 
@@ -203,7 +204,13 @@ class RuntimePrefsStore:
             int(current["night_end_hour"]),
         )
 
+        floor_net = _parse_bool(
+            patch.get("floor_safety_net", current.get("floor_safety_net", True)),
+            bool(current.get("floor_safety_net", True)),
+        )
+
         return {
+            "floor_safety_net": floor_net,
             "sensitivity_preset": final_preset,
             "sit_confirm_seconds": sit,
             "leave_confirm_seconds": leave,

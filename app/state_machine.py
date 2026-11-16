@@ -113,6 +113,7 @@ class FallStateMachine:
         night_strict_mode: bool = True,
         night_start_hour: int = 22,
         night_end_hour: int = 7,
+        floor_safety_net: bool = True,
     ) -> None:
         self._sit_confirm = float(sit_confirm_seconds)
         self._leave_confirm = float(leave_confirm_seconds)
@@ -173,6 +174,16 @@ class FallStateMachine:
         self._baseline = BedBaseline()
         self._last_alert_by_state: dict[PatientState, float] = {}
         self._fall_unacknowledged = False
+
+        # Страховка «человек на полу»: не зависит от того, кому присвоена роль бабушки
+        self._floor_safety_net = bool(floor_safety_net)
+        self._down_since: float | None = None
+        self._down_center: tuple[float, float] = (0.0, 0.0)
+        self._down_track_id: int | None = None
+        self._down_alerting = False
+        self._down_dismissed_center: tuple[float, float] | None = None
+        self._down_dismissed_until: float = -1e9
+        self._unattended_fall_timer = 0.0
 
     @property
     def state(self) -> PatientState:
@@ -256,8 +267,13 @@ class FallStateMachine:
                 self._night_start_hour = int(kwargs["night_start_hour"]) % 24
             if "night_end_hour" in kwargs and kwargs["night_end_hour"] is not None:
                 self._night_end_hour = int(kwargs["night_end_hour"]) % 24
+            if "floor_safety_net" in kwargs and kwargs["floor_safety_net"] is not None:
+                self._floor_safety_net = bool(kwargs["floor_safety_net"])
+                if not self._floor_safety_net:
+                    self._clear_person_down()
 
             return {
+                "floor_safety_net": self._floor_safety_net,
                 "sit_confirm_seconds": round(self._sit_confirm, 2),
                 "leave_confirm_seconds": round(self._leave_confirm, 2),
                 "fall_confirm_seconds": round(self._fall_confirm, 2),
@@ -351,6 +367,8 @@ class FallStateMachine:
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
+            self._unattended_fall_timer = 0.0
+            self._clear_person_down()
             if not was_calm_in_bed:
                 self._last_seen_deep_in_bed = False
             self._clear_away_tracking()
@@ -378,6 +396,8 @@ class FallStateMachine:
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
+            self._unattended_fall_timer = 0.0
+            self._clear_person_down()
             self._was_monitored_recently = False
             self._last_seen_deep_in_bed = False
             self._fall_unacknowledged = False
@@ -399,6 +419,12 @@ class FallStateMachine:
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
+            self._unattended_fall_timer = 0.0
+            if self._down_alerting and self._last_eval_ts is not None:
+                # «Ты ошибся» по страховке: 10 минут не тревожим по этому же месту
+                self._down_dismissed_center = self._down_center
+                self._down_dismissed_until = self._last_eval_ts + 600.0
+            self._clear_person_down()
             self._upper_y_history.clear()
             self._hip_y_history.clear()
             self._clear_away_tracking()
@@ -872,6 +898,115 @@ class FallStateMachine:
 
         return False, ""
 
+    def _clear_person_down(self) -> None:
+        self._down_since = None
+        self._down_track_id = None
+        self._down_alerting = False
+
+    @staticmethod
+    def _is_lying_on_floor(obs: PoseObservation, zones: ZonesConfig) -> bool:
+        """Строго горизонтальная низкая поза вне матраса (лежит на полу), без привязки к роли."""
+        if obs.conf < 0.5 or obs.bbox_height > 0.40 or obs.bbox_height < 0.05:
+            return False
+        if zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones):
+            return False
+        if zones.has_bed:
+            _, bed_max_y = polygon_y_bounds(zones.bed_polygon)
+            anchor = obs.mid_hip or obs.body_center
+            # Лежащий «на полу» не может быть целиком выше нижней кромки матраса и внутри его контура
+            if (
+                obs.bbox_norm[3] <= bed_max_y
+                and polygon_distance_norm(anchor, zones.bed_polygon) >= 0.0
+            ):
+                return False
+        angle = obs.torso_angle_from_vertical_deg()
+        if angle is not None:
+            return angle >= 62.0 and obs.aspect_ratio_wh >= 0.95
+        return obs.aspect_ratio_wh >= 1.45
+
+    def _check_person_down(
+        self,
+        observations: Sequence[PoseObservation],
+        identities: dict[int, TrackIdentity],
+        zones: ZonesConfig,
+        now: float,
+    ) -> AlertEvent | None:
+        """
+        Страховка от путаницы ролей: если ЛЮБОЙ человек (гость / неопознанный) неподвижно
+        лежит на полу и рядом нет никого на ногах — это тревога падения, кем бы его ни считал
+        идентификатор. Пациент со своей ролью обрабатывается основной веткой.
+        """
+        if not self._floor_safety_net:
+            return None
+
+        candidate: PoseObservation | None = None
+        helper_present = False
+        for obs in observations:
+            ident = identities.get(obs.track_id)
+            if ident is None:
+                continue
+            if self._is_lying_on_floor(obs, zones):
+                dismissed_spot = (
+                    self._down_dismissed_center is not None
+                    and now < self._down_dismissed_until
+                    and math.hypot(
+                        obs.body_center[0] - self._down_dismissed_center[0],
+                        obs.body_center[1] - self._down_dismissed_center[1],
+                    )
+                    <= 0.10
+                )
+                if dismissed_spot:
+                    continue
+                if ident.role != Role.PATIENT and (
+                    candidate is None or obs.track_id == self._down_track_id
+                ):
+                    candidate = obs
+                continue
+            on_bed = zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones)
+            angle = obs.torso_angle_from_vertical_deg()
+            if not on_bed and obs.bbox_height >= 0.22 and (angle is None or angle < 55.0):
+                helper_present = True
+
+        if candidate is None or helper_present:
+            if self._down_alerting and self._state == PatientState.FALLEN:
+                self._state = PatientState.IDLE
+                self._status_reason = "ожидание в кадре"
+            self._clear_person_down()
+            return None
+
+        center = candidate.body_center
+        if (
+            self._down_since is None
+            or math.hypot(center[0] - self._down_center[0], center[1] - self._down_center[1]) > 0.07
+        ):
+            # Новый эпизод либо человек заметно перемещается (моет пол, играет ребёнок) — отсчёт заново
+            self._down_since = now
+            self._down_center = center
+            self._down_track_id = candidate.track_id
+            if not self._down_alerting:
+                return None
+        self._down_track_id = candidate.track_id
+
+        needed = max(6.0, self._fall_confirm * 3.0)
+        if not self._down_alerting and (now - self._down_since) < needed:
+            return None
+
+        first = not self._down_alerting
+        self._down_alerting = True
+        self._state = PatientState.FALLEN
+        self._status_reason = "человек неподвижно лежит на полу"
+        if first:
+            return self._emit_if_cooled_down(
+                PatientState.FALLEN,
+                AlertSeverity.CRITICAL,
+                "Человек лежит на полу!",
+                "Кто-то неподвижно лежит на полу, рядом никого нет. "
+                "Нажмите «Я подошёл», чтобы отключить повтор сигнала.",
+                now,
+                candidate.track_id,
+            )
+        return None
+
     def _emit_if_cooled_down(
         self,
         new_state: PatientState,
@@ -906,8 +1041,16 @@ class FallStateMachine:
         now: float,
         local_hour: int | None = None,
         patient_in_bed_latched: bool = False,
+        caregiver_visible: bool | None = None,
     ) -> AlertEvent | None:
+        """
+        caregiver_visible — помощник реально виден в кадре сейчас (None = считать равным
+        caregiver_nearby). Если визит только «защёлкнут» по двери, а в кадре никого нет,
+        падение пациента НЕ подавляется.
+        """
         with self._lock:
+            if caregiver_visible is None:
+                caregiver_visible = bool(caregiver_nearby)
             dt = 0.2 if self._last_eval_ts is None else max(0.0, min(1.0, now - self._last_eval_ts))
             self._last_eval_ts = now
             hour = datetime.now().hour if local_hour is None else int(local_hour)
@@ -922,6 +1065,8 @@ class FallStateMachine:
                 self._status_reason = "ручная пауза («Я рядом»)"
                 self._clear_away_tracking()
                 self._clear_immobility_tracking()
+                self._clear_person_down()
+                self._unattended_fall_timer = 0.0
                 return None
             if self._state == PatientState.PAUSED:
                 if zones.has_bed and (
@@ -935,6 +1080,13 @@ class FallStateMachine:
                 else:
                     self._state = PatientState.IDLE
                     self._status_reason = "ожидание в кадре"
+
+            # Страховка «человек на полу» — раньше любых подавлений по ролям и визитам
+            down_ev = self._check_person_down(observations, identities, zones, now)
+            if down_ev is not None:
+                return down_ev
+            if self._down_alerting:
+                return None
 
             # Ищем наблюдение подтверждённой бабушки (Role.PATIENT)
             patient_obs: PoseObservation | None = None
@@ -1057,6 +1209,35 @@ class FallStateMachine:
                     and upper_pt[1] < 0.64
                 ):
                     self._clear_assisted_seated()
+
+                # Визит «защёлкнут», но помощника в кадре нет: падение пациента не подавляем
+                if not caregiver_visible:
+                    lone_fallen, lone_reason = self._check_fallen_or_slumped(patient_obs, zones, now)
+                    if lone_fallen:
+                        self._unattended_fall_timer += dt
+                        if self._unattended_fall_timer >= max(self._fall_confirm * 1.5, self._fall_confirm + 1.0):
+                            self._clear_assisted_seated()
+                            self._last_seen_deep_in_bed = False
+                            prev = self._state
+                            self._state = PatientState.FALLEN
+                            self._status_reason = lone_reason.rstrip(".")
+                            if prev != PatientState.FALLEN or not self._fall_unacknowledged:
+                                return self._emit_if_cooled_down(
+                                    PatientState.FALLEN,
+                                    AlertSeverity.CRITICAL,
+                                    "Падение / сползание вне кровати!",
+                                    f"{lone_reason} Помощника в кадре нет. "
+                                    "Нажмите «Я подошёл», чтобы отключить повтор сигнала.",
+                                    now,
+                                    patient_obs.track_id,
+                                )
+                            return None
+                    else:
+                        self._unattended_fall_timer = max(0.0, self._unattended_fall_timer - dt * 1.5)
+                    if self._state == PatientState.FALLEN and self._fall_unacknowledged and lone_fallen:
+                        return None
+                else:
+                    self._unattended_fall_timer = 0.0
                 self._fall_timer = 0.0
                 self._help_timer = 0.0
                 self._sit_timer = 0.0

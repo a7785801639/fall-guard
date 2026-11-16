@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import urllib.parse
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable
@@ -20,7 +22,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .devices import DEVICE_COOKIE, normalize_alert_mode
 from .engine import FallGuardEngine
+from .qr_svg import render_qr_svg
 from .patient_id import Role
 from .tg_auth import (
     DEFAULT_SESSION_TTL_SEC,
@@ -77,6 +81,22 @@ class FalseAlarmReportPayload(BaseModel):
     reporter: str = "Веб-пульт"
 
 
+class AlertModePayload(BaseModel):
+    mode: str = "all"
+
+
+class DeviceClaimPayload(BaseModel):
+    code: str = ""
+    name: str = ""
+    platform: str = "android"
+
+
+class DevicePatchPayload(BaseModel):
+    name: str | None = None
+    mode: str | None = None
+    enabled: bool | None = None
+
+
 class TelegramAuthPayload(BaseModel):
     init_data: str = ""
 
@@ -97,6 +117,7 @@ _PUBLIC_AUTH_POST_PATHS: frozenset[str] = frozenset(
     {
         "/api/tg/auth",
         "/api/tg/logout",
+        "/api/devices/claim",
     }
 )
 
@@ -125,33 +146,60 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         fwd_proto = (headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
         return fwd_proto == "https" or scheme.lower() == "https"
 
+    def _collect_token_candidates(
+        headers: Mapping[str, str],
+        cookies: Mapping[str, str],
+        query_params: Mapping[str, str],
+    ) -> list[str]:
+        candidates: list[str] = []
+        raw_auth = (headers.get("authorization") or "").strip()
+        if raw_auth.lower().startswith("bearer "):
+            bearer_tok = raw_auth[7:].strip()
+            if bearer_tok:
+                candidates.append(bearer_tok)
+        for raw in (
+            query_params.get("token"),
+            cookies.get(WEBAPP_SESSION_COOKIE),
+            cookies.get(DEVICE_COOKIE),
+        ):
+            tok = (raw or "").strip()
+            if tok:
+                candidates.append(tok)
+        return candidates
+
+    def _authenticate_device(
+        headers: Mapping[str, str],
+        cookies: Mapping[str, str],
+        query_params: Mapping[str, str],
+    ) -> dict[str, Any] | None:
+        for cand in _collect_token_candidates(headers, cookies, query_params):
+            dev = engine.devices.authenticate(cand)
+            if dev is not None:
+                return dev
+        return None
+
     def _authenticate_external_credentials(
         headers: Mapping[str, str],
         cookies: Mapping[str, str],
         query_params: Mapping[str, str],
     ) -> dict[str, Any] | None:
+        device = _authenticate_device(headers, cookies, query_params)
+        if device is not None:
+            return {
+                "kind": "device",
+                "device_id": device["id"],
+                "chat_id": "",
+                "name": device["name"],
+                "username": "",
+            }
+
         if not engine.settings.telegram_configured:
             return None
         bot_token = engine.settings.tg_bot_token.strip()
         if not bot_token:
             return None
 
-        token_candidates: list[str] = []
-        raw_auth = (headers.get("authorization") or "").strip()
-        if raw_auth.lower().startswith("bearer "):
-            bearer_tok = raw_auth[7:].strip()
-            if bearer_tok:
-                token_candidates.append(bearer_tok)
-
-        query_tok = (query_params.get("token") or "").strip()
-        if query_tok:
-            token_candidates.append(query_tok)
-
-        cookie_tok = (cookies.get(WEBAPP_SESSION_COOKIE) or "").strip()
-        if cookie_tok:
-            token_candidates.append(cookie_tok)
-
-        for cand in token_candidates:
+        for cand in _collect_token_candidates(headers, cookies, query_params):
             parsed = verify_session_token(cand, bot_token)
             if parsed is not None and engine.notifier.is_authorized_webapp_user(parsed["chat_id"]):
                 return parsed
@@ -168,6 +216,33 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
                     "username": verified.get("username", ""),
                 }
         return None
+
+    def _resolve_identity(request: Request) -> dict[str, Any]:
+        """Кто смотрит пульт: привязанный телефон, подписчик Telegram или анонимный браузер в LAN."""
+        auth = _authenticate_external_credentials(
+            request.headers,
+            request.cookies,
+            request.query_params,
+        )
+        if auth is not None and auth.get("kind") == "device":
+            dev = engine.devices.get(str(auth["device_id"])) or {}
+            return {
+                "kind": "device",
+                "id": str(auth["device_id"]),
+                "name": str(dev.get("name") or auth.get("name") or "Телефон"),
+                "mode": normalize_alert_mode(dev.get("mode")),
+                "enabled": bool(dev.get("enabled", True)),
+            }
+        if auth is not None and auth.get("chat_id"):
+            cid = str(auth["chat_id"])
+            return {
+                "kind": "telegram",
+                "id": cid,
+                "name": str(auth.get("name") or f"Чат {cid}"),
+                "mode": engine.notifier.get_subscriber_mode(cid),
+                "enabled": engine.notifier.is_subscriber_enabled(cid),
+            }
+        return {"kind": "lan", "id": "", "name": "Этот браузер", "mode": "all", "enabled": True}
 
     def _is_public_shell_route(method: str, path: str) -> bool:
         m = method.upper()
@@ -293,6 +368,17 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
                 "webapp_url": webapp_url,
             }
 
+        if auth_user.get("kind") == "device":
+            return {
+                "ok": True,
+                "authenticated": True,
+                "mode": "device",
+                "session_token": "",
+                "user": {"chat_id": "", "name": auth_user["name"], "username": ""},
+                "bot_username": bot_uname,
+                "webapp_url": webapp_url,
+            }
+
         fresh_token = create_session_token(
             chat_id=auth_user["chat_id"],
             name=auth_user["name"],
@@ -399,6 +485,157 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
             samesite="none" if is_https else "lax",
         )
         return resp
+
+    # --- Кто я и мой режим тревог --------------------------------------------------
+    @app.get("/api/me")
+    async def get_me(request: Request) -> dict:
+        return {"ok": True, "me": _resolve_identity(request)}
+
+    @app.post("/api/me/mode")
+    async def set_my_mode(request: Request, payload: AlertModePayload) -> dict:
+        me = _resolve_identity(request)
+        mode = normalize_alert_mode(payload.mode)
+        if me["kind"] == "device":
+            engine.devices.update(me["id"], mode=mode)
+        elif me["kind"] == "telegram":
+            engine.notifier.set_subscriber_mode(me["id"], mode)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Браузер в локальной сети не является получателем — режим хранится в самом браузере",
+            )
+        return {"ok": True, "me": _resolve_identity(request)}
+
+    @app.post("/api/subscribers/{chat_id}/mode")
+    async def set_subscriber_mode(chat_id: str, payload: AlertModePayload) -> dict:
+        updated = engine.notifier.set_subscriber_mode(chat_id, payload.mode)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Подписчик не найден")
+        return {"ok": True, "subscriber": updated, "subscribers": engine.list_subscribers_normalized()}
+
+    # --- Телефоны (Android-приложение) ---------------------------------------------
+    @app.post("/api/devices/pair-code")
+    async def create_device_pair_code(request: Request) -> dict:
+        code, ttl = engine.devices.create_pair_code()
+        public_url = engine.settings.public_webapp_url
+        lan_url = str(request.base_url).rstrip("/")
+        client_host = request.client.host if request.client is not None else None
+        if is_external_proxy_request(request.headers, client_host):
+            fwd_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",", 1)[0].strip()
+            proto = "https" if _is_https_request(request.headers, request.url.scheme) else "http"
+            if not public_url and fwd_host:
+                public_url = f"{proto}://{fwd_host}"
+            lan_url = ""
+        server_url = public_url or lan_url
+        params = {"code": code, "server": server_url}
+        if public_url and lan_url and lan_url != public_url:
+            params["lan"] = lan_url
+        link = "fallguard://pair?" + urllib.parse.urlencode(params)
+        return {
+            "ok": True,
+            "code": code,
+            "expires_in": int(ttl),
+            "server_url": server_url,
+            "lan_url": lan_url,
+            "link": link,
+            "qr_svg": render_qr_svg(link, border=2),
+        }
+
+    @app.post("/api/devices/claim")
+    async def claim_device(request: Request, payload: DeviceClaimPayload) -> JSONResponse:
+        client_host = request.client.host if request.client is not None else None
+        is_external = is_external_proxy_request(request.headers, client_host)
+        if engine.devices.claims_locked_out():
+            return JSONResponse(
+                status_code=429,
+                content={"ok": False, "detail": "Слишком много неверных кодов. Повторите через 10 минут."},
+            )
+        claimed = engine.devices.claim(
+            payload.code,
+            name=payload.name,
+            platform=payload.platform,
+            require_code=is_external,
+        )
+        if claimed is None:
+            return JSONResponse(
+                status_code=403,
+                content={"ok": False, "detail": "Код привязки неверный или истёк. Получите новый в пульте."},
+            )
+        device, token = claimed
+        engine._log_event("info", f"Привязан телефон: {device['name']}", category="system")
+        resp = JSONResponse(status_code=200, content={"ok": True, "token": token, "device": device})
+        is_https = _is_https_request(request.headers, request.url.scheme)
+        resp.set_cookie(
+            key=DEVICE_COOKIE,
+            value=token,
+            max_age=31_536_000,
+            path="/",
+            httponly=True,
+            secure=is_https,
+            samesite="lax",
+        )
+        return resp
+
+    @app.get("/api/devices")
+    async def list_devices() -> dict:
+        return {"ok": True, "devices": engine.devices.list()}
+
+    @app.post("/api/devices/{device_id}")
+    async def patch_device(device_id: str, payload: DevicePatchPayload) -> dict:
+        updated = engine.devices.update(
+            device_id,
+            name=payload.name,
+            mode=payload.mode,
+            enabled=payload.enabled,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Устройство не найдено")
+        return {"ok": True, "device": updated, "devices": engine.devices.list()}
+
+    @app.delete("/api/devices/{device_id}")
+    async def delete_device(device_id: str) -> dict:
+        if not engine.devices.remove(device_id):
+            raise HTTPException(status_code=404, detail="Устройство не найдено")
+        engine._log_event("info", "Телефон отвязан", category="system")
+        return {"ok": True, "devices": engine.devices.list()}
+
+    # --- Лента тревог для приложения (long-poll) ------------------------------------
+    @app.get("/api/alerts/poll")
+    async def poll_alerts(
+        request: Request,
+        after: int = Query(default=0, ge=0),
+        wait: float = Query(default=25.0, ge=0.0, le=50.0),
+        mode: str = Query(default=""),
+    ) -> dict:
+        me = _resolve_identity(request)
+        eff_mode = normalize_alert_mode(mode) if (mode and me["kind"] == "lan") else me["mode"]
+        enabled = bool(me["enabled"])
+        # Первое подключение (after=0): не поднимаем старые тревоги, только последние 90 с
+        max_age = 90.0 if after <= 0 else 0.0
+        deadline = time.monotonic() + wait
+        alerts: list[dict[str, Any]] = []
+        while True:
+            alerts = engine.alert_feed.since(after, mode=eff_mode, max_age_sec=max_age) if enabled else []
+            if alerts or time.monotonic() >= deadline or await request.is_disconnected():
+                break
+            await asyncio.sleep(0.4)
+        for item in alerts:
+            item["image_url"] = f"/api/clips/{item['id']}.jpg" if item.get("has_image") else ""
+        state = engine.fsm.state.value
+        fall_active = bool(engine.fsm.fall_unacknowledged and state == "fallen")
+        return {
+            "ok": True,
+            "alerts": alerts,
+            "cursor": max([after, engine.alert_feed.cursor] if not alerts else [a["seq"] for a in alerts]),
+            "state": state,
+            "status_line": engine.get_human_status_line(),
+            "fall_active": fall_active,
+            "alarm_active": bool(engine.fsm.fall_unacknowledged) and enabled
+            and (fall_active or eff_mode == "all"),
+            "mode": eff_mode,
+            "enabled": enabled,
+            "server_ts": round(time.time(), 3),
+        }
 
     @app.get("/api/status")
     async def status(window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0)) -> dict:

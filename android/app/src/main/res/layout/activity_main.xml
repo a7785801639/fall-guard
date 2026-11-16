@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/setup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <ImageView
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:layout_marginTop="24dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_shield" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Подключение телефона"
+                android:textColor="@color/text"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:lineSpacingMultiplier="1.15"
+                android:text="В пульте FallGuard откройте Настройки → Кому сигналить → «Подключить телефон».\n\nПроще всего навести камеру телефона на QR-код — приложение подключится само. Либо введите адрес и код ниже."
+                android:textColor="@color/muted"
+                android:textSize="15sp" />
+
+            <EditText
+                android:id="@+id/inServer"
+                style="@style/Field"
+                android:layout_marginTop="24dp"
+                android:hint="Адрес сервера, например 192.168.1.50:8090"
+                android:importantForAutofill="no"
+                android:inputType="textUri" />
+
+            <EditText
+                android:id="@+id/inCode"
+                style="@style/Field"
+                android:hint="Код привязки из пульта"
+                android:importantForAutofill="no"
+                android:inputType="textCapCharacters|textNoSuggestions"
+                android:letterSpacing="0.15"
+                android:maxLength="12" />
+
+            <Button
+                android:id="@+id/btnPair"
+                style="@style/Btn.Primary"
+                android:layout_marginTop="16dp"
+                android:text="Подключить" />
+
+            <TextView
+                android:id="@+id/setupMsg"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:textColor="@color/alarm"
+                android:textSize="15sp" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/offline"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/offlineTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Соединяюсь с FallGuard…"
+            android:textColor="@color/text"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/offlineText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:textColor="@color/muted"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btnRetry"
+            style="@style/Btn.Primary"
+            android:layout_marginTop="24dp"
+            android:text="Повторить" />
+
+        <Button
+            android:id="@+id/btnOfflineSettings"
+            style="@style/Btn"
+            android:text="Настройки приложения" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/fullscreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+</FrameLayout>

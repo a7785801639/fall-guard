@@ -291,6 +291,8 @@ def test_telegram_notifier_report_clip_photo_via_mock_transport(tmp_path: Path) 
         "pause15",
         "pause60",
         "resume",
+        "fallsonly",
+        "allevents",
         "mute",
         "unmute",
     ]

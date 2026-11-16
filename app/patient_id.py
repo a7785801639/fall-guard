@@ -110,6 +110,8 @@ class TrackIdentity:
     was_on_bed: bool = False
     confirmed_second_track: bool = False
     outfit_saved: bool = False
+    face_patient_hits: int = 0
+    face_visitor_hits: int = 0
     manual_assigned_at: float = -1e9
     last_center: tuple[float, float] = (0.5, 0.5)
     height_cm: float | None = None
@@ -1299,12 +1301,32 @@ class PatientIdentifier:
         self._portal_last_frame_id: int | None = None
         self._sole_mover_at_door_ts: float = -1e9
         self._sole_mover_last_seen_ts: float = -1e9
+        # Когда в кадре последний раз реально наблюдался второй человек (а не «защёлка» визита)
+        self._other_person_seen_at: float = -1e9
+        self._last_update_now: float = 0.0
+        self._face_recheck_min_score: float = (
+            float(getattr(face_registry, "_threshold", 0.38)) + 0.08
+            if face_registry is not None
+            else 0.46
+        )
 
         self._load_anchor_state()
 
     @property
     def state_path(self) -> Path | None:
         return self._state_path
+
+    CAREGIVER_VISIBLE_GRACE_SEC: float = 30.0
+
+    @property
+    def caregiver_visible(self) -> bool:
+        """
+        Помощник реально наблюдался в кадре в последние 30 с. В отличие от door_visit_active
+        (может висеть часами, если выход гостя не замечен), этот флаг гаснет сам —
+        и тогда падение пациента перестаёт подавляться.
+        """
+        with self._lock:
+            return (self._last_update_now - self._other_person_seen_at) <= self.CAREGIVER_VISIBLE_GRACE_SEC
 
     @property
     def is_night_ir(self) -> bool:
@@ -3443,12 +3465,26 @@ class PatientIdentifier:
                         self._recent_visitors.pop(matched_vis_tid, None)
 
                 # Слой 2: Биометрия лица (не чаще 1 раза в секунду на трек)
+                # Перепроверка уже назначенных ролей (раз в 2 с): гость вне кровати может оказаться
+                # бабушкой, а «бабушка» вне кровати — родственником. Смена роли только по двум
+                # подряд уверенным совпадениям лица, чтобы единичный шум не переворачивал роли.
+                face_recheck_role = (
+                    tr.role == Role.VISITOR and not on_bed
+                ) or (
+                    tr.role == Role.PATIENT and not reclining_on_bed and tr.reason != "face_patient"
+                )
+                role_before_face = tr.role
                 if (
                     frame_bgr is not None
                     and self._face_registry is not None
-                    and (now - tr.last_face_check) >= 1.0
                     and tr.reason not in ("manual_override", "manual_visitor_override")
-                    and (tr.role == Role.UNKNOWN or (tr.role == Role.VISITOR and on_bed))
+                    and (
+                        (
+                            (now - tr.last_face_check) >= 1.0
+                            and (tr.role == Role.UNKNOWN or (tr.role == Role.VISITOR and on_bed))
+                        )
+                        or (face_recheck_role and (now - tr.last_face_check) >= 2.0)
+                    )
                 ):
                     tr.last_face_check = now
                     other_obs_for_face = [o for o in observations if o.track_id != obs.track_id]
@@ -3465,6 +3501,38 @@ class PatientIdentifier:
                         )
                     except TypeError:
                         matched_role, score = self._face_registry.match_person_crop(frame_bgr, obs)
+
+                    if face_recheck_role:
+                        strong_face = score >= max(self._face_recheck_min_score, 0.46)
+                        if role_before_face == Role.PATIENT:
+                            if matched_role == Role.VISITOR and strong_face:
+                                tr.face_visitor_hits += 1
+                            elif matched_role == Role.PATIENT:
+                                tr.face_visitor_hits = 0
+                            if tr.face_visitor_hits < 2:
+                                matched_role = Role.UNKNOWN
+                            else:
+                                tr.role = Role.UNKNOWN
+                                tr.bed_accum_sec = 0.0
+                                if confirmed_patient_id == obs.track_id:
+                                    confirmed_patient_id = None
+                                logger.info(
+                                    "Лицо «Своего» дважды подтверждено на треке #%d с ролью бабушки (%.2f) — роль снята",
+                                    obs.track_id,
+                                    score,
+                                )
+                        else:
+                            if matched_role == Role.PATIENT and strong_face:
+                                tr.face_patient_hits += 1
+                            elif matched_role == Role.VISITOR:
+                                tr.face_patient_hits = 0
+                            if matched_role == Role.PATIENT and tr.face_patient_hits < 2:
+                                matched_role = Role.UNKNOWN
+                    face_double_confirmed_patient = (
+                        face_recheck_role
+                        and role_before_face == Role.VISITOR
+                        and tr.face_patient_hits >= 2
+                    )
                     if (
                         matched_role == Role.VISITOR
                         and not reclining_on_bed
@@ -3479,8 +3547,9 @@ class PatientIdentifier:
                     elif (
                         matched_role == Role.PATIENT
                         and not tall_floor_stander
-                        and not outside_companion_guard
+                        and (not outside_companion_guard or face_double_confirmed_patient)
                     ):
+                        tr.face_visitor_hits = 0
                         if confirmed_patient_id is not None and confirmed_patient_id != obs.track_id:
                             old_pat = self._tracks.get(confirmed_patient_id)
                             if old_pat is not None:
@@ -4210,6 +4279,10 @@ class PatientIdentifier:
                     )
                     if exited_via_door or timed_out:
                         self._reset_door_visit_portal()
+
+            self._last_update_now = now
+            if other_obs or active_visitors or (patient_obs is None and observations):
+                self._other_person_seen_at = now
 
             if self._door_visit_active:
                 caregiver_nearby = True

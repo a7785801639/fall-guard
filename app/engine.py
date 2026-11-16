@@ -24,6 +24,7 @@ from .archive import ClipArchiveStore
 from .capture import VideoStreamCapture
 from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
+from .devices import AlertFeed, DeviceStore
 from .feedback import FalseAlertFeedbackStore, is_safe_alert_id
 from .geometry import (
     KP_L_ANKLE,
@@ -697,6 +698,8 @@ class FallGuardEngine:
             max_total_mb=250.0,
         )
         self.feedback = FalseAlertFeedbackStore(self.settings.data_dir / "feedback")
+        self.devices = DeviceStore(self.settings.data_dir / "devices.json")
+        self.alert_feed = AlertFeed()
         self.faces = FaceRegistry(
             faces_dir=self.settings.data_dir / "faces",
             models_dir=self.settings.models_dir,
@@ -735,6 +738,7 @@ class FallGuardEngine:
             "night_strict_mode",
             "night_start_hour",
             "night_end_hour",
+            "floor_safety_net",
         ):
             if extra_key in fsm_params and extra_key in prefs_now:
                 fsm_kwargs[extra_key] = prefs_now[extra_key]
@@ -2108,6 +2112,8 @@ class FallGuardEngine:
                 "telegram_bot_url": f"https://t.me/{uname}",
                 "telegram_subscribers": subs,
                 "telegram_recipients_count": len(self.notifier.get_recipient_chat_ids()),
+                "devices": self.devices.list(),
+                "public_webapp_url": self.settings.public_webapp_url,
                 "missing_env_keys": self.settings.missing_required_keys(),
                 "runtime": self.pose.runtime_label,
                 "infer_fps": round(self._actual_fps, 1),
@@ -2761,6 +2767,14 @@ class FallGuardEngine:
         )
 
         ev_state = str(getattr(event.state, "value", event.state))
+        self.alert_feed.push(
+            alert_id=alert_id,
+            state=ev_state,
+            severity=event.severity.value,
+            title=event.title,
+            description=event.description,
+            has_image=bool(clip_id),
+        )
         self._log_event(
             event.severity.value,
             f"{event.title} — {event.description}",
@@ -2904,8 +2918,13 @@ class FallGuardEngine:
                     "zones": zones,
                     "now": now,
                 }
-                if "patient_in_bed_latched" in inspect.signature(self.fsm.step).parameters:
+                step_params = inspect.signature(self.fsm.step).parameters
+                if "patient_in_bed_latched" in step_params:
                     step_kwargs["patient_in_bed_latched"] = patient_in_bed_latched
+                if "caregiver_visible" in step_params:
+                    step_kwargs["caregiver_visible"] = bool(
+                        getattr(self.identifier, "caregiver_visible", caregiver_nearby)
+                    )
                 alert_event = self.fsm.step(**step_kwargs)
                 self.timeline.record(self.fsm.state.value, True)
                 if self.thumbs is not None:
