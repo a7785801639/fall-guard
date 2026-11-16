@@ -52,7 +52,7 @@
     .small { font-size: 13px; }
 
     /* ---------- Каркас ---------- */
-    .app { max-width: 1240px; margin: 0 auto; padding: calc(8px + var(--safe-t)) 16px calc(28px + var(--safe-b)); }
+    .app { max-width: 2560px; margin: 0 auto; padding: calc(8px + var(--safe-t)) 16px calc(28px + var(--safe-b)); }
     .top { display: flex; align-items: center; gap: 10px; height: 52px; }
     .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; flex: 1; }
     .brand svg { width: 26px; height: 26px; color: var(--calm); }
@@ -60,12 +60,25 @@
     .icon-btn:active { background: var(--fill); }
     .layout { display: grid; gap: 14px; }
     .col { display: grid; gap: 14px; align-content: start; min-width: 0; }
+    .stage { display: grid; gap: 10px; width: 100%; margin: 0 auto; }
     @media (min-width: 980px) {
-      .app { padding-left: 28px; padding-right: 28px; }
-      .layout { grid-template-columns: minmax(0, 1fr) 372px; gap: 20px; align-items: start; }
-      .col.side { position: sticky; top: 12px; }
+      .app { padding: calc(8px + var(--safe-t)) 20px 16px; }
+      /* Видео берёт всю высоту окна (минус шапка и шкала), колонка забирает остаток ширины */
+      .layout { display: flex; gap: 16px; align-items: flex-start; }
+      .col.main { flex: 0 1 auto; width: min(calc(100% - 356px), calc((100dvh - 204px) * var(--ar, 1.7778))); }
+      .col.side { flex: 1 1 340px; min-width: 340px; max-width: 600px; position: sticky; top: 8px; max-height: calc(100dvh - 16px); overflow-y: auto; scrollbar-width: none; }
+      .col.side::-webkit-scrollbar { display: none; }
+      .viewport { max-height: none; }
     }
-    @media (max-width: 979px) { .col.side { display: contents; } .hero { order: -1; } }
+    @media (max-width: 979px) {
+      .col.side { display: contents; }
+      .people { order: 1; }
+      .hero { order: 2; }
+      .app[data-alarm="1"] .hero { order: -1; }
+      .toggles { order: 3; }
+      .events-card { order: 4; }
+      .tech { order: 5; }
+    }
 
     .card { background: var(--card); border-radius: var(--r); padding: 18px; box-shadow: var(--shadow); }
     .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
@@ -122,7 +135,7 @@
     .row > .btn { flex: 1; }
 
     /* ---------- Видео ---------- */
-    .viewport { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 76vh; background: #07080B; border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); color: #fff; }
+    .viewport { position: relative; width: 100%; aspect-ratio: var(--ar, 1.7778); background: #07080B; border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); color: #fff; }
     .viewport video, .viewport img.live, .viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     .viewport video, .viewport img.live { object-fit: contain; }
     .viewport canvas { pointer-events: none; }
@@ -157,6 +170,21 @@
     .person-actions .btn { background: var(--card); box-shadow: var(--shadow); }
     .person-actions .btn[aria-pressed="true"] { background: var(--calm-soft); }
 
+    /* ---------- Компактные переключатели ---------- */
+    .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tog {
+      display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px; border-radius: 16px;
+      background: var(--card); box-shadow: var(--shadow); transition: background 0.2s, color 0.2s; min-width: 0;
+    }
+    .tog-ico { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: var(--fill); color: var(--muted); flex: none; transition: inherit; }
+    .tog-ico svg { width: 19px; height: 19px; }
+    .tog-txt { min-width: 0; line-height: 1.2; }
+    .tog-txt b { display: block; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tog-txt span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tog[aria-checked="true"] .tog-ico { background: var(--alarm); color: #fff; }
+    #btnSound[aria-checked="true"] .tog-ico { background: var(--calm); }
+    .tog:active { transform: scale(0.98); }
+
     /* ---------- Переключатели-строки ---------- */
     .card.lines { padding: 6px 18px; }
     .line { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 0; }
@@ -175,23 +203,40 @@
     .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14); }
     .seg.wide { display: flex; }
     .seg.wide button { flex: 1; min-height: 40px; font-size: 14.5px; }
-    .ribbon-wrap { padding: 9px 0; cursor: pointer; touch-action: pan-y; }
-    .ribbon { position: relative; height: 12px; border-radius: 999px; background: var(--fill); }
-    .ribbon-clip { position: absolute; inset: 0; border-radius: 999px; overflow: hidden; }
-    .ribbon i { position: absolute; top: 0; bottom: 0; min-width: 2px; }
-    .ribbon i.t-calm { background: var(--calm); opacity: 0.55; }
-    .ribbon i.t-caregiver { background: var(--care); }
-    .ribbon i.t-warn { background: #F5A524; }
-    .ribbon i.t-alarm { background: #E5343F; min-width: 4px; }
-    .ribbon i.t-paused { background: var(--faint); opacity: 0.6; }
-    .ribbon i.t-offline { background: transparent; }
-    .ribbon b { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #F5A524; border: 2.5px solid var(--card); }
-    .ribbon b.fall { background: #E5343F; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
-    .ribbon u { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--text); display: none; }
-    .axis { display: flex; justify-content: space-between; margin-top: 2px; font-size: 12px; color: var(--faint); }
+    .timeline { background: var(--card); border-radius: 18px; padding: 10px 14px 8px; box-shadow: var(--shadow); }
+    .tl-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 30px; }
+    .tl-title { font-weight: 650; font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-title small { color: var(--muted); font-weight: 500; font-size: 13px; }
+    .ribbon-wrap { padding: 4px 0 0; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .ribbon { position: relative; height: 34px; border-radius: 10px; background: var(--fill); }
+    .ribbon-clip { position: absolute; inset: 0; border-radius: 10px; overflow: hidden; }
+    .ribbon i { position: absolute; top: 0; bottom: 0; min-width: 2px; font-style: normal; font-size: 11.5px; font-weight: 650; line-height: 34px; padding-left: 7px; white-space: nowrap; overflow: hidden; color: rgba(0, 0, 0, 0.62); box-shadow: inset -1px 0 0 var(--card); }
+    .ribbon i.t-calm { background: color-mix(in srgb, var(--calm) 42%, var(--fill)); }
+    .ribbon i.t-caregiver { background: color-mix(in srgb, var(--care) 60%, var(--fill)); }
+    .ribbon i.t-warn { background: #F5B23A; }
+    .ribbon i.t-alarm { background: #E5343F; color: #fff; min-width: 4px; }
+    .ribbon i.t-paused { background: repeating-linear-gradient(135deg, var(--fill-2) 0 5px, var(--fill) 5px 10px); color: var(--muted); }
+    .ribbon i.t-offline { background: transparent; color: var(--faint); }
+    :root[data-theme="dark"] .ribbon i:not(.t-alarm):not(.t-paused):not(.t-offline) { color: rgba(255, 255, 255, 0.85); }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ribbon i:not(.t-alarm):not(.t-paused):not(.t-offline) { color: rgba(255, 255, 255, 0.85); } }
+    .ribbon b { position: absolute; top: -7px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #F5B23A; border: 2.5px solid var(--card); z-index: 2; cursor: pointer; }
+    .ribbon b.fall { background: #E5343F; width: 18px; height: 18px; margin-left: -9px; top: -9px; }
+    .ribbon b::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 34px; margin-left: -1px; background: inherit; opacity: 0.55; }
+    .ribbon u { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--text); display: none; z-index: 3; text-decoration: none; }
+    .ribbon u[data-t]::before { content: attr(data-t); position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -3px); padding: 2px 6px; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 11px; font-weight: 650; white-space: nowrap; }
+    .axis { position: relative; height: 18px; margin-top: 4px; font-size: 11.5px; color: var(--faint); }
+    .axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+    .axis span::before { content: ""; position: absolute; left: 50%; top: -5px; width: 1px; height: 4px; background: var(--fill-2); }
+    .axis span.first { transform: none; }
+    .axis span.last { transform: translateX(-100%); }
+    .scrub { position: absolute; inset: 0; z-index: 4; background: #07080B; display: grid; place-items: center; }
+    .scrub img { width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
+    .scrub-badge { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: rgba(8, 10, 14, 0.7); backdrop-filter: blur(10px); font-size: 13px; font-weight: 650; }
+    .scrub-badge::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: #F5B23A; }
     .tip { position: fixed; z-index: 50; width: 196px; padding: 8px 8px 10px; border-radius: 14px; pointer-events: none; background: var(--card); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3); font-size: 13px; }
     .tip img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 9px; background: var(--fill); display: block; margin-bottom: 7px; }
-    .tip img:not([src]) { display: none; }
+    .stats-line { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13.5px; }
+    .stats-line b { color: var(--text); }
     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
     .stat { background: var(--fill); border-radius: 12px; padding: 10px 6px; text-align: center; min-width: 0; }
     .stat b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; }
@@ -286,6 +331,8 @@
       <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.800 19.500h18.400L12 4Z"/><path d="M12 10v4.500M12 17.200v.1"/></symbol>
       <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16.500V11a6 6 0 0 1 12 0v5.500l1.500 2h-15l1.500-2Z"/><path d="M10 21h4"/></symbol>
       <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+      <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15 9a4 4 0 0 1 0 6M17.8 6.5a8 8 0 0 1 0 11"/></symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="m16 9.5 5 5m0-5-5 5"/></symbol>
       <symbol id="i-camoff" viewBox="0 0 24 24"><path d="M4 7.500h9.500a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM15.500 11l5-3v8l-5-3M3 4l18 17"/></symbol>
     </defs>
   </svg>
@@ -306,27 +353,41 @@
     </header>
 
     <div class="layout">
-      <div class="col">
-        <div class="viewport" id="viewport">
-          <video id="liveVideo" muted playsinline autoplay hidden></video>
-          <img class="live" id="liveImg" alt="" hidden />
-          <canvas id="overlay"></canvas>
-          <div class="vp-msg" id="vpMsg"><div><b>Нет связи с камерой</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
-          <div class="vp-top">
-            <div class="vp-chips"><span class="chip live" id="chipLight" hidden>Эфир</span><span class="chip" id="chipVisit" hidden>Визит родственника</span></div>
-            <div class="vp-btns">
-              <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Разметка поверх видео"><svg class="ico"><use href="#i-eye"/></svg></button>
-              <button class="vp-btn" onclick="toggleFullscreen()" aria-label="На весь экран" title="На весь экран"><svg class="ico"><use href="#i-full"/></svg></button>
+      <div class="col main" id="stage">
+        <div class="stage">
+          <div class="viewport" id="viewport">
+            <video id="liveVideo" muted playsinline autoplay hidden></video>
+            <img class="live" id="liveImg" alt="" hidden />
+            <canvas id="overlay"></canvas>
+            <div class="vp-msg" id="vpMsg"><div><b>Нет связи с камерой</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
+            <div class="scrub" id="scrub" hidden><img id="scrubImg" alt="Снимок из хроники" /><span class="scrub-badge num" id="scrubBadge"></span></div>
+            <div class="vp-top">
+              <div class="vp-chips"><span class="chip live" id="chipLight" hidden>Эфир</span><span class="chip" id="chipVisit" hidden>Визит родственника</span></div>
+              <div class="vp-btns">
+                <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Разметка поверх видео"><svg class="ico"><use href="#i-eye"/></svg></button>
+                <button class="vp-btn" onclick="toggleFullscreen()" aria-label="На весь экран" title="На весь экран"><svg class="ico"><use href="#i-full"/></svg></button>
+              </div>
+            </div>
+            <div class="draw-bar" id="drawBar" hidden>
+              <span id="drawHint"></span>
+              <button class="btn sm" onclick="undoPoint()">Назад</button>
+              <button class="btn sm" onclick="cancelDraw()">Отмена</button>
+              <button class="btn sm primary" id="btnSaveZone" onclick="saveDraw()" disabled>Сохранить</button>
             </div>
           </div>
-          <div class="draw-bar" id="drawBar" hidden>
-            <span id="drawHint"></span>
-            <button class="btn sm" onclick="undoPoint()">Назад</button>
-            <button class="btn sm" onclick="cancelDraw()">Отмена</button>
-            <button class="btn sm primary" id="btnSaveZone" onclick="saveDraw()" disabled>Сохранить</button>
-          </div>
+
+          <section class="timeline" aria-label="Хроника">
+            <div class="tl-head">
+              <div class="tl-title" id="tlTitle">Хроника</div>
+              <div class="seg" id="winSeg">
+                <button aria-pressed="true" onclick="setWindow(21600)">6 ч</button>
+                <button aria-pressed="false" onclick="setWindow(86400)">Сутки</button>
+              </div>
+            </div>
+            <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div></div>
+            <div class="axis num" id="axis"></div>
+          </section>
         </div>
-        <div class="people" id="people"></div>
       </div>
 
       <div class="col side">
@@ -341,38 +402,21 @@
           <div class="hero-actions" id="guardSlot"></div>
         </section>
 
-        <section class="card lines">
-          <button class="line" id="modeBtn" role="switch" aria-checked="false" onclick="toggleMyMode()">
-            <div class="line-body">
-              <div class="line-title">Только падение и сползание</div>
-              <div class="line-sub" id="modeSub"></div>
-            </div>
-            <span class="switch"></span>
-          </button>
-          <button class="line" id="btnSound" role="switch" aria-checked="false" onclick="toggleSound()">
-            <div class="line-body">
-              <div class="line-title">Звук тревоги в браузере</div>
-              <div class="line-sub">Сирена, пока эта страница открыта</div>
-            </div>
-            <span class="switch"></span>
-          </button>
-        </section>
+        <div class="people" id="people"></div>
 
-        <section class="card">
-          <div class="card-head">
-            <span class="card-title">Хроника</span>
-            <div class="seg" id="winSeg">
-              <button aria-pressed="true" onclick="setWindow(21600)">6 ч</button>
-              <button aria-pressed="false" onclick="setWindow(86400)">Сутки</button>
-            </div>
-          </div>
-          <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div></div>
-          <div class="axis num" id="axis"></div>
-          <div class="stats" id="stats"></div>
-        </section>
+        <div class="toggles">
+          <button class="tog" id="modeBtn" role="switch" aria-checked="false" onclick="toggleMyMode()" title="Сигналить только о падении и сползании">
+            <span class="tog-ico"><svg class="ico"><use id="modeIco" href="#i-bell"/></svg></span>
+            <span class="tog-txt"><b id="modeTitle">Все события</b><span id="modeSub">сигналят</span></span>
+          </button>
+          <button class="tog" id="btnSound" role="switch" aria-checked="false" onclick="toggleSound()" title="Сирена в этом браузере, пока страница открыта">
+            <span class="tog-ico"><svg class="ico"><use id="soundIco" href="#i-mute"/></svg></span>
+            <span class="tog-txt"><b id="soundTitle">Звук выкл.</b><span>в браузере</span></span>
+          </button>
+        </div>
 
-        <section class="card">
-          <div class="card-head"><span class="card-title">События</span><button class="link" onclick="openSheet('journal')">Весь журнал</button></div>
+        <section class="card events-card">
+          <div class="card-head"><span class="card-title">Последние события</span><button class="link" id="journalLink" onclick="openSheet('journal')">Журнал</button></div>
           <div class="list" id="events"></div>
         </section>
 
@@ -528,6 +572,9 @@
   function syncSoundBtn() {
     $("btnSound").hidden = Boolean(native);
     $("btnSound").setAttribute("aria-checked", String(soundOn));
+    $("soundIco").setAttribute("href", soundOn ? "#i-sound" : "#i-mute");
+    $("soundTitle").textContent = soundOn ? "Звук вкл." : "Звук выкл.";
+    document.querySelector(".toggles").style.gridTemplateColumns = native ? "1fr" : "";
   }
   function toggleSound() {
     soundOn = !soundOn;
@@ -696,7 +743,7 @@
   }
   function layout() {
     const [sw, sh] = srcSize();
-    if (!document.fullscreenElement) viewport.style.aspectRatio = sw + " / " + sh;
+    $("stage").style.setProperty("--ar", (sw / sh).toFixed(4));
     const vw = viewport.clientWidth, vh = viewport.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     const k = Math.min(vw / sw, vh / sh);
     rect = { w: sw * k, h: sh * k, x: (vw - sw * k) / 2, y: (vh - sh * k) / 2 };
@@ -867,6 +914,7 @@
     if (sub.toLowerCase().startsWith("рядом родственник")) sub = sub.slice(17).replace(/^[\s·,—-]+/, "");
     sub = sub ? sub.charAt(0).toUpperCase() + sub.slice(1) : "";
     $("status").dataset.tone = tone;
+    $("app").dataset.alarm = lvl ? "1" : "0";
     $("heroIco").setAttribute("href", "#" + ico);
     $("statusTitle").textContent = title;
     $("statusSub").textContent = sub;
@@ -941,11 +989,11 @@
   /* ---------- Мой режим: только падение и сползание ---------- */
   function renderMode() {
     const on = me.mode === "falls";
+    const who = me.kind === "telegram" ? "в Telegram" : me.kind === "device" ? "на телефон" : "в браузере";
     $("modeBtn").setAttribute("aria-checked", String(on));
-    const who = me.kind === "telegram" ? "вам в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
-    $("modeSub").textContent = on
-      ? `Остальные события ${who} приходят без сигнала`
-      : `Сейчас ${who} сигналят и посадка, и выход из кровати`;
+    $("modeIco").setAttribute("href", on ? "#i-alert" : "#i-bell");
+    $("modeTitle").textContent = on ? "Только падения" : "Все события";
+    $("modeSub").textContent = who;
   }
   async function toggleMyMode() {
     const next = me.mode === "falls" ? "all" : "falls";
@@ -958,10 +1006,12 @@
       poll();
     }
     renderMode(); renderFast();
-    toast(next === "falls" ? "Теперь только падение и сползание" : "Теперь сигналят все события");
+    toast(next === "falls" ? "Сигнал только при падении и сползании" : "Сигналят все события: посадка, выход, падение");
   }
 
-  /* ---------- Хроника ---------- */
+  /* ---------- Хроника под видео ---------- */
+  const TONE_LABEL = { calm: "спокойно", caregiver: "родственник", paused: "пауза", offline: "нет связи", alarm: "падение" };
+  let thumbs = [];
   function setWindow(sec) {
     windowSec = sec; lsSet("fg_win", String(sec));
     [...$("winSeg").children].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (sec === 21600))));
@@ -969,64 +1019,135 @@
   }
   function renderTimeline(tl) {
     if (!tl) return;
+    const rb = $("ribbon"), W = rb.clientWidth || 600;
     const start = tl.start_ts, win = tl.window_sec || windowSec;
     let html = `<div class="ribbon-clip">`;
     for (const sp of tl.spans || []) {
       const l = Math.max(0, (sp.start - start) / win * 100), w = Math.min(100 - l, (sp.end - Math.max(sp.start, start)) / win * 100);
-      if (w > 0) html += `<i class="t-${esc(sp.tone)}" style="left:${l.toFixed(3)}%;width:${Math.max(0.15, w).toFixed(3)}%"></i>`;
+      if (w <= 0) continue;
+      const txt = sp.tone === "warn" ? String(sp.label || "").toLowerCase() : (TONE_LABEL[sp.tone] || "");
+      const fits = (w / 100) * W > txt.length * 6.6 + 14;
+      html += `<i class="t-${esc(sp.tone)}" style="left:${l.toFixed(3)}%;width:${Math.max(0.15, w).toFixed(3)}%">${fits ? esc(txt) : ""}</i>`;
     }
     html += `</div><u id="ribbonCursor"></u>`;
     for (const c of clips) {
       const p = (c.ts - start) / win * 100;
-      if (p >= 0 && p <= 100 && !c.false_alarm) html += `<b class="${c.state === "fallen" ? "fall" : ""}" style="left:${p.toFixed(3)}%"></b>`;
+      if (p >= 0 && p <= 100 && !c.false_alarm) html += `<b class="${c.state === "fallen" ? "fall" : ""}" style="left:${p.toFixed(3)}%" title="${esc(c.title)}"></b>`;
     }
-    const rb = $("ribbon");
-    if (rb._h !== html && !rb._hover) { rb._h = html; rb.innerHTML = html; }
+    if (rb._h !== html && !rb._busy) { rb._h = html; rb.innerHTML = html; }
     rb._tl = tl;
-    const hrs = win / 3600, marks = [];
-    for (let i = 0; i < 4; i++) marks.push(i === 3 ? "сейчас" : clock(start + (win / 3) * i));
-    setHtml($("axis"), marks.map((m) => `<span>${m}</span>`).join(""));
+    // Часовые отметки: шаг 1 ч для 6 ч, 3 ч для суток; не теснее 70 px
+    let step = win <= 21600 ? 3600 : 10800;
+    while ((step / win) * W < 70) step *= 2;
+    let ax = "";
+    const first = Math.ceil(start / step) * step;
+    for (let t = first; t < start + win - step * 0.35; t += step) {
+      const p = (t - start) / win * 100;
+      if (p > 4) ax += `<span style="left:${p.toFixed(2)}%">${clock(t)}</span>`;
+    }
+    ax += `<span class="last" style="left:100%">сейчас</span>`;
+    setHtml($("axis"), ax);
   }
-  (function ribbonHover() {
-    const rb = $("ribbon"), tip = $("tip"), wrap = $("ribbonWrap");
-    let thumbTimer = 0;
+  window.addEventListener("resize", () => { if (S) { $("ribbon")._h = null; renderTimeline(S.timeline); } });
+
+  (function timelineControls() {
+    const rb = $("ribbon"), tip = $("tip"), wrap = $("ribbonWrap"), scrub = $("scrub"), scrubImg = $("scrubImg");
+    const cache = new Map();
+    let drag = null, tipTimer = 0;
     function at(e) {
       const tl = rb._tl; if (!tl) return null;
       const r = rb.getBoundingClientRect(), f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-      return { ts: tl.start_ts + f * tl.window_sec, f, r, tl };
+      return { ts: tl.start_ts + f * tl.window_sec, f, r, tl, x: e.clientX };
     }
-    function near(h) { const tol = h.tl.window_sec * 0.015; return clips.find((c) => Math.abs(c.ts - h.ts) <= tol); }
-    function move(e) {
-      const h = at(e); if (!h) return;
-      rb._hover = true;
-      const cur = $("ribbonCursor"); if (cur) { cur.style.display = "block"; cur.style.left = h.f * 100 + "%"; }
-      const sp = (h.tl.spans || []).find((s) => h.ts >= s.start && h.ts <= s.end), clip = near(h);
-      $("tipText").innerHTML = `<b class="num">${clock(h.ts)}</b> · ${esc(clip ? clip.title : sp ? sp.label : "нет данных")}`;
+    function clipNear(h) {
+      const tol = (12 / h.r.width) * h.tl.window_sec;
+      let best = null, bd = tol;
+      for (const c of clips) { const d = Math.abs(c.ts - h.ts); if (d <= bd && !c.false_alarm) { best = c; bd = d; } }
+      return best;
+    }
+    function thumbNear(ts) {
+      if (!thumbs.length) return null;
+      let lo = 0, hi = thumbs.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (thumbs[mid].ts < ts) lo = mid + 1; else hi = mid; }
+      const c = thumbs[lo], p = thumbs[lo - 1];
+      return p && Math.abs(p.ts - ts) < Math.abs(c.ts - ts) ? p : c;
+    }
+    function thumbUrl(ts, clip) {
+      if (clip && clip.jpg_url) return withAuth(clip.jpg_url);
+      const t = thumbNear(ts);
+      return t ? withAuth("/api/timeline/thumb/" + encodeURIComponent(t.id) + ".jpg") : withAuth("/api/timeline/thumb?ts=" + ts.toFixed(0));
+    }
+    function preload(url) { if (!cache.has(url)) { const im = new Image(); im.src = url; cache.set(url, im); if (cache.size > 120) cache.delete(cache.keys().next().value); } }
+    function cursor(h, withTime) {
+      const cur = $("ribbonCursor"); if (!cur) return;
+      cur.style.display = "block"; cur.style.left = h.f * 100 + "%";
+      if (withTime) cur.dataset.t = clock(h.ts); else delete cur.dataset.t;
+    }
+    function label(h, clip) {
+      const sp = (h.tl.spans || []).find((s) => h.ts >= s.start && h.ts <= s.end);
+      return clip ? clip.title : sp ? sp.label : "нет данных";
+    }
+    function hover(h) {
+      cursor(h);
+      const clip = clipNear(h);
+      $("tipText").innerHTML = `<b class="num">${clock(h.ts)}</b> · ${esc(label(h, clip))}${clip ? "<br><span class='muted'>нажмите, чтобы открыть запись</span>" : ""}`;
       tip.hidden = false;
-      tip.style.left = Math.max(8, Math.min(window.innerWidth - 198, e.clientX - 95)) + "px";
-      tip.style.top = Math.max(8, h.r.top - tip.offsetHeight - 10) + "px";
-      clearTimeout(thumbTimer);
-      thumbTimer = setTimeout(() => { $("tipImg").src = withAuth(clip && clip.jpg_url ? clip.jpg_url : "/api/timeline/thumb?ts=" + h.ts.toFixed(0)); }, 90);
+      tip.style.visibility = "hidden";
+      tip.style.left = Math.max(8, Math.min(window.innerWidth - 204, h.x - 98)) + "px";
+      tip.style.top = Math.max(8, h.r.top - tip.offsetHeight - 14) + "px";
+      tip.style.visibility = "visible";
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(() => { $("tipImg").src = thumbUrl(h.ts, clip); }, 70);
     }
-    function leave() { rb._hover = false; tip.hidden = true; const cur = $("ribbonCursor"); if (cur) cur.style.display = "none"; }
-    wrap.addEventListener("pointermove", move);
-    wrap.addEventListener("pointerdown", move);
-    wrap.addEventListener("pointerleave", leave);
-    wrap.addEventListener("pointercancel", leave);
-    wrap.addEventListener("click", (e) => { const h = at(e); const c = h && near(h); if (c) openClip(c.id); });
+    function showScrub(h) {
+      cursor(h, true);
+      const clip = clipNear(h), url = thumbUrl(h.ts, clip);
+      preload(url);
+      if (scrubImg.getAttribute("src") !== url) scrubImg.src = url;
+      $("scrubBadge").textContent = "Запись " + clock(h.ts) + " · " + label(h, clip);
+      scrub.hidden = false;
+    }
+    function endAll() {
+      rb._busy = false; tip.hidden = true; scrub.hidden = true;
+      const cur = $("ribbonCursor"); if (cur) cur.style.display = "none";
+    }
+    wrap.addEventListener("pointerdown", (e) => {
+      const h = at(e); if (!h) return;
+      wrap.setPointerCapture(e.pointerId);
+      rb._busy = true; tip.hidden = true;
+      drag = { x0: e.clientX, moved: false, h };
+      showScrub(h);
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      const h = at(e); if (!h) return;
+      if (drag) {
+        if (Math.abs(e.clientX - drag.x0) > 6) drag.moved = true;
+        drag.h = h; showScrub(h);
+      } else if (e.pointerType === "mouse") { rb._busy = true; hover(h); }
+    });
+    function finish(e, cancelled) {
+      if (!drag) return;
+      const d = drag; drag = null;
+      endAll();
+      if (!cancelled && !d.moved) { const c = clipNear(d.h); if (c) openClip(c.id); }
+    }
+    wrap.addEventListener("pointerup", (e) => finish(e, false));
+    wrap.addEventListener("pointercancel", (e) => finish(e, true));
+    wrap.addEventListener("pointerleave", () => { if (!drag) endAll(); });
     $("tipImg").addEventListener("error", () => { $("tipImg").removeAttribute("src"); });
   })();
-  function renderStats(care) {
+
+  function statsHtml(care) {
     const s = (care && care.summary_24h) || {};
-    const cell = (v, l, bad) => `<div class="stat${bad ? " bad" : ""}"><b class="num">${v}</b><span>${l}</span></div>`;
     const h = (s.in_bed_sec || 0) / 3600;
-    setHtml($("stats"), cell(h >= 10 ? Math.round(h) + " ч" : h.toFixed(1).replace(".", ",") + " ч", "в кровати") + cell(s.sit_up_count || 0, "посадок") + cell(s.left_bed_count || 0, "выходов") + cell(s.fall_count || 0, "падений", s.fall_count > 0));
+    return `<div class="stats-line num"><span>В кровати <b>${h.toFixed(1).replace(".", ",")} ч</b></span><span>Посадок <b>${s.sit_up_count || 0}</b></span><span>Выходов <b>${s.left_bed_count || 0}</b></span><span>Падений <b${s.fall_count ? ' style="color:var(--alarm)"' : ""}>${s.fall_count || 0}</b></span></div>`;
   }
 
   /* ---------- События и клипы ---------- */
   function renderEvents() {
+    $("journalLink").textContent = clips.length > 3 ? `Все ${clips.length}` : "Журнал";
     if (!clips.length) { setHtml($("events"), `<div class="empty">Тревог пока не было</div>`); return; }
-    setHtml($("events"), clips.slice(0, 8).map((c) => {
+    setHtml($("events"), clips.slice(0, 3).map((c) => {
       const thumb = c.jpg_url ? `<img class="thumb" loading="lazy" alt="" src="${esc(withAuth(c.jpg_url))}" />` : `<span class="thumb-ph"></span>`;
       const badge = c.false_alarm ? `<span class="badge">ложная</span>` : c.state === "fallen" ? `<span class="badge alarm">падение</span>` : "";
       return `<button class="item" onclick="openClip('${esc(c.id)}')">${thumb}<span class="item-body"><span class="item-title">${esc(c.title || c.state)}</span><span class="item-sub num">${esc(c.time || clock(c.ts))} · ${ago(c.ts)}</span></span>${badge}</button>`;
@@ -1199,7 +1320,7 @@
   function tabJournal() {
     const evs = (S.events || []).filter((e) => logFilter === "all" || e.category === logFilter);
     const st = S.clips_stats || {};
-    return `<div class="group"><div style="margin-bottom:12px"><div class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div></div>
+    return `<div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div><div class="group"><div style="margin-bottom:12px"><div class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div></div>
       ${evs.length ? `<div class="rows">` + evs.slice(0, 120).map((e) => `<div class="logrow ${esc(e.level)}"><time class="num" title="${esc(e.date)}">${esc((e.time || "").slice(0, 5))}</time><span style="flex:1;min-width:0">${esc(e.text)}</span>${e.clip_id && clips.some((c) => c.id === e.clip_id) ? `<button class="btn sm ghost" onclick="openClip('${esc(e.clip_id)}')">Запись</button>` : ""}</div>`).join("") + `</div>` : `<div class="empty">Записей нет</div>`}</div>
       <div class="group"><h3>Архив записей</h3><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ. Старые удаляются автоматически.</p><button class="btn red-text" onclick="clearArchive()">Очистить архив</button></div>`;
   }
@@ -1232,10 +1353,11 @@
       if (S.zones && !drawMode) zones = S.zones;
       if (S.camera) cam = Object.assign(cam, S.camera);
       clips = S.recent_clips || [];
+      if (Array.isArray(S.thumbs)) thumbs = S.thumbs.slice().sort((x, y) => x.ts - y.ts);
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
       if (me.kind === "telegram") { const mine = (S.telegram_subscribers || []).find((s) => String(s.chat_id) === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
       if (me.kind === "device") { const mine = (S.devices || []).find((d) => d.id === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
-      renderMode(); renderFast(); renderTimeline(S.timeline); renderStats(S.care); renderEvents(); renderSheet(); draw();
+      renderMode(); renderFast(); renderTimeline(S.timeline); renderEvents(); renderSheet(); draw();
       $("tech").textContent = [S.runtime, (S.infer_fps || 0).toFixed(1) + " кадр/с", cam.resolution && cam.resolution[0] ? cam.resolution.join("×") : "", mjpeg ? "MJPEG" : "H.264"].filter(Boolean).join(" · ");
       if (pendingClip && clips.some((c) => c.id === pendingClip)) { const id = pendingClip; pendingClip = ""; openClip(id); }
     } catch (_) {} finally { pollBusy = false; }

@@ -272,7 +272,7 @@ def _create_thumbnail_store(thumbs_dir: Any) -> Any:
     try:
         from .thumbs import TimelineThumbnailStore  # type: ignore[import-not-found]
 
-        return TimelineThumbnailStore(thumbs_dir)
+        return TimelineThumbnailStore(thumbs_dir, thumb_size=(640, 360), jpeg_quality=70)
     except Exception:
         return _FallbackThumbnailStore(thumbs_dir)
 
