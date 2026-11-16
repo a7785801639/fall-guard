@@ -315,7 +315,7 @@
             <div class="vp-top">
               <div class="vp-chips"><span class="chip live" id="chipLight" hidden>Эфир</span><span class="chip" id="chipVisit" hidden>Визит родственника</span></div>
               <div class="vp-btns">
-                <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Разметка поверх видео"><svg class="ico"><use href="#i-eye"/></svg></button>
+                <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
                 <button class="vp-btn" onclick="toggleFullscreen()" aria-label="На весь экран" title="На весь экран"><svg class="ico"><use href="#i-full"/></svg></button>
               </div>
             </div>
@@ -445,6 +445,7 @@
   let cam = { rotate: 0, flip_h: false, enhance: false, resolution: [0, 0], connected: false };
   let windowSec = Number(lsGet("fg_win", "21600")) === 86400 ? 86400 : 21600;
   let showOverlay = lsGet("fg_overlay", "1") !== "0";
+  let showZones = lsGet("fg_zones", "0") === "1";
   let soundOn = lsGet("fg_sound", "0") === "1";
   let drawMode = null, draft = [];
   let activeTab = "recipients";
@@ -732,12 +733,12 @@
     requestAnimationFrame(() => {
       rafPending = false;
       ctx.clearRect(0, 0, viewport.clientWidth, viewport.clientHeight);
-      const zonesOn = showOverlay || drawMode;
-      if (zonesOn) {
-        if (drawMode !== "bed") poly(zones.bed_polygon, "rgba(61,217,160,0.8)", null, true);
-        if (drawMode !== "door") poly(zones.door_polygon, "rgba(111,165,255,0.8)", null, true);
+      // Зоны на главном экране не показываем: только при рисовании или по переключателю в настройках
+      if (drawMode || showZones) {
+        if (drawMode !== "bed") poly(zones.bed_polygon, "rgba(61,214,140,0.75)", null, true);
+        if (drawMode !== "door") poly(zones.door_polygon, "rgba(125,176,255,0.75)", null, true);
         if (drawMode !== "floor") poly(zones.floor_polygon, "rgba(255,255,255,0.35)", null, true);
-        for (const ig of zones.ignore_polygons || []) poly(ig, "rgba(163,171,186,0.7)", "rgba(163,171,186,0.12)", false);
+        if (drawMode === "ignore" || showZones) for (const ig of zones.ignore_polygons || []) poly(ig, "rgba(163,171,186,0.6)", "rgba(163,171,186,0.10)", false);
       }
       if (drawMode) {
         poly(draft, "#fff", "rgba(255,255,255,0.1)", false, draft.length > 2);
@@ -772,6 +773,11 @@
         label(x1, y1, t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Кто-то", color);
       }
     });
+  }
+  function toggleZones() {
+    showZones = !showZones;
+    lsSet("fg_zones", showZones ? "1" : "0");
+    draw(); renderSheet();
   }
   function toggleOverlay() {
     showOverlay = !showOverlay;
@@ -1283,7 +1289,8 @@
     const zrow = (mode, title, sub, ok, clearPayload) => `<div class="rowi"><div class="rowi-body"><div class="rowi-title">${title} ${ok ? '<span class="badge calm">задана</span>' : '<span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
       <div class="rowi-actions">${ok && clearPayload ? `<button class="btn sm ghost" onclick='clearZone(${JSON.stringify(clearPayload)})'>Убрать</button>` : ""}<button class="btn sm" onclick="startDraw('${mode}')">${ok ? "Перерисовать" : "Нарисовать"}</button></div></div>`;
     const ig = (z.ignore_polygons || []).length;
-    let h = `<div class="group"><h3>Зоны на видео</h3><p>Кровать обязательна: по ней система понимает, где бабушка лежит, а где пол. Дверь помогает отличать вошедших родственников.</p><div class="rows">`
+    let h = `<div class="group"><h3>Зоны на видео</h3><p>Кровать обязательна: по ней система понимает, где бабушка лежит, а где пол. Дверь помогает отличать вошедших родственников.</p><div class="rows">
+      <div class="rowi"><div class="rowi-body"><div class="rowi-title">Показывать зоны поверх видео</div><div class="rowi-sub">Обычно выключено, чтобы не мешать смотреть</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
       + zrow("bed", "Кровать", "Обведите матрас по углам", has(z.bed_polygon, 3), null)
       + zrow("door", "Дверь", "Кто вошёл через дверь — тот «свой»", has(z.door_polygon, 3), { door_polygon: [] })
       + zrow("floor", "Пол у кровати", "4 точки — для оценки роста и расстояний", has(z.floor_polygon, 4), { floor_polygon: [] })
