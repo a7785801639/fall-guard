@@ -657,7 +657,7 @@ def test_timeline_thumbnails_endpoints_and_path_traversal(
     assert "max-age=86400" in r_by_id.headers.get("cache-control", "")
     decoded_img = cv2.imdecode(np.frombuffer(r_by_id.content, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert decoded_img is not None
-    assert decoded_img.shape[:2] == (180, 320)
+    assert decoded_img.shape[:2] == (360, 640)
 
     # 3. GET /api/timeline/thumb?ts=... -> ближайший кадр с заголовками X-Thumb-Ts и X-Thumb-State
     r_near = client.get(f"/api/timeline/thumb?ts={now_ts - 48.0}")
