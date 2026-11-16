@@ -185,6 +185,12 @@ class FallStateMachine:
         self._down_dismissed_until: float = -1e9
         self._unattended_fall_timer = 0.0
 
+        # Контроль падения во время паузы «Я рядом»: эпизод, который уже был на момент паузы,
+        # считается подтверждённым; новое падение при пустой комнате снова поднимает тревогу
+        self._pause_fall_acked = False
+        self._pause_fall_timer = 0.0
+        self._pause_clear_timer = 0.0
+
     @property
     def state(self) -> PatientState:
         with self._lock:
@@ -353,6 +359,9 @@ class FallStateMachine:
         with self._lock:
             was_calm_in_bed = self._state in (PatientState.IN_BED, PatientState.CAREGIVER_ASSIST)
             self._fall_unacknowledged = False
+            self._pause_fall_acked = True
+            self._pause_fall_timer = 0.0
+            self._pause_clear_timer = 0.0
             if pause_seconds > 0:
                 self._paused_until = now + pause_seconds
                 self._caregiver_active_until = max(self._caregiver_active_until, now + pause_seconds + 8.0)
@@ -1007,6 +1016,64 @@ class FallStateMachine:
             )
         return None
 
+    def _watch_fall_during_pause(
+        self,
+        observations: Sequence[PoseObservation],
+        identities: dict[int, TrackIdentity],
+        zones: ZonesConfig,
+        now: float,
+        dt: float,
+        caregiver_visible: bool,
+    ) -> AlertEvent | None:
+        """
+        Пауза «Я рядом» глушит посадку, выход и жест, но не падение: если в кадре никого из своих,
+        а бабушка (или любой человек) оказалась на полу уже после начала паузы — тревога и конец паузы.
+        """
+        fallen, reason = False, ""
+        for obs in observations:
+            ident = identities.get(obs.track_id)
+            if ident is None:
+                continue
+            if ident.role == Role.PATIENT:
+                pobs = sanitize_collapsed_bed_keypoints(obs, zones.bed_polygon) if zones.has_bed else obs
+                fallen, reason = self._check_fallen_or_slumped(pobs, zones, now)
+                if fallen:
+                    break
+            elif self._floor_safety_net and self._is_lying_on_floor(obs, zones):
+                fallen, reason = True, "Человек лежит на полу."
+                break
+
+        if caregiver_visible:
+            self._pause_fall_timer = 0.0
+            return None
+        if not fallen:
+            self._pause_fall_timer = 0.0
+            self._pause_clear_timer += dt
+            if self._pause_clear_timer >= 5.0:
+                self._pause_fall_acked = False  # прежний эпизод закончился — следующее падение уже новое
+            return None
+        self._pause_clear_timer = 0.0
+        if self._pause_fall_acked:
+            return None
+        self._pause_fall_timer += dt
+        if self._pause_fall_timer < max(2.0, self._fall_confirm * 1.5):
+            return None
+
+        self._paused_until = 0.0
+        self._pause_fall_timer = 0.0
+        self._clear_assisted_seated()
+        self._state = PatientState.FALLEN
+        self._status_reason = reason.rstrip(".")
+        return self._emit_if_cooled_down(
+            PatientState.FALLEN,
+            AlertSeverity.CRITICAL,
+            "Падение во время паузы!",
+            f"{reason} Рядом никого нет, пауза охраны снята. "
+            "Нажмите «Я подошёл», чтобы отключить повтор сигнала.",
+            now,
+            None,
+        )
+
     def _emit_if_cooled_down(
         self,
         new_state: PatientState,
@@ -1067,7 +1134,7 @@ class FallStateMachine:
                 self._clear_immobility_tracking()
                 self._clear_person_down()
                 self._unattended_fall_timer = 0.0
-                return None
+                return self._watch_fall_during_pause(observations, identities, zones, now, dt, bool(caregiver_visible))
             if self._state == PatientState.PAUSED:
                 if zones.has_bed and (
                     patient_in_bed_latched

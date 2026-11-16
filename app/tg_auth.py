@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import os
 import time
 import urllib.parse
 from collections.abc import Mapping
@@ -15,12 +16,17 @@ DEFAULT_SESSION_TTL_SEC: int = 2_592_000  # 30 суток
 DEFAULT_INIT_DATA_MAX_AGE_SEC: int = 86_400  # 24 часа
 CLOCK_SKEW_TOLERANCE_SEC: float = 60.0
 
-REVERSE_PROXY_IPS: frozenset[str] = frozenset(
-    {
-        "192.168.1.6",
-        "192.168.211.2",
-    }
-)
+_DEFAULT_REVERSE_PROXY_IPS = ("192.168.1.6", "192.168.211.2")
+
+
+def _load_reverse_proxy_ips() -> frozenset[str]:
+    """Адреса обратных прокси, через которые идёт внешний трафик: REVERSE_PROXY_IPS в .env (через запятую)."""
+    raw = os.environ.get("REVERSE_PROXY_IPS", "")
+    extra = {p.strip() for p in raw.replace(";", ",").split(",") if p.strip()}
+    return frozenset(set(_DEFAULT_REVERSE_PROXY_IPS) | extra)
+
+
+REVERSE_PROXY_IPS: frozenset[str] = _load_reverse_proxy_ips()
 
 _LOCAL_HOSTNAMES: frozenset[str] = frozenset(
     {
@@ -337,6 +343,17 @@ def is_external_proxy_request(
     for hdr_name in ("x-forwarded-host", "host"):
         hostname = _extract_hostname_without_port(low_headers.get(hdr_name, ""))
         if _is_public_domain_or_ip(hostname):
+            return True
+
+    # Запрос прошёл через прокси: смотрим, откуда он пришёл на самом деле. Берём ПОСЛЕДНИЙ адрес
+    # X-Forwarded-For — его дописал ближайший прокси, подделать его клиент не может. Если прокси
+    # не передал адрес клиента вовсе — считаем запрос внешним (безопаснее потребовать вход).
+    forwarded_markers = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-proto", "x-forwarded-host")
+    if any(low_headers.get(h, "").strip() for h in forwarded_markers):
+        hops = [h.strip() for h in low_headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        origin = hops[-1] if hops else low_headers.get("x-real-ip", "").strip()
+        origin_ip = _parse_ip(origin) if origin else None
+        if origin_ip is None or not _is_private_or_local_ip(origin_ip):
             return True
 
     clean_client = (client_host or "").strip().lower()

@@ -24,6 +24,7 @@ from .archive import ClipArchiveStore
 from .capture import VideoStreamCapture
 from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
+from .camera_health import CameraHealthMonitor
 from .devices import AlertFeed, DeviceStore
 from .feedback import FalseAlertFeedbackStore, is_safe_alert_id
 from .geometry import (
@@ -699,6 +700,7 @@ class FallGuardEngine:
         )
         self.feedback = FalseAlertFeedbackStore(self.settings.data_dir / "feedback")
         self.devices = DeviceStore(self.settings.data_dir / "devices.json")
+        self.camera_health = CameraHealthMonitor(self.settings.data_dir)
         self.alert_feed = AlertFeed()
         self.faces = FaceRegistry(
             faces_dir=self.settings.data_dir / "faces",
@@ -809,6 +811,7 @@ class FallGuardEngine:
         self._worker_thread: threading.Thread | None = None
         self._camera_was_online = False
         self._camera_offline_alerted = False
+        self._prev_fall_unack = False
         self._fallback_cam_state: dict[str, object] = {
             "rotate": self.settings.frame_rotate,
             "flip_h": self.settings.frame_flip_h,
@@ -1126,6 +1129,7 @@ class FallGuardEngine:
             if hasattr(self.pose, "reset_smoother"):
                 self.pose.reset_smoother()  # type: ignore[attr-defined]
             self._reset_telemetry_latch()
+            self.camera_health.reset_reference()
         fresh_sec = float(getattr(self.capture, "seconds_since_last_frame", 999.0))
         res["connected"] = bool(self.capture.is_connected or fresh_sec < 15.0)
         rot_lbl = f"{res.get('rotate', 0)}°"
@@ -1144,6 +1148,8 @@ class FallGuardEngine:
                 self._telemetry_latch.pop(track_id, None)
 
     def on_zones_updated(self) -> None:
+        # Разметку перерисовали — значит, текущий вид комнаты и есть правильный
+        self.camera_health.reset_reference()
         with self._lock:
             self._reset_telemetry_latch()
             self._sync_tracks_summary_locked()
@@ -2048,6 +2054,7 @@ class FallGuardEngine:
             "stream_mode": stream_mode,
             "stream_clients": stream_clients,
             "resolution": resolution,
+            "camera_issue": self.camera_health.issue,
             "camera_rotate": int(cam.get("rotate", self.settings.frame_rotate)),  # type: ignore[arg-type]
             "camera_flip_h": bool(cam.get("flip_h", self.settings.frame_flip_h)),
             "tracks": tracks_snapshot,
@@ -2101,6 +2108,7 @@ class FallGuardEngine:
                 "camera_configured": self.settings.camera_configured,
                 "camera_connected": bool(cam.get("connected", self.capture.is_connected)),
                 "camera_error": self.capture.last_error,
+                "camera_issue": self.camera_health.issue,
                 "camera": cam,
                 "decoder_backend": decoder_backend,
                 "encoder_backend": encoder_backend,
@@ -2732,6 +2740,36 @@ class FallGuardEngine:
             "visitor_face_status": str(visitor_face_status or "not_attempted"),
         }
 
+    def _check_alarm_resolved_by_family(self) -> None:
+        """Тревога была, кнопку никто не нажимал, а в кадре появился свой — тревога снята сама."""
+        cur = bool(self.fsm.fall_unacknowledged)
+        prev, self._prev_fall_unack = self._prev_fall_unack, cur
+        if prev and not cur and self.fsm.state == PatientState.CAREGIVER_ASSIST:
+            note = "Рядом свой — тревога снята"
+            self._log_event("info", note, category="alert", state="caregiver")
+            threading.Thread(
+                target=self.notifier.mark_latest_resolved,
+                args=(note,),
+                name="alert-resolved",
+                daemon=True,
+            ).start()
+
+    def _handle_camera_health(self, frame: np.ndarray, night_ir: bool) -> None:
+        try:
+            changes = self.camera_health.update(frame, time.time(), night_ir)
+        except Exception as exc:
+            logger.debug("Сбой контроля камеры: %s", exc)
+            return
+        for ch in changes:
+            if ch.active:
+                title = "Изображение с камеры застыло" if ch.kind == "frozen" else "Камеру сдвинули"
+                self._log_event("warning", f"{title}: {ch.detail}", category="system")
+                self.notifier.send_text(f"⚠️ FallGuard: {title.lower()}. {ch.detail}")
+            else:
+                title = "Изображение с камеры снова идёт" if ch.kind == "frozen" else "Вид с камеры снова совпадает с разметкой"
+                self._log_event("info", title, category="system")
+                self.notifier.send_text(f"✅ FallGuard: {title.lower()}.")
+
     def _dispatch_alert_async(self, event: AlertEvent, alert_jpeg: bytes) -> None:
         clip_id: str | None = None
         if alert_jpeg:
@@ -2926,6 +2964,7 @@ class FallGuardEngine:
                         getattr(self.identifier, "caregiver_visible", caregiver_nearby)
                     )
                 alert_event = self.fsm.step(**step_kwargs)
+                self._check_alarm_resolved_by_family()
                 self.timeline.record(self.fsm.state.value, True)
                 if self.thumbs is not None:
                     try:
@@ -2963,6 +3002,7 @@ class FallGuardEngine:
                     now_mono=now,
                 )
                 night_ir_now = _detect_night_ir_frame(frame, self.identifier)
+                self._handle_camera_health(frame, night_ir_now)
 
                 done_mono = time.monotonic()
                 if last_tick_mono > 0.0:

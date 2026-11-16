@@ -178,6 +178,8 @@ class _AlertPostState:
     wrong_by: str = ""
     visitor_face_saved: bool = False
     has_video: bool = False
+    resolved_note: str = ""
+    created_ts: float = field(default_factory=time.time)
     messages: dict[str, int] = field(default_factory=dict)
 
 
@@ -657,6 +659,8 @@ class TelegramNotifier:
 
     def _rebuild_post_suffix_locked(self, post: _AlertPostState) -> str:
         lines: list[str] = []
+        if post.resolved_note and not post.acked_by:
+            lines.append(f"👣 <b>{html.escape(post.resolved_note)}</b>")
         if post.acked_by:
             lines.append(f"✅ <b>Принято ({html.escape(post.acked_by)})</b> · пауза 15 мин")
         if post.wrong_marked:
@@ -693,6 +697,34 @@ class TelegramNotifier:
             for cid, mid in old_post.messages.items():
                 if self._key_by_msg.get((str(cid), int(mid))) == old_key:
                     self._key_by_msg.pop((str(cid), int(mid)), None)
+
+    def mark_latest_resolved(self, note: str, max_age_sec: float = 1800.0) -> bool:
+        """
+        Тревогу сняли без кнопок — к бабушке подошёл свой. Помечаем последнее неподтверждённое
+        сообщение у всех получателей, чтобы никто не бежал зря.
+        """
+        if not self.enabled:
+            return False
+        now = time.time()
+        with self._posts_lock:
+            post = next(
+                (
+                    p
+                    for p in reversed(list(self._posts_by_key.values()))
+                    if (now - p.created_ts) <= max_age_sec and not p.acked_by and not p.wrong_marked and not p.resolved_note
+                ),
+                None,
+            )
+            if post is None:
+                return False
+            post.resolved_note = note
+            self._rebuild_post_suffix_locked(post)
+        try:
+            with self._make_client(10.0) as client:
+                self._edit_post_captions(client, post)
+        except Exception as exc:
+            logger.debug("Не удалось отметить снятие тревоги: %s", exc)
+        return True
 
     def _find_post_locked(
         self,

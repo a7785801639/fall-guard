@@ -273,3 +273,169 @@ def test_floor_safety_net_pref_is_persisted_and_applied(tmp_path: Path) -> None:
     assert engine.get_prefs()["floor_safety_net"] is True
     assert engine.update_prefs({"floor_safety_net": False})["floor_safety_net"] is False
     assert engine.fsm._floor_safety_net is False
+
+
+# --- Пауза «Я рядом» не отключает контроль падения --------------------------------
+
+def test_pause_still_catches_a_new_fall_when_nobody_is_around() -> None:
+    fsm = FallStateMachine(fall_confirm_seconds=1.0)
+    roles = {1: _ident(1, Role.PATIENT)}
+    t = 0.0
+    for _ in range(8):
+        t += 0.25
+        fsm.step([_in_bed()], roles, False, BED_ZONE, now=t)
+    fsm.acknowledge_and_pause(now=t, pause_seconds=900.0)
+
+    # Пока лежит в кровати — пауза, тишина
+    for _ in range(20):
+        t += 0.25
+        assert fsm.step([_in_bed()], roles, False, BED_ZONE, now=t, caregiver_visible=False) is None
+    assert fsm.state == PatientState.PAUSED
+
+    # Упала, своих в кадре нет — тревога, пауза снята
+    events = []
+    for _ in range(16):
+        t += 0.25
+        ev = fsm.step([_on_floor(1)], roles, False, BED_ZONE, now=t, caregiver_visible=False)
+        if ev is not None:
+            events.append(ev)
+    assert len(events) == 1 and events[0].state == PatientState.FALLEN
+    assert fsm.pause_remaining_sec(t) == 0.0 and fsm.fall_unacknowledged is True
+
+
+def test_pause_does_not_repeat_the_fall_that_was_just_acknowledged_or_when_family_is_there() -> None:
+    fsm = FallStateMachine(fall_confirm_seconds=1.0)
+    roles = {1: _ident(1, Role.PATIENT)}
+    t = 0.0
+    for _ in range(12):
+        t += 0.25
+        fsm.step([_on_floor(1)], roles, False, BED_ZONE, now=t, caregiver_visible=False)
+    assert fsm.state == PatientState.FALLEN
+    fsm.acknowledge_and_pause(now=t, pause_seconds=900.0)  # «Я иду» — человек ещё на полу
+    for _ in range(80):
+        t += 0.25
+        assert fsm.step([_on_floor(1)], roles, False, BED_ZONE, now=t, caregiver_visible=False) is None
+
+    # Новый эпизод при родственнике рядом — тоже тишина
+    for _ in range(30):
+        t += 0.25
+        fsm.step([_in_bed()], roles, False, BED_ZONE, now=t, caregiver_visible=False)
+    for _ in range(30):
+        t += 0.25
+        assert fsm.step([_on_floor(1)], roles, True, BED_ZONE, now=t, caregiver_visible=True) is None
+    assert fsm.state == PatientState.PAUSED
+
+
+# --- Внешний доступ: прокси без Host не открывает пульт без входа -------------------
+
+def test_proxied_requests_from_internet_require_login_even_without_public_host() -> None:
+    from app.tg_auth import is_external_proxy_request as ext
+
+    docker = "172.18.0.5"
+    assert ext({"host": "fall-guard:8090", "x-forwarded-for": "8.8.8.8"}, docker) is True
+    # Клиент подставил «домашний» адрес — ближайший прокси всё равно дописал настоящий
+    assert ext({"host": "fall-guard:8090", "x-forwarded-for": "192.168.1.30, 8.8.8.8"}, docker) is True
+    assert ext({"host": "fall-guard:8090", "x-forwarded-proto": "https"}, docker) is True
+    assert ext({"host": "fall-guard:8090", "x-forwarded-for": "192.168.1.30"}, docker) is False
+    assert ext({"host": "192.168.1.50:8090"}, "192.168.1.30") is False
+
+
+# --- Контроль камеры: застывшее изображение и сдвиг -----------------------------------
+
+def _room(seed: int = 0):
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    img = np.full((360, 640, 3), 70, np.uint8)
+    for _ in range(40):  # «мебель»: прямоугольники разной яркости
+        x, y = int(rng.integers(0, 560)), int(rng.integers(0, 300))
+        w, h = int(rng.integers(20, 120)), int(rng.integers(20, 90))
+        c = int(rng.integers(20, 230))
+        cv2.rectangle(img, (x, y), (x + w, y + h), (c, c, c), -1)
+    return img
+
+
+def test_camera_health_detects_frozen_picture_and_moved_camera(tmp_path: Path) -> None:
+    import numpy as np
+
+    from app.camera_health import CameraHealthMonitor
+
+    rng = np.random.default_rng(3)
+    base = _room()
+
+    def noisy(img):
+        return np.clip(img.astype(np.int16) + rng.normal(0, 3, img.shape).astype(np.int16), 0, 255).astype(np.uint8)
+
+    mon = CameraHealthMonitor(tmp_path)
+    t, changes = 0.0, []
+    for _ in range(200):
+        t += 1.0
+        changes += mon.update(noisy(base), t, False)
+    assert changes == [] and mon.issue == ""
+    assert (tmp_path / "camera_ref_day.npy").exists()
+
+    # Камеру задели: картинка уехала на 12% кадра
+    moved = np.roll(base, 80, axis=1)
+    for _ in range(120):
+        t += 1.0
+        changes += mon.update(noisy(moved), t, False)
+    assert [(c.kind, c.active) for c in changes] == [("moved", True)] and mon.issue == "moved"
+
+    # Перерисовали разметку — новый вид становится эталоном, тревога снимается
+    mon.reset_reference()
+    assert mon.issue == ""
+
+    # Застывшее изображение: поток идёт, а кадр не меняется
+    frozen = CameraHealthMonitor(None)
+    t, changes = 0.0, []
+    for _ in range(300):
+        t += 0.5
+        changes += frozen.update(base, t, False)
+    assert ("frozen", True) in [(c.kind, c.active) for c in changes]
+    changes = frozen.update(noisy(base), t + 0.5, False)
+    assert [(c.kind, c.active) for c in changes] == [("frozen", False)]
+
+
+# --- Тревога снимается сама, когда подходит свой --------------------------------------
+
+def test_alarm_auto_resolves_when_family_member_arrives_and_telegram_post_is_marked(tmp_path: Path) -> None:
+    edits: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        endpoint = request.url.path.rsplit("/", 1)[-1]
+        body = request.read().decode("utf-8", "ignore")
+        if endpoint == "sendPhoto":
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 11}})
+        if endpoint == "editMessageCaption":
+            from urllib.parse import parse_qs
+
+            edits.append(parse_qs(body).get("caption", [""])[0])
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    notifier = TelegramNotifier(
+        bot_token="123456:MOCK",
+        chat_ids=("1001",),
+        on_pause_cmd=lambda _: None,
+        on_resume_cmd=lambda: None,
+        get_snapshot_jpeg=lambda: None,
+        is_fall_unacknowledged=lambda: False,
+        subscribers_path=tmp_path / "subs.json",
+        transport=httpx.MockTransport(handler),
+    )
+    notifier.send_alert_photo(_event(PatientState.FALLEN, AlertSeverity.CRITICAL), b"jpg", alert_id="f1")
+    assert notifier.mark_latest_resolved("Рядом свой — тревога снята") is True
+    assert edits and "Рядом свой" in edits[-1]
+    assert notifier.mark_latest_resolved("ещё раз") is False  # одно сообщение помечается один раз
+
+    # Машина состояний: свой подошёл к упавшей — тревога больше не «неподтверждённая»
+    fsm = FallStateMachine(fall_confirm_seconds=1.0)
+    roles = {1: _ident(1, Role.PATIENT), 2: _ident(2, Role.VISITOR)}
+    t = 0.0
+    for _ in range(12):
+        t += 0.25
+        fsm.step([_on_floor(1)], {1: roles[1]}, False, BED_ZONE, now=t, caregiver_visible=False)
+    assert fsm.fall_unacknowledged is True
+    t += 0.25
+    fsm.step([_on_floor(1), _standing(2)], roles, True, BED_ZONE, now=t, caregiver_visible=True)
+    assert fsm.fall_unacknowledged is False and fsm.state == PatientState.CAREGIVER_ASSIST
