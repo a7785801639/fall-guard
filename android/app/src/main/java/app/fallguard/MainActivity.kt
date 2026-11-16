@@ -67,6 +67,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        applyKeepScreenOn()
         if (!prefs.paired) show(setup) else if (loadedBase.isEmpty()) connect()
         web.onResume()
     }
@@ -74,6 +75,21 @@ class MainActivity : Activity() {
     override fun onPause() {
         web.onPause()
         super.onPause()
+    }
+
+    private fun applyKeepScreenOn() {
+        if (prefs.keepScreenOn) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun setSystemBarsHidden(on: Boolean) {
+        val ctrl = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            ctrl.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            ctrl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        } else {
+            ctrl.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     private fun show(target: View) {
@@ -85,6 +101,11 @@ class MainActivity : Activity() {
             AlertService.start(this)
             askNotificationPermission()
             connect()
+            // Сразу после привязки — проверка, что тревога действительно дойдёт
+            if (!prefs.onboardingShown) {
+                prefs.onboardingShown = true
+                startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_ONBOARDING, true))
+            }
         } else {
             show(setup)
         }
@@ -218,11 +239,13 @@ class MainActivity : Activity() {
                 customCallback = callback
                 fullscreen.addView(view)
                 fullscreen.visibility = View.VISIBLE
+                setSystemBarsHidden(true)
             }
 
             override fun onHideCustomView() {
                 fullscreen.removeAllViews()
                 fullscreen.visibility = View.GONE
+                setSystemBarsHidden(false)
                 customView = null
                 customCallback = null
             }
@@ -276,6 +299,19 @@ class MainActivity : Activity() {
         fun openAppSettings() {
             runOnUiThread { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         }
+
+        /** Телефон или планшет у кровати как монитор: экран не гаснет, пока открыт пульт. */
+        @JavascriptInterface
+        fun setKeepScreenOn(on: Boolean) {
+            prefs.keepScreenOn = on
+            runOnUiThread { applyKeepScreenOn() }
+        }
+
+        @JavascriptInterface
+        fun isKeepScreenOn(): Boolean = prefs.keepScreenOn
+
+        @JavascriptInterface
+        fun isReady(): Boolean = Readiness.check(this@MainActivity).allOk
     }
 
     companion object {

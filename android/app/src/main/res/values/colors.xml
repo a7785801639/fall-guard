@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#0A0C10</color>
+    <color name="bg">#0A0B0E</color>
     <color name="surface">#12151B</color>
     <color name="surface2">#191D25</color>
     <color name="line">#262B36</color>
     <color name="text">#ECEFF4</color>
     <color name="muted">#8D95A5</color>
-    <color name="calm">#34D399</color>
+    <color name="calm">#3DD68C</color>
     <color name="on_calm">#062415</color>
     <color name="alarm">#E5484D</color>
     <color name="alarm_bg">#2A0F12</color>
+    <color name="icon_bg">#0A0B0E</color>
+    <color name="warn">#F5B23A</color>
 </resources>

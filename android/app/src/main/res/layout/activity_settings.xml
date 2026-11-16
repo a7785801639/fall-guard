@@ -8,62 +8,52 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="20dp">
 
         <TextView
+            android:id="@+id/setTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:text="Настройки приложения"
             android:textColor="@color/text"
-            android:textSize="24sp"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/setInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:lineSpacingMultiplier="1.15"
             android:textColor="@color/muted"
             android:textSize="15sp" />
 
         <TextView
+            style="@style/Section"
+            android:text="Тревога точно дойдёт" />
+
+        <LinearLayout
+            android:id="@+id/checklist"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Чтобы тревога точно дошла"
-            android:textColor="@color/text"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:orientation="vertical" />
 
         <Button
             android:id="@+id/btnTest"
             style="@style/Btn.Primary"
+            android:layout_marginTop="14dp"
             android:text="Проверить тревогу сейчас" />
 
         <Button
-            android:id="@+id/btnBattery"
+            android:id="@+id/btnDone"
             style="@style/Btn"
-            android:text="Разрешить работу в фоне (батарея)" />
-
-        <Button
-            android:id="@+id/btnNotif"
-            style="@style/Btn"
-            android:text="Настройки уведомлений" />
-
-        <Button
-            android:id="@+id/btnFullScreen"
-            style="@style/Btn"
-            android:text="Разрешить окно на весь экран" />
+            android:text="Готово"
+            android:visibility="gone" />
 
         <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Адреса сервера"
-            android:textColor="@color/text"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            style="@style/Section"
+            android:text="Адреса сервера" />
 
         <EditText
             android:id="@+id/setLan"
@@ -90,5 +80,14 @@
             android:layout_marginTop="32dp"
             android:text="Отвязать этот телефон"
             android:textColor="@color/alarm" />
+
+        <TextView
+            android:id="@+id/setVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
     </LinearLayout>
 </ScrollView>

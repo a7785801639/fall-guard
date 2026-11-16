@@ -314,6 +314,8 @@
       <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15 9a4 4 0 0 1 0 6M17.8 6.5a8 8 0 0 1 0 11"/></symbol>
       <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="m16 9.5 5 5m0-5-5 5"/></symbol>
       <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2M11 8.2v5.6M8.2 11h5.6"/></symbol>
+      <symbol id="i-screen" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></symbol>
+      <symbol id="i-screen-on" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3M9.5 9.5l2 2 3.5-3.5"/></symbol>
       <symbol id="i-camoff" viewBox="0 0 24 24"><path d="M4 7.5h9.5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM15.5 11l5-3v8l-5-3M3 4l18 17"/></symbol>
     </defs>
   </svg>
@@ -560,14 +562,31 @@
       o.start(t0 + at); o.stop(t0 + at + len + 0.05);
     }
   }
+  // В Android-приложении сирену даёт сам телефон, поэтому вместо «Звука» — «Экран не гаснет»
+  const nativeScreen = Boolean(native && typeof native.setKeepScreenOn === "function");
   function syncSoundBtn() {
+    if (nativeScreen) {
+      let on = false; try { on = Boolean(native.isKeepScreenOn()); } catch (_) {}
+      $("btnSound").setAttribute("aria-pressed", String(on));
+      $("soundIco").setAttribute("href", on ? "#i-screen-on" : "#i-screen");
+      $("soundLabel").textContent = on ? "Экран вкл." : "Экран";
+      $("btnSound").title = "Не гасить экран, пока открыт пульт — телефон у кровати как монитор";
+      return;
+    }
     $("btnSound").hidden = Boolean(native);
     $("btnSound").setAttribute("aria-pressed", String(soundOn));
     $("soundIco").setAttribute("href", soundOn ? "#i-sound" : "#i-mute");
     $("soundLabel").textContent = soundOn ? "Звук вкл." : "Без звука";
-    document.querySelector(".tools").style.gridTemplateColumns = native ? "repeat(2, 1fr)" : "";
+    document.querySelector(".tools").style.gridTemplateColumns = native ? "repeat(3, 1fr)" : "";
   }
   function toggleSound() {
+    if (nativeScreen) {
+      let on = false; try { on = Boolean(native.isKeepScreenOn()); } catch (_) {}
+      try { native.setKeepScreenOn(!on); } catch (_) {}
+      toast(!on ? "Экран не будет гаснуть, пока открыт пульт" : "Экран гаснет как обычно");
+      syncSoundBtn();
+      return;
+    }
     soundOn = !soundOn;
     lsSet("fg_sound", soundOn ? "1" : "0");
     if (soundOn) {

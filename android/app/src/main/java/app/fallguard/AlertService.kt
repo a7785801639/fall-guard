@@ -167,7 +167,12 @@ class AlertService : Service() {
             ui.post { startAlarm(info) }
         } else if (!alarmActive) {
             silencedUntilQuiet = false
-            if (ringing && current?.base?.isNotEmpty() == true) ui.post { stopAlarm() }
+            if (ringing && current?.base?.isNotEmpty() == true) {
+                // Тревогу сняли на сервере: подошёл свой или кто-то нажал «Принято»
+                val note = if (j.optString("state") == "caregiver") "Рядом свой — тревога снята" else "Тревога снята"
+                ui.post { stopAlarm() }
+                notifyEvent(NOTIF_EVENT, note, j.optString("status_line"))
+            }
         } else if (!ringing && !silencedUntilQuiet) {
             // Тревога на сервере ещё не подтверждена (например, телефон только что включили)
             val info = AlarmInfo(
@@ -224,8 +229,8 @@ class AlertService : Service() {
             val am = getSystemService(AudioManager::class.java)
             savedAlarmVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
             am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            // Своя двухтональная сирена — её не спутать с будильником или звонком
+            val uri = android.net.Uri.parse("android.resource://$packageName/${R.raw.siren}")
             player = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -240,6 +245,20 @@ class AlertService : Service() {
             }
         } catch (_: Exception) {
             player = null
+            try {
+                // Запасной вариант — системный звук будильника
+                val fallback = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                player = MediaPlayer().apply {
+                    setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
+                    setDataSource(this@AlertService, fallback)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            } catch (_: Exception) {
+                player = null
+            }
         }
         try {
             val vib = getSystemService(Vibrator::class.java)

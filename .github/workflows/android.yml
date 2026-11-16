@@ -5,11 +5,18 @@ on:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+    tags:
+      - "android-v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.FG_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -17,10 +24,34 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK
+
+      # Постоянный ключ подписи из секретов: тогда новые версии ставятся поверх старых.
+      # Секреты: FG_KEYSTORE_BASE64 (base64 от .jks), FG_KEYSTORE_PASSWORD, FG_KEY_ALIAS.
+      - name: Restore signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          FG_KEYSTORE_BASE64: ${{ secrets.FG_KEYSTORE_BASE64 }}
+        run: |
+          echo "$FG_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/fallguard.jks"
+          echo "FG_KEYSTORE_FILE=$RUNNER_TEMP/fallguard.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        env:
+          FG_VERSION_CODE: ${{ github.run_number }}
+          FG_KEYSTORE_PASSWORD: ${{ secrets.FG_KEYSTORE_PASSWORD }}
+          FG_KEY_ALIAS: ${{ secrets.FG_KEY_ALIAS }}
+        run: |
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "FallGuard-1.${{ github.run_number }}.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: fallguard-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/FallGuard-*.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" android/FallGuard-*.apk --title "FallGuard для Android ${GITHUB_REF_NAME#android-v}" --notes "Установите APK поверх прежней версии."

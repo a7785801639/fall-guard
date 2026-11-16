@@ -42,7 +42,7 @@
     <Button
         android:id="@+id/btnAck"
         style="@style/Btn.Danger"
-        android:text="Я рядом — снять тревогу" />
+        android:text="Принято, иду" />
 
     <LinearLayout
         android:layout_width="match_parent"

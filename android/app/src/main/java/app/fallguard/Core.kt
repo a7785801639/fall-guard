@@ -25,6 +25,13 @@ class Prefs(ctx: Context) {
         get() = sp.getLong("cursor", 0L)
         set(v) = sp.edit().putLong("cursor", v).apply()
 
+    var keepScreenOn: Boolean
+        get() = sp.getBoolean("keep_screen_on", false)
+        set(v) = sp.edit().putBoolean("keep_screen_on", v).apply()
+    var onboardingShown: Boolean
+        get() = sp.getBoolean("onboarding_shown", false)
+        set(v) = sp.edit().putBoolean("onboarding_shown", v).apply()
+
     val paired: Boolean get() = token.isNotEmpty() && urls.isNotEmpty()
 
     /** Домашний адрес пробуем первым: дома он быстрее и работает без интернета. */
@@ -36,6 +43,23 @@ class Prefs(ctx: Context) {
 class HttpResult(val code: Int, val body: String) {
     val ok: Boolean get() = code in 200..299
     fun json(): JSONObject = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
+}
+
+/** Готов ли телефон к громкой тревоге: уведомления, фон, окно поверх блокировки. */
+object Readiness {
+    data class State(val notifications: Boolean, val battery: Boolean, val fullScreen: Boolean) {
+        val allOk: Boolean get() = notifications && battery && fullScreen
+    }
+
+    fun check(ctx: Context): State {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+        return State(
+            notifications = nm.areNotificationsEnabled(),
+            battery = pm.isIgnoringBatteryOptimizations(ctx.packageName),
+            fullScreen = android.os.Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent(),
+        )
+    }
 }
 
 object Api {

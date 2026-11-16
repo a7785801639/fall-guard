@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Номер сборки и ключ подписи приходят из CI (секреты GitHub) или из ~/.gradle/gradle.properties.
+// Без ключа релиз подписывается отладочным — так проект собирается у любого.
+fun prop(name: String): String? = (project.findProperty(name) as String?) ?: System.getenv(name)
+
+val buildNumber = prop("FG_VERSION_CODE")?.toIntOrNull() ?: 2
+val keystorePath = prop("FG_KEYSTORE_FILE")
+
 android {
     namespace = "app.fallguard"
     compileSdk = 35
@@ -11,15 +18,25 @@ android {
         applicationId = "app.fallguard"
         minSdk = 27
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber
+        versionName = "1.$buildNumber"
+    }
+
+    signingConfigs {
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = prop("FG_KEYSTORE_PASSWORD")
+                keyAlias = prop("FG_KEY_ALIAS") ?: "fallguard"
+                keyPassword = prop("FG_KEY_PASSWORD") ?: prop("FG_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Подпись отладочным ключом: APK ставится вручную, без публикации в магазине.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -36,4 +53,5 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    testImplementation("junit:junit:4.13.2")
 }
