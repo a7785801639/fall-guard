@@ -87,6 +87,13 @@
     .more { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); flex: none; }
     .more:hover { background: var(--fill); color: var(--text); }
 
+    /* ================= Крупный план (широкий экран) ================= */
+    .closeup { display: none; position: relative; border-radius: var(--r); overflow: hidden; background: #000; aspect-ratio: 4 / 3; flex: none; }
+    @media (min-width: 980px) { .closeup { display: block; } }
+    .closeup canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .closeup-label { position: absolute; left: 10px; top: 10px; height: 24px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
+    .closeup-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 14px; }
+
     /* ================= Кнопки ================= */
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 44px; padding: 0 16px; border-radius: 12px; background: var(--fill); font-weight: 600; font-size: 15px; transition: background 0.15s, transform 0.06s; white-space: nowrap; }
     a.btn, label.btn { text-decoration: none; color: inherit; cursor: pointer; }
@@ -109,7 +116,7 @@
     /* Сигнал мне: сегмент с иконками */
     .seg { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--fill); }
     .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; }
-    .seg button[aria-pressed="true"] { background: var(--raise-2); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+    .seg button[aria-pressed="true"] { background: #343A46; color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
     .seg.wide { display: flex; width: 100%; }
     .seg.wide button { flex: 1 1 0; min-width: 0; min-height: 42px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
     .seg svg { width: 17px; height: 17px; }
@@ -188,8 +195,8 @@
     .ribbon { position: relative; height: 34px; border-radius: 8px; background: #1A1D23; }
     .ribbon-clip { position: absolute; inset: 0; border-radius: 8px; overflow: hidden; }
     .ribbon i { position: absolute; top: 0; bottom: 0; min-width: 2px; font-style: normal; font-size: 11.5px; font-weight: 650; line-height: 34px; padding-left: 8px; white-space: nowrap; overflow: hidden; color: rgba(255, 255, 255, 0.88); box-shadow: inset -1px 0 0 #101216; }
-    .ribbon i.t-calm { background: #1C5E44; }
-    .ribbon i.t-caregiver { background: #2F5BA8; }
+    .ribbon i.t-calm { background: #1A3A2E; color: rgba(255, 255, 255, 0.45); }
+    .ribbon i.t-caregiver { background: #2A4C8C; }
     .ribbon i.t-warn { background: #F5B23A; color: #2B1A00; }
     .ribbon i.t-alarm { background: var(--alarm-strong); min-width: 4px; }
     .ribbon i.t-paused { background: repeating-linear-gradient(135deg, #2A2E37 0 5px, #1A1D23 5px 10px); color: #9AA2B1; }
@@ -394,6 +401,12 @@
           <div class="who vis" id="whoVisitors"><i></i><b>Свои</b><span>—</span><button class="more" onclick="visitorsMenu(this)" aria-label="Действия"><svg class="ico"><use href="#i-dots"/></svg></button></div>
         </section>
 
+        <section class="closeup" id="closeup" aria-label="Бабушка крупно">
+          <canvas id="closeupCanvas"></canvas>
+          <div class="closeup-empty" id="closeupEmpty">Бабушки не видно</div>
+          <span class="closeup-label" id="closeupLabel">Крупно</span>
+        </section>
+
         <section class="signal">
           <div class="label">Сигнал <span id="modeWho">в этом браузере</span></div>
           <div class="seg wide" id="modeSeg">
@@ -443,9 +456,10 @@
       <div class="clip-media" id="clipMedia"></div>
       <div class="clip-foot">
         <div class="muted small num" id="clipMeta"></div>
-        <div class="row">
-          <button class="btn" id="clipFalse" onclick="falseAlarmClip()">Это ложная тревога</button>
-          <button class="btn red-text" onclick="deleteClip()">Удалить</button>
+        <div class="row" style="align-items:center">
+          <button class="btn" id="clipFalse" style="flex:0 1 auto" onclick="falseAlarmClip()">Это ложная тревога</button>
+          <span style="flex:1"></span>
+          <button class="btn sm ghost red-text" style="flex:0 0 auto" onclick="deleteClip()">Удалить запись</button>
         </div>
       </div>
     </div>
@@ -746,12 +760,27 @@
   const ROLE_COLOR = { patient: "#3DD68C", visitor: "#7DB0FF", unknown: "#D0D5DD" };
   let rect = { x: 0, y: 0, w: 1, h: 1 }, rafPending = false;
 
+  // Прямой H.264-поток идёт с камеры как есть, а анализ и разметка — по кадру после поворота/отражения
+  // (как в capture._apply_transform: сначала поворот по часовой, затем зеркало). Повторяем это в CSS.
+  function camRot() { return (((Number(cam.rotate) || 0) % 360) + 360) % 360; }
+  function videoSideways() { return !video.hidden && (camRot() === 90 || camRot() === 270); }
   function srcSize() {
-    const w = (!video.hidden && video.videoWidth) || (!img.hidden && img.naturalWidth) || cam.resolution[0] || 16;
-    const h = (!video.hidden && video.videoHeight) || (!img.hidden && img.naturalHeight) || cam.resolution[1] || 9;
+    let w = (!video.hidden && video.videoWidth) || (!img.hidden && img.naturalWidth) || cam.resolution[0] || 16;
+    let h = (!video.hidden && video.videoHeight) || (!img.hidden && img.naturalHeight) || cam.resolution[1] || 9;
+    if (videoSideways() && video.videoWidth) [w, h] = [h, w];
     return [w, h];
   }
+  function applyVideoOrientation() {
+    const rot = camRot(), flip = Boolean(cam.flip_h), side = rot === 90 || rot === 270;
+    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+    video.style.width = side ? vh + "px" : "";
+    video.style.height = side ? vw + "px" : "";
+    video.style.left = side ? (vw - vh) / 2 + "px" : "";
+    video.style.top = side ? (vh - vw) / 2 + "px" : "";
+    video.style.transform = (flip ? "scaleX(-1) " : "") + (rot ? `rotate(${rot}deg)` : "");
+  }
   function layout() {
+    applyVideoOrientation();
     const [sw, sh] = srcSize();
     $("stage").style.setProperty("--ar", (sw / sh).toFixed(4));
     const vw = viewport.clientWidth, vh = viewport.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
@@ -1066,6 +1095,57 @@
   }
   async function act(url, msg) { if (await call(url, { method: "POST" }, msg)) poll(); }
 
+  /* ---------- Крупный план бабушки: вырезаем из живого видео, плавно ведём за ней ---------- */
+  const cuCanvas = $("closeupCanvas"), cuCtx = cuCanvas.getContext("2d");
+  let cuBox = null, cuLastSeen = 0;
+  function closeupTarget() {
+    const src = live || S; if (!src) return null;
+    const pat = realTracks(src).find((t) => t.role === "patient");
+    let b = null, label = "Бабушка крупно";
+    if (pat) { b = pat.bbox; cuLastSeen = Date.now(); }
+    else if (src.patient_in_bed_latched && zones.bed_polygon && zones.bed_polygon.length >= 3) {
+      const xs = zones.bed_polygon.map((p) => p[0]), ys = zones.bed_polygon.map((p) => p[1]);
+      b = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; label = "Кровать крупно";
+    } else if (cuBox && Date.now() - cuLastSeen < 15000) return { box: cuBox, label: "Бабушка крупно" };
+    if (!b) return null;
+    // Кадр 4:3 вокруг человека с запасом
+    const [W, H] = srcSize(), ar = 4 / 3;
+    let cx = (b[0] + b[2]) / 2 * W, cy = (b[1] + b[3]) / 2 * H;
+    let w = Math.max((b[2] - b[0]) * W * 1.45, 0.2 * W), h = Math.max((b[3] - b[1]) * H * 1.45, w / ar);
+    w = Math.max(w, h * ar); h = w / ar;
+    if (w > W) { w = W; h = w / ar; } if (h > H) { h = H; w = h * ar; }
+    cx = Math.min(W - w / 2, Math.max(w / 2, cx)); cy = Math.min(H - h / 2, Math.max(h / 2, cy));
+    return { box: [cx - w / 2, cy - h / 2, w, h], label };
+  }
+  function drawCloseup() {
+    if (!$("closeup").offsetParent || document.hidden) return;
+    const t = closeupTarget();
+    $("closeupEmpty").hidden = Boolean(t);
+    $("closeupLabel").hidden = !t;
+    if (!t) { cuBox = null; cuCtx.clearRect(0, 0, cuCanvas.width, cuCanvas.height); return; }
+    $("closeupLabel").textContent = t.label;
+    cuBox = cuBox ? cuBox.map((v, i) => v + (t.box[i] - v) * 0.18) : t.box.slice();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), cw = Math.round(cuCanvas.clientWidth * dpr), ch = Math.round(cuCanvas.clientHeight * dpr);
+    if (cuCanvas.width !== cw || cuCanvas.height !== ch) { cuCanvas.width = cw; cuCanvas.height = ch; }
+    const [sx, sy, sw, sh] = cuBox;
+    cuCtx.setTransform(1, 0, 0, 1, 0, 0);
+    cuCtx.imageSmoothingQuality = "high";
+    try {
+      if (!video.hidden && video.readyState >= 2 && video.videoWidth) {
+        const W = video.videoWidth, H = video.videoHeight, rot = camRot(), [Wr] = srcSize();
+        cuCtx.scale(cw / sw, ch / sh); cuCtx.translate(-sx, -sy);
+        if (cam.flip_h) { cuCtx.translate(Wr, 0); cuCtx.scale(-1, 1); }
+        if (rot === 90) { cuCtx.translate(H, 0); cuCtx.rotate(Math.PI / 2); }
+        else if (rot === 180) { cuCtx.translate(W, H); cuCtx.rotate(Math.PI); }
+        else if (rot === 270) { cuCtx.translate(0, W); cuCtx.rotate(-Math.PI / 2); }
+        cuCtx.drawImage(video, 0, 0);
+      } else if (!img.hidden && img.naturalWidth) {
+        cuCtx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+      }
+    } catch (_) {}
+  }
+  setInterval(drawCloseup, 80);
+
   /* ---------- Тревога и пауза ---------- */
   let dismissedWarn = "";
   function ackAlarm() {
@@ -1224,7 +1304,8 @@
     for (const sp of tl.spans || []) {
       const l = Math.max(0, (sp.start - start) / win * 100), w = Math.min(100 - l, (sp.end - Math.max(sp.start, start)) / win * 100);
       if (w <= 0) continue;
-      const txt = sp.tone === "warn" ? String(sp.label || "").toLowerCase() : (TONE_LABEL[sp.tone] || "");
+      // Подписываем только то, на что стоит обратить внимание; «спокойно» — фон
+      const txt = sp.tone === "warn" ? String(sp.label || "").toLowerCase() : sp.tone === "calm" ? "" : (TONE_LABEL[sp.tone] || "");
       const fits = (w / 100) * W > txt.length * 6.6 + 14;
       html += `<i class="t-${esc(sp.tone)}" style="left:${l.toFixed(3)}%;width:${Math.max(0.15, w).toFixed(3)}%">${fits ? esc(txt) : ""}</i>`;
     }
@@ -1582,7 +1663,11 @@
       if (!r.ok) return;
       S = await r.json();
       if (S.zones && !drawMode) { const hadBed = zones.bed_polygon && zones.bed_polygon.length >= 3; zones = S.zones; if (bedZoom && !hadBed) zoomToBed(false); }
-      if (S.camera) cam = Object.assign(cam, S.camera);
+      if (S.camera) {
+        const before = camRot() + ":" + Boolean(cam.flip_h);
+        cam = Object.assign(cam, S.camera);
+        if (before !== camRot() + ":" + Boolean(cam.flip_h)) layout();
+      }
       clips = S.recent_clips || [];
       if (Array.isArray(S.thumbs)) thumbs = S.thumbs.slice().sort((x, y) => x.ts - y.ts);
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
