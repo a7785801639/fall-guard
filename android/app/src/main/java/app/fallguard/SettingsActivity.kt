@@ -2,6 +2,7 @@ package app.fallguard
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -60,8 +61,6 @@ class SettingsActivity : Activity() {
         refresh()
     }
 
-    private fun dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
-
     private fun refresh() {
         val st = Readiness.check(this)
         findViewById<TextView>(R.id.setTitle).text = when {
@@ -98,38 +97,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun addRow(parent: LinearLayout, ok: Boolean, title: String, sub: String, onFix: () -> Unit) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundResource(R.drawable.card)
-            setPadding(dp(16), dp(14), dp(12), dp(14))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
-        }
-        val mark = TextView(this).apply {
-            text = if (ok) "✓" else "!"
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(getColor(if (ok) R.color.calm else R.color.warn))
-            layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        val texts = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
-            addView(TextView(this@SettingsActivity).apply { text = title; textSize = 16f; setTextColor(getColor(R.color.text)) })
-            addView(TextView(this@SettingsActivity).apply { text = if (ok) "Разрешено" else sub; textSize = 13f; setTextColor(getColor(R.color.muted)) })
-        }
-        row.addView(mark)
-        row.addView(texts)
-        if (!ok) {
-            row.addView(Button(this, null, 0, R.style.Btn_Primary).apply {
-                text = "Разрешить"
-                textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)).apply { marginStart = dp(8) }
-                setPadding(dp(14), 0, dp(14), 0)
-                setOnClickListener { onFix() }
-            })
-        }
-        parent.addView(row)
+        parent.addView(ChecklistRow.build(this, ok, title, sub, onFix))
     }
 
     private fun unpair() {
@@ -153,5 +121,46 @@ class SettingsActivity : Activity() {
 
     companion object {
         const val EXTRA_ONBOARDING = "onboarding"
+    }
+}
+
+/** Строка проверки готовности: ✓/! · название и пояснение · кнопка «Разрешить». */
+object ChecklistRow {
+    fun build(ctx: Context, ok: Boolean, title: String, sub: String, onFix: () -> Unit): View {
+        fun dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).toInt()
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.card)
+            setPadding(dp(16), dp(14), dp(12), dp(14))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
+        }
+        row.addView(TextView(ctx).apply {
+            text = if (ok) "✓" else "!"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(ctx.getColor(if (ok) R.color.calm else R.color.warn))
+            layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
+        })
+        row.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
+            addView(TextView(ctx).apply { text = title; textSize = 16f; setTextColor(ctx.getColor(R.color.text)) })
+            addView(TextView(ctx).apply { text = if (ok) "Разрешено" else sub; textSize = 13f; setTextColor(ctx.getColor(R.color.muted)) })
+        })
+        if (!ok) {
+            row.addView(Button(ctx, null, 0, R.style.Btn_Primary).apply {
+                text = "Разрешить"
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)).apply { marginStart = dp(8) }
+                minHeight = 0
+                minimumHeight = 0
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setPadding(dp(14), 0, dp(14), 0)
+                setOnClickListener { onFix() }
+            })
+        }
+        return row
     }
 }

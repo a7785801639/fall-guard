@@ -45,7 +45,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:lineSpacingMultiplier="1.15"
-                android:text="В пульте FallGuard откройте Настройки → Кому сигналить → «Подключить телефон».\n\nПроще всего навести камеру телефона на QR-код — приложение подключится само. Либо введите адрес и код ниже."
+                android:text="@string/setup_hint"
                 android:textColor="@color/muted"
                 android:textSize="15sp" />
 
