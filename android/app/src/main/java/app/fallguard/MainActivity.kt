@@ -184,6 +184,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- пульт
     private fun connect() {
         show(offline)
+        findViewById<View>(R.id.offlineIcon).visibility = View.INVISIBLE
         findViewById<TextView>(R.id.offlineTitle).text = "Соединяюсь с FallGuard…"
         findViewById<TextView>(R.id.offlineText).text = ""
         Thread {
@@ -191,6 +192,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (isFinishing) return@runOnUiThread
                 if (base == null) {
+                    findViewById<View>(R.id.offlineIcon).visibility = View.VISIBLE
                     findViewById<TextView>(R.id.offlineTitle).text = "Нет связи с сервером"
                     findViewById<TextView>(R.id.offlineText).text =
                         "Тревоги продолжат приходить, как только связь появится.\n" + prefs.urls.joinToString("\n")

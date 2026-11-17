@@ -27,7 +27,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
-            android:textColor="#FFB4B6"
+            android:textColor="@color/alarm_eyebrow"
             android:textSize="15sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -37,7 +37,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/text"
         android:textSize="30sp"
         android:textStyle="bold" />
 
@@ -46,7 +46,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:textColor="#F3D6D7"
+        android:lineSpacingMultiplier="1.1"
+        android:textColor="@color/alarm_soft"
         android:textSize="17sp" />
 
     <!-- Кадр сразу под текстом, во всю ширину, со скруглением -->
@@ -57,16 +58,41 @@
         android:layout_marginTop="18dp"
         android:adjustViewBounds="true"
         android:background="@drawable/frame_round"
-        android:clipToOutline="true"
         android:contentDescription="Кадр с камеры"
         android:maxHeight="360dp"
         android:minHeight="160dp"
         android:scaleType="fitCenter" />
 
-    <View
+    <!-- Сколько тревога висит без ответа: заполняет свободное место на высоких экранах,
+         на низких прячется, чтобы не сдвигать кнопки -->
+    <LinearLayout
+        android:id="@+id/alarmTimerBox"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/alarmElapsed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFeatureSettings="tnum"
+            android:includeFontPadding="false"
+            android:text="0:00"
+            android:textColor="@color/text"
+            android:textSize="60sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/alarmElapsedLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/alarm_elapsed_label"
+            android:textColor="@color/alarm_soft"
+            android:textSize="15sp" />
+    </LinearLayout>
 
     <Button
         android:id="@+id/btnAck"
@@ -100,6 +126,6 @@
         style="@style/Btn"
         android:background="@android:color/transparent"
         android:text="Только выключить звук на этом телефоне"
-        android:textColor="#F3D6D7"
+        android:textColor="@color/alarm_soft"
         android:textSize="14sp" />
 </LinearLayout>

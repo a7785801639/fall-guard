@@ -5,6 +5,9 @@ import android.app.KeyguardManager
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
@@ -15,6 +18,15 @@ import java.util.Locale
 
 /** Окно тревоги поверх экрана блокировки. */
 class AlarmActivity : Activity() {
+    private val ui = Handler(Looper.getMainLooper())
+    private var alarmTs = 0L
+    private val tick = object : Runnable {
+        override fun run() {
+            updateElapsed()
+            ui.postDelayed(this, 1000)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true)
@@ -23,7 +35,35 @@ class AlarmActivity : Activity() {
         getSystemService(KeyguardManager::class.java)?.requestDismissKeyguard(this, null)
         setContentView(R.layout.activity_alarm)
         AlertService.onAlarmStopped = { runOnUiThread { finish() } }
+        // Таймер виден, только если для него есть место: кнопки важнее
+        val box = findViewById<View>(R.id.alarmTimerBox)
+        box.addOnLayoutChangeListener { v, _, top, _, bottom, _, _, _, _ ->
+            val need = findViewById<View>(R.id.alarmElapsed).measuredHeight +
+                findViewById<View>(R.id.alarmElapsedLabel).measuredHeight
+            val show = (bottom - top) >= need + v.resources.displayMetrics.density * 24
+            for (i in 0 until (v as android.view.ViewGroup).childCount) {
+                v.getChildAt(i).visibility = if (show) View.VISIBLE else View.INVISIBLE
+            }
+        }
         bind()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ui.removeCallbacks(tick)
+        ui.post(tick)
+    }
+
+    override fun onPause() {
+        ui.removeCallbacks(tick)
+        super.onPause()
+    }
+
+    private fun updateElapsed() {
+        val sec = ((System.currentTimeMillis() - alarmTs) / 1000).coerceAtLeast(0)
+        val text = if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60)
+        else "%d:%02d".format(sec / 60, sec % 60)
+        findViewById<TextView>(R.id.alarmElapsed).text = text
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -37,6 +77,8 @@ class AlarmActivity : Activity() {
             finish()
             return
         }
+        alarmTs = info.ts
+        updateElapsed()
         findViewById<TextView>(R.id.alarmTime).text =
             "ТРЕВОГА · " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
         findViewById<TextView>(R.id.alarmTitle).text = info.title
@@ -61,6 +103,7 @@ class AlarmActivity : Activity() {
         }
 
         val image = findViewById<ImageView>(R.id.alarmImage)
+        image.clipToOutline = true // скругление кадра (XML-атрибут работает только с API 31)
         if (info.imageUrl.isNotEmpty() && info.base.isNotEmpty()) {
             val token = Prefs(this).token
             Thread {
@@ -79,6 +122,7 @@ class AlarmActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacks(tick)
         AlertService.onAlarmStopped = null
         super.onDestroy()
     }

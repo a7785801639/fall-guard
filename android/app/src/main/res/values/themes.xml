@@ -8,6 +8,7 @@
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/muted</item>
         <item name="android:colorControlActivated">@color/calm</item>
+        <item name="android:fontFamily">@font/onest</item>
     </style>
 
     <style name="Theme.FallGuard.Alarm">
@@ -51,6 +52,13 @@
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0.06</item>
         <item name="android:textAllCaps">true</item>
+    </style>
+
+    <style name="Label">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">13sp</item>
     </style>
 
     <style name="Field">

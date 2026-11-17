@@ -8,5 +8,12 @@
     <string name="ch_events_desc">Посадка, выход из кровати, жест рукой</string>
     <string name="ch_link">Связь с сервером</string>
     <string name="ch_link_desc">Постоянное уведомление о том, что приложение на связи</string>
-    <string name="setup_hint">В пульте FallGuard откройте Настройки → Кому сигналить → «Подключить телефон».\n\nПроще всего навести камеру телефона на QR-код — приложение подключится само. Либо введите адрес и код ниже.</string>
+    <string name="setup_title">Подключите телефон</string>
+    <string name="setup_sub">Телефон будет громко звонить при падении — даже ночью и в беззвучном режиме.</string>
+    <string name="setup_qr_title">Наведите камеру на QR-код</string>
+    <string name="setup_qr_sub">В пульте: Настройки → Кому сигналить → «Подключить телефон»</string>
+    <string name="setup_or">или вручную</string>
+    <string name="setup_server">Адрес пульта</string>
+    <string name="setup_code">Код из пульта</string>
+    <string name="alarm_elapsed_label">тревога без ответа</string>
 </resources>

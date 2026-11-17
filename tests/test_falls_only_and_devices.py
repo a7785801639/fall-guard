@@ -439,3 +439,12 @@ def test_alarm_auto_resolves_when_family_member_arrives_and_telegram_post_is_mar
     t += 0.25
     fsm.step([_on_floor(1), _standing(2)], roles, True, BED_ZONE, now=t, caregiver_visible=True)
     assert fsm.fall_unacknowledged is False and fsm.state == PatientState.CAREGIVER_ASSIST
+
+
+def test_fonts_are_public_but_everything_else_stays_behind_login(tmp_path: Path) -> None:
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    client = TestClient(create_web_app(engine))
+    font = client.get("/static/fonts/onest-cyrillic.woff2", headers=EXTERNAL)
+    assert font.status_code == 200 and font.headers["content-type"].startswith("font/")
+    assert client.get("/static/index.html", headers=EXTERNAL).status_code == 401
+    assert client.get("/api/status", headers=EXTERNAL).status_code == 401
