@@ -9,93 +9,123 @@
   <title>FallGuard</title>
   <script src="/telegram-web-app.js"></script>
   <style>
+    @font-face { font-family: "Onest"; src: url("/static/fonts/onest-cyrillic.woff2") format("woff2"); font-weight: 100 900; font-display: swap; unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+    @font-face { font-family: "Onest"; src: url("/static/fonts/onest-latin.woff2") format("woff2"); font-weight: 100 900; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
     :root {
-      --bg: #0A0B0E; --raise: #13151A; --raise-2: #1A1D23; --fill: rgba(255, 255, 255, 0.06); --fill-2: rgba(255, 255, 255, 0.1);
-      --line: rgba(255, 255, 255, 0.08); --text: #ECEEF2; --muted: #8B93A1; --faint: #5A6170;
-      --calm: #3DD68C; --calm-soft: rgba(61, 214, 140, 0.14); --care: #5B9BFF; --care-soft: rgba(91, 155, 255, 0.15);
-      --warn: #F5B23A; --warn-soft: rgba(245, 178, 58, 0.15); --alarm: #FF4D57; --alarm-strong: #E5343F; --alarm-soft: rgba(255, 77, 87, 0.15);
-      --r: 14px; --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+      /* Поверхности: фон → панель → плитка → приподнятое */
+      --bg: #0B0C0F; --panel: #111318; --tile: #171A20; --raise: #171A20; --raise-2: #1F232A;
+      --fill: rgba(255, 255, 255, 0.055); --fill-2: rgba(255, 255, 255, 0.09); --line: rgba(255, 255, 255, 0.07);
+      --text: #F1F3F6; --muted: #959CA9; --faint: #5E6572;
+      /* Смысловые цвета: спокойно, свои, внимание, тревога */
+      --calm: #5BE0A1; --calm-soft: rgba(91, 224, 161, 0.13);
+      --care: #7EA8FF; --care-soft: rgba(126, 168, 255, 0.14);
+      --warn: #FFB547; --warn-soft: rgba(255, 181, 71, 0.14);
+      --alarm: #FF5A5F; --alarm-strong: #E5383F; --alarm-soft: rgba(255, 90, 95, 0.15);
+      --r: 16px; --r-lg: 22px; --r-sm: 12px;
+      --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+      --font: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
       color-scheme: dark;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; min-height: 100%; background: var(--bg); }
-    body { color: var(--text); font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+    body { color: var(--text); font: 15px/1.45 var(--font); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
     [hidden] { display: none !important; }
     button, select, input { font: inherit; color: inherit; }
     button { cursor: pointer; border: 0; background: none; padding: 0; text-align: inherit; }
     button:disabled { opacity: 0.4; cursor: default; }
     :focus-visible { outline: 2px solid var(--care); outline-offset: 2px; }
     .num { font-variant-numeric: tabular-nums; }
-    svg.ico { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+    svg.ico { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .muted { color: var(--muted); }
     .small { font-size: 13px; }
 
     /* ================= Каркас ================= */
-    .app { padding: calc(10px + var(--safe-t)) 12px calc(20px + var(--safe-b)); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .app { padding: calc(10px + var(--safe-t)) 12px calc(96px + var(--safe-b)); }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .layout > *, .rail > * { min-width: 0; }
     .main { min-width: 0; }
-    .rail { min-width: 0; display: grid; gap: 14px; }
+    .rail { min-width: 0; display: grid; gap: 12px; }
     .rail-spacer { display: none; }
     @media (max-width: 979px) {
       .rail { display: contents; }
-      .status { order: -1; }
+      .hero { order: -1; }
       .main { order: 0; }
-      .inframe { order: 1; } .signal { order: 2; } .tools { order: 3; }
+      .people { order: 1; } .signal { order: 2; }
     }
     @media (min-width: 980px) {
-      .app { height: 100dvh; padding: 12px; }
-      .layout { display: flex; justify-content: center; gap: 12px; height: 100%; }
-      /* Плеер: видео по высоте окна + полоса хроники 76 px; панель справа фиксированной ширины */
-      .main { flex: none; align-self: flex-start; width: min(calc(100% - 372px), calc((100dvh - 24px - 76px) * var(--ar, 1.7778))); }
-      .rail { flex: none; width: 360px; display: flex; flex-direction: column; gap: 22px; padding: 6px 4px 4px 14px; border-left: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
+      .app { height: 100dvh; padding: 14px; }
+      .layout { display: flex; justify-content: center; gap: 14px; height: 100%; }
+      /* Плеер: видео по высоте окна + полоса хроники; справа панель постоянной ширины */
+      .main { flex: none; align-self: flex-start; width: min(calc(100% - 386px), calc((100dvh - 28px - 76px) * var(--ar, 1.7778))); }
+      .rail { flex: none; width: 372px; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--panel); border-radius: var(--r-lg); overflow-y: auto; scrollbar-width: none; }
       .rail::-webkit-scrollbar { display: none; }
-      .rail-spacer { display: block; flex: 1; min-height: 8px; }
+      .rail-spacer { display: block; flex: 1; min-height: 4px; }
     }
-    .label { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+    .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 4px 8px; }
+    .caption b { font-weight: 600; color: var(--text); font-size: 14px; }
 
-    /* ================= Статус (фиксированная высота) ================= */
-    .status { display: flex; align-items: center; gap: 14px; height: 76px; padding: 0 14px; border-radius: var(--r); background: var(--raise); transition: background 0.25s; }
-    .status-dot { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--fill); color: var(--muted); transition: background 0.25s, color 0.25s; }
-    .status-dot svg { width: 22px; height: 22px; stroke-width: 2.1; }
-    .status-text { min-width: 0; flex: 1; }
-    .status-title, .status-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .status-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 26px; }
-    .status-sub { font-size: 13.5px; color: var(--muted); line-height: 19px; height: 19px; }
-    .status[data-tone="calm"] .status-dot { background: var(--calm-soft); color: var(--calm); }
-    .status[data-tone="care"] .status-dot { background: var(--care-soft); color: var(--care); }
-    .status[data-tone="warn"] { background: #2A2213; }
-    .status[data-tone="warn"] .status-dot { background: var(--warn); color: #2B1A00; }
-    .status[data-tone="alarm"] { background: var(--alarm-strong); animation: pulse 1.2s ease-in-out infinite; }
-    .status[data-tone="alarm"] .status-dot { background: #fff; color: var(--alarm-strong); }
-    .status[data-tone="alarm"] .status-sub { color: rgba(255, 255, 255, 0.85); }
-    @keyframes pulse { 50% { background: #C32733; } }
+    /* ================= Статус: человеческая фраза о бабушке ================= */
+    .hero { position: relative; height: 112px; padding: 14px 16px; border-radius: var(--r); background: var(--tile); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; isolation: isolate; transition: background 0.3s; }
+    .hero::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity 0.3s; }
+    .hero-meta { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); height: 18px; }
+    .hero-meta .since { margin-left: auto; font-weight: 500; color: var(--muted); }
+    .hero-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+    .hero-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: 0; }
+    .hero-main { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+    .hero-text { min-width: 0; flex: 1; }
+    .hero-title, .hero-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hero-title { font-size: 25px; font-weight: 650; letter-spacing: -0.025em; line-height: 30px; }
+    .hero-sub { font-size: 14px; color: var(--muted); line-height: 20px; height: 20px; }
+    .hero[data-tone="calm"]::before { opacity: 1; background: radial-gradient(120% 140% at 0% 0%, rgba(91, 224, 161, 0.16), transparent 60%); }
+    .hero[data-tone="calm"] .hero-meta { color: var(--calm); }
+    .hero[data-tone="calm"] .hero-dot { background: var(--calm); color: var(--calm); }
+    .hero[data-tone="calm"] .hero-dot::after { animation: breathe 3s ease-out infinite; }
+    .hero[data-tone="care"]::before { opacity: 1; background: radial-gradient(120% 140% at 0% 0%, rgba(126, 168, 255, 0.18), transparent 60%); }
+    .hero[data-tone="care"] .hero-meta { color: var(--care); }
+    .hero[data-tone="care"] .hero-dot { background: var(--care); color: var(--care); }
+    .hero[data-tone="warn"]::before { opacity: 1; background: radial-gradient(130% 160% at 0% 0%, rgba(255, 181, 71, 0.26), rgba(255, 181, 71, 0.06) 70%); }
+    .hero[data-tone="warn"] .hero-meta { color: var(--warn); }
+    .hero[data-tone="warn"] .hero-dot { background: var(--warn); color: var(--warn); }
+    .hero[data-tone="warn"] .hero-dot::after { animation: breathe 1.4s ease-out infinite; }
+    .hero[data-tone="alarm"] { background: var(--alarm-strong); animation: alarm-bg 1.2s ease-in-out infinite; }
+    .hero[data-tone="alarm"] .hero-meta, .hero[data-tone="alarm"] .hero-meta .since, .hero[data-tone="alarm"] .hero-sub { color: rgba(255, 255, 255, 0.88); }
+    .hero[data-tone="alarm"] .hero-dot { background: #fff; color: #fff; }
+    .hero[data-tone="alarm"] .hero-dot::after { animation: breathe 1s ease-out infinite; }
+    @keyframes breathe { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.9); opacity: 0; } }
+    @keyframes alarm-bg { 50% { background: #C5262F; } }
     .player { position: relative; }
     .app[data-alarm="1"] .player::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); box-shadow: inset 0 0 0 3px var(--alarm); pointer-events: none; animation: ring 1.2s ease-in-out infinite; z-index: 6; }
-    @keyframes ring { 50% { box-shadow: inset 0 0 0 3px rgba(255, 77, 87, 0.25); } }
-    @media (prefers-reduced-motion: reduce) { .status, .player::after { animation: none !important; } }
+    @keyframes ring { 50% { box-shadow: inset 0 0 0 3px rgba(255, 90, 95, 0.25); } }
+    @media (prefers-reduced-motion: reduce) { .hero, .hero-dot::after, .player::after { animation: none !important; } }
+    @media (max-width: 979px) { .hero { height: 98px; padding: 12px 14px; } .hero-title { font-size: 22px; line-height: 27px; } }
 
-    /* ================= В кадре: две неизменные строки ================= */
-    .who { display: flex; align-items: center; gap: 12px; height: 46px; }
-    .who + .who { border-top: 1px solid var(--line); }
-    .who i { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--faint); }
-    .who[data-on="1"] i { background: var(--calm); }
-    .who.vis[data-on="1"] i { background: var(--care); }
-    .who b { font-weight: 600; width: 74px; flex: none; }
-    .who span { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .who[data-on="1"] span { color: var(--text); }
-    .more { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); flex: none; }
-    .more:hover { background: var(--fill); color: var(--text); }
+    /* ================= Кто в комнате: две постоянные плитки ================= */
+    .people { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pcell { display: flex; align-items: center; gap: 12px; height: 68px; padding: 0 12px; border-radius: var(--r); background: var(--tile); min-width: 0; transition: background 0.15s; }
+    .pcell:hover { background: var(--raise-2); }
+    .avatar { position: relative; width: 42px; height: 42px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--fill-2); color: var(--muted); font-weight: 650; font-size: 16px; overflow: hidden; box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px transparent; transition: box-shadow 0.25s; }
+    .avatar img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) brightness(0.65); transition: filter 0.25s; }
+    .avatar svg { width: 20px; height: 20px; }
+    .pcell[data-on="1"] .avatar { box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px var(--calm); color: var(--text); }
+    .pcell.vis[data-on="1"] .avatar { box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px var(--care); }
+    .pcell[data-on="1"][data-tone="warn"] .avatar { box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px var(--warn); }
+    .pcell[data-on="1"][data-tone="alarm"] .avatar { box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px var(--alarm); }
+    .pcell[data-tone="alarm"] .pcell-text span { color: var(--alarm); opacity: 1; }
+    .pcell[data-on="1"] .avatar img { filter: none; }
+    .pcell-text { min-width: 0; display: grid; line-height: 1.25; }
+    .pcell-text b { font-weight: 600; font-size: 15px; }
+    .pcell-text span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pcell[data-on="1"] .pcell-text span { color: var(--text); opacity: 0.85; }
 
     /* ================= Крупный план (широкий экран) ================= */
     .closeup { display: none; position: relative; border-radius: var(--r); overflow: hidden; background: #000; aspect-ratio: 4 / 3; flex: none; }
-    @media (min-width: 980px) { .closeup { display: block; } }
+    @media (min-width: 980px) { .closeup { display: block; flex: 1 1 auto; aspect-ratio: auto; min-height: 200px; } }
     .closeup canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .closeup-label { position: absolute; left: 10px; top: 10px; height: 24px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
+    .closeup-label { position: absolute; left: 10px; top: 10px; height: 24px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
     .closeup-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 14px; }
 
     /* ================= Кнопки ================= */
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 44px; padding: 0 16px; border-radius: 12px; background: var(--fill); font-weight: 600; font-size: 15px; transition: background 0.15s, transform 0.06s; white-space: nowrap; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 44px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fill); font-weight: 600; font-size: 15px; transition: background 0.15s, transform 0.06s; white-space: nowrap; }
     a.btn, label.btn { text-decoration: none; color: inherit; cursor: pointer; }
     .btn:hover { background: var(--fill-2); }
     .btn:active { transform: scale(0.98); }
@@ -103,37 +133,42 @@
     .btn.block { width: 100%; }
     .btn.solid { background: var(--text); color: var(--bg); }
     .btn.solid:hover { background: #fff; }
-    .btn.primary { background: var(--calm); color: #04210F; }
+    .btn.primary { background: var(--calm); color: #062716; }
     .btn.danger { background: var(--alarm-strong); color: #fff; }
     .btn.ghost { background: transparent; }
-    .btn.sm { min-height: 34px; padding: 0 12px; font-size: 13.5px; border-radius: 9px; }
+    .btn.sm { min-height: 34px; padding: 0 12px; font-size: 13.5px; border-radius: 10px; }
     .btn.red-text { color: var(--alarm); }
     .btn[aria-pressed="true"] { background: var(--calm-soft); color: var(--calm); }
     .row { display: flex; gap: 8px; flex-wrap: wrap; }
     .row > .btn { flex: 1; }
 
-
-    /* Сигнал мне: сегмент с иконками */
-    .seg { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--fill); }
-    .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; }
-    .seg button[aria-pressed="true"] { background: #343A46; color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+    /* ================= Сигнал мне ================= */
+    .signal { padding: 12px; border-radius: var(--r); background: var(--tile); }
+    .seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--fill); }
+    .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+    .seg button:hover { color: var(--text); }
+    .seg button[aria-pressed="true"] { background: #323844; color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
     .seg.wide { display: flex; width: 100%; }
-    .seg.wide button { flex: 1 1 0; min-width: 0; min-height: 42px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+    .seg.wide button { flex: 1 1 0; min-width: 0; min-height: 40px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
     .seg svg { width: 17px; height: 17px; }
-    #modeSeg button[data-v="falls"][aria-pressed="true"] { color: var(--alarm); }
-    #modeSeg button[data-v="all"][aria-pressed="true"] { color: var(--calm); }
-    .hint { font-size: 12.5px; color: var(--muted); margin-top: 7px; min-height: 17px; }
+    #modeSeg button[data-v="all"][aria-pressed="true"] { background: var(--calm-soft); color: var(--calm); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
+    #modeSeg button[data-v="falls"][aria-pressed="true"] { background: var(--alarm-soft); color: var(--alarm); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
+    .hint { font-size: 12.5px; color: var(--muted); margin: 8px 4px 0; height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    /* Инструменты: звук, журнал, настройки */
-    .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-    .tool { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; height: 62px; border-radius: 12px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+    /* ================= Док: пауза, звук, журнал, настройки ================= */
+    .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .tool { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 58px; border-radius: 14px; font-size: 12px; font-weight: 600; color: var(--muted); transition: background 0.15s, color 0.15s; }
     .tool:hover { background: var(--fill); color: var(--text); }
     .tool svg { width: 22px; height: 22px; }
     .tool[aria-pressed="true"] { color: var(--calm); }
     #btnPause[aria-pressed="true"] { color: var(--warn); background: var(--warn-soft); }
+    @media (max-width: 979px) {
+      /* На телефоне док всегда под большим пальцем */
+      .tools { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 6px 10px calc(6px + var(--safe-b)); background: rgba(11, 12, 15, 0.86); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-top: 1px solid var(--line); }
+    }
 
     /* ================= Плеер ================= */
-    .player { background: #000; border-radius: var(--r); overflow: hidden; }
+    .player { background: #000; border-radius: var(--r); overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
     .viewport { position: relative; width: 100%; aspect-ratio: var(--ar, 1.7778); background: #000; overflow: hidden; color: #fff; }
     .vp-inner { position: absolute; inset: 0; transform-origin: 0 0; transition: transform 0.28s ease; will-change: transform; }
     .viewport { touch-action: pan-y; }
@@ -153,6 +188,11 @@
     .vp-btn { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); }
     .vp-btn svg { width: 17px; height: 17px; }
     #btnOverlay[aria-pressed="false"] { opacity: 0.5; }
+    @media (hover: hover) and (pointer: fine) {
+      .vp-btns { opacity: 0; transition: opacity 0.2s; }
+      .viewport:hover .vp-btns, .vp-btns:focus-within { opacity: 1; }
+    }
+    .chip { font-variant-numeric: tabular-nums; }
     #btnZoom[aria-pressed="true"] { background: #fff; color: #000; }
     .chip.fs-status { display: none; }
     .chip.fs-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--calm); }
@@ -170,11 +210,11 @@
     .status-actions { display: none; gap: 6px; flex: none; }
     .status-actions .btn { background: rgba(255, 255, 255, 0.18); }
     .status-actions .btn.solid { background: #fff; color: #B81F2E; }
-    .status[data-tone="warn"] .status-actions .btn.solid { background: var(--warn); color: #2B1A00; }
+    .hero[data-tone="warn"] .status-actions .btn.solid { background: var(--warn); color: #2B1A00; }
     @media (max-width: 979px) {
       .vp-alarm { display: none !important; }       /* на телефоне видео не закрываем — кнопки в блоке статуса */
       .status-actions:not([hidden]) { display: flex; }
-      .status { padding-right: 10px; }
+      .hero { padding-right: 10px; }
     }
     .vp-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: #9AA3B2; background: #000; font-size: 14px; }
     .vp-msg b { display: block; color: #fff; font-size: 17px; margin-bottom: 4px; }
@@ -187,7 +227,7 @@
     .scrub-badge::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--warn); }
 
     /* Хроника — нижняя полоса плеера */
-    .timeline { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px 6px; background: #101216; }
+    .timeline { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px 6px; background: var(--panel); }
     .timeline .seg { flex: none; margin-top: 1px; }
     .timeline .seg button { padding: 0 10px; }
     .tl-track { flex: 1; min-width: 0; }
@@ -383,22 +423,23 @@
       </div>
 
       <aside class="rail">
-        <section class="status" id="status" data-tone="offline" role="status" aria-live="polite">
-          <span class="status-dot"><svg class="ico"><use id="statusIco" href="#i-camoff"/></svg></span>
-          <div class="status-text">
-            <div class="status-title" id="statusTitle">Подключение…</div>
-            <div class="status-sub num" id="statusSub"></div>
-          </div>
-          <div class="status-actions" id="statusActions" hidden>
-            <button class="btn sm" onclick="falseAlarmCurrent()">Ложная</button>
-            <button class="btn sm solid" id="statusAck" onclick="ackAlarm()">Принято</button>
+        <section class="hero" id="status" data-tone="offline" role="status" aria-live="polite">
+          <div class="hero-meta"><span class="hero-dot"></span><span id="statusEyebrow">Подключение</span><span class="since num" id="statusSince"></span></div>
+          <div class="hero-main">
+            <div class="hero-text">
+              <div class="hero-title" id="statusTitle">Подключаемся к камере…</div>
+              <div class="hero-sub num" id="statusSub"></div>
+            </div>
+            <div class="status-actions" id="statusActions" hidden>
+              <button class="btn sm" onclick="falseAlarmCurrent()">Ложная</button>
+              <button class="btn sm solid" id="statusAck" onclick="ackAlarm()">Принято</button>
+            </div>
           </div>
         </section>
 
-        <section class="inframe">
-          <div class="label">В кадре</div>
-          <div class="who" id="whoPatient"><i></i><b>Бабушка</b><span>—</span><button class="more" onclick="patientMenu(this)" aria-label="Действия"><svg class="ico"><use href="#i-dots"/></svg></button></div>
-          <div class="who vis" id="whoVisitors"><i></i><b>Свои</b><span>—</span><button class="more" onclick="visitorsMenu(this)" aria-label="Действия"><svg class="ico"><use href="#i-dots"/></svg></button></div>
+        <section class="people" aria-label="Кто в комнате">
+          <button class="pcell" id="whoPatient" onclick="patientMenu(this)"><span class="avatar" id="avPatient">Б</span><span class="pcell-text"><b>Бабушка</b><span>—</span></span></button>
+          <button class="pcell vis" id="whoVisitors" onclick="visitorsMenu(this)"><span class="avatar" id="avVisitors"><svg class="ico"><use href="#i-users"/></svg></span><span class="pcell-text"><b>Свои</b><span>—</span></span></button>
         </section>
 
         <section class="closeup" id="closeup" aria-label="Бабушка крупно">
@@ -408,7 +449,7 @@
         </section>
 
         <section class="signal">
-          <div class="label">Сигнал <span id="modeWho">в этом браузере</span></div>
+          <div class="caption"><b>Сигнал</b><span id="modeWho">в этом браузере</span></div>
           <div class="seg wide" id="modeSeg">
             <button data-v="all" aria-pressed="true" onclick="setMyMode('all')"><svg class="ico"><use href="#i-bell"/></svg>Все события</button>
             <button data-v="falls" aria-pressed="false" onclick="setMyMode('falls')"><svg class="ico"><use href="#i-alert"/></svg>Только падения</button>
@@ -416,9 +457,7 @@
           <div class="hint" id="modeHint"></div>
         </section>
 
-        <div class="rail-spacer"></div>
-
-        <nav class="tools">
+        <nav class="tools" aria-label="Действия">
           <button class="tool" id="btnPause" aria-pressed="false" onclick="pauseMenu(this)"><svg class="ico"><use href="#i-pause"/></svg><span id="pauseLabel">Пауза</span></button>
           <button class="tool" id="btnSound" aria-pressed="false" onclick="toggleSound()"><svg class="ico"><use id="soundIco" href="#i-mute"/></svg><span id="soundLabel">Без звука</span></button>
           <button class="tool" onclick="openJournal()"><svg class="ico"><use href="#i-list"/></svg>Журнал</button>
@@ -475,17 +514,19 @@
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 
+  // Заголовок — фраза о бабушке; над ним — тон и сколько это длится
   const STATE = {
-    idle: ["Охрана включена", "calm", "i-check"],
-    in_bed: ["Всё спокойно", "calm", "i-check"],
-    caregiver: ["Рядом родственник", "care", "i-users"],
-    paused: ["Охрана на паузе", "offline", "i-pause"],
-    help_call: ["Зовёт на помощь", "warn", "i-bell"],
-    sitting_up: ["Пытается встать", "warn", "i-alert"],
-    left_bed: ["Встала с кровати одна", "warn", "i-alert"],
-    missing: ["Её нет в кадре", "warn", "i-alert"],
-    fallen: ["Падение!", "alarm", "i-alert"],
+    idle: ["Бабушку пока не видно", "calm"],
+    in_bed: ["Бабушка в кровати", "calm"],
+    caregiver: ["Бабушка под присмотром", "care"],
+    paused: ["Охрана на паузе", "offline"],
+    help_call: ["Бабушка зовёт на помощь", "warn"],
+    sitting_up: ["Бабушка садится", "warn"],
+    left_bed: ["Бабушка встала одна", "warn"],
+    missing: ["Бабушка ушла из кадра", "warn"],
+    fallen: ["Падение!", "alarm"],
   };
+  const EYEBROW = { calm: "Охрана включена", care: "Рядом свои", warn: "Внимание", alarm: "Тревога", offline: "Нет связи" };
   const WARN_STATES = ["help_call", "sitting_up", "left_bed", "missing"];
   const native = window.FallGuardAndroid || null;
 
@@ -949,24 +990,35 @@
     tws.onclose = () => { tws = null; clearTimeout(twsTimer); twsTimer = setTimeout(connectTelemetry, 1500); };
   }
   function camOnline() { return Boolean(S && (S.camera_connected || (S.camera && S.camera.connected))); }
-  const CALM_SUB = { idle: "ждёт, когда бабушка появится в кадре", in_bed: "лежит в кровати", caregiver: "тревоги о подъёме приглушены" };
+  const CALM_SUB = { idle: "Сигнал придёт, как только что-то случится", in_bed: "Лежит спокойно", caregiver: "Посадка и выход не сигналят, пока рядом свои" };
+  function sinceText(state) {
+    const tl = S && S.timeline, spans = (tl && tl.spans) || [];
+    const last = spans[spans.length - 1];
+    if (!last || (state && last.state !== state)) return "";
+    const sec = Date.now() / 1000 - last.start;
+    if (sec < 60) return "только что";
+    const m = Math.floor(sec / 60), h = Math.floor(m / 60);
+    return h ? `${h} ч ${pad(m % 60)} мин` : `${m} мин`;
+  }
   function cap(t) { t = String(t || ""); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; }
   function renderFast() {
     const src = live || S;
     if (!src || !S) return;
     const st = src.state || "idle", online = camOnline();
-    let [title, tone, ico] = STATE[st] || [st, "calm", "i-check"];
+    let [title, tone] = STATE[st] || [st, "calm"];
     let sub = CALM_SUB[st] || src.status_reason || "";
+    let eyebrow = "";
     const lvl = online ? alarmLevel(st, src.fall_unacknowledged) : "";
-    if (!online && st !== "paused") { title = "Нет связи с камерой"; tone = "offline"; ico = "i-camoff"; sub = S.camera_configured === false ? "Укажите RTSP_URL в файле .env" : (S.camera_error || "Подключение к потоку…"); }
-    else if (st === "paused") sub = src.pause_remaining_sec > 0 ? "Тревоги не приходят ещё " + timer(src.pause_remaining_sec) : "";
-    else if (lvl === "alarm" && st !== "fallen") { title = "Тревога не подтверждена"; tone = "alarm"; ico = "i-alert"; }
+    if (!online && st !== "paused") { title = "Нет связи с камерой"; tone = "offline"; sub = S.camera_configured === false ? "Укажите RTSP_URL в файле .env" : (S.camera_error || "Подключаемся к потоку…"); }
+    else if (st === "paused") { eyebrow = "Пауза"; sub = src.pause_remaining_sec > 0 ? `Ещё ${timer(src.pause_remaining_sec)} · падение всё равно ловится` : ""; }
+    else if (lvl === "alarm" && st !== "fallen") { title = "Тревога не подтверждена"; tone = "alarm"; }
     else if (!lvl && WARN_STATES.includes(st)) tone = "care"; // режим «только падения»: без тревожного вида
     const camIssue = online && !lvl && st !== "paused" ? (src.camera_issue || (S && S.camera_issue) || "") : "";
-    if (camIssue === "moved") { title = "Камеру сдвинули"; tone = "warn"; ico = "i-alert"; sub = "Проверьте разметку кровати в настройках"; }
-    else if (camIssue === "frozen") { title = "Изображение застыло"; tone = "warn"; ico = "i-camoff"; sub = "Камера шлёт один и тот же кадр"; }
+    if (camIssue === "moved") { title = "Камеру сдвинули"; tone = "warn"; sub = "Проверьте разметку кровати в настройках"; }
+    else if (camIssue === "frozen") { title = "Изображение застыло"; tone = "warn"; sub = "Камера шлёт один и тот же кадр"; }
     $("status").dataset.tone = tone;
-    $("statusIco").setAttribute("href", "#" + ico);
+    $("statusEyebrow").textContent = eyebrow || EYEBROW[tone] || "";
+    $("statusSince").textContent = online ? sinceText(st) : "";
     $("statusTitle").textContent = title;
     $("statusSub").textContent = cap(sub);
     $("status").title = title + (sub ? " — " + cap(sub) : "");
@@ -974,7 +1026,7 @@
     $("vpMsg").hidden = online;
     $("vpMsgSub").textContent = cap(sub);
     $("chipLight").hidden = !online;
-    $("chipLight").textContent = src.is_night_ir ? "Эфир · ночь" : "Эфир";
+    $("chipLight").textContent = clock(Date.now() / 1000) + (src.is_night_ir ? " · ночь" : "");
     $("chipVisit").hidden = !src.door_visit_active;
 
     // Тревога — баннером поверх видео: раскладка не сдвигается
@@ -1005,6 +1057,12 @@
   /* ---------- В кадре: две неизменные строки ---------- */
   const PATIENT_TEXT = { in_bed: "в кровати", sitting_up: "садится", help_call: "зовёт рукой", left_bed: "встала, ходит", missing: "ушла из кадра", fallen: "на полу!" };
   function realTracks(src) { return (src.tracks || []).filter((t) => t && Number(t.track_id) >= 0 && !t.virtual_presence && Array.isArray(t.bbox)); }
+  function setAvatar(el, url, fallbackHtml) {
+    const key = url || fallbackHtml;
+    if (el._k === key) return;
+    el._k = key;
+    el.innerHTML = url ? `<img alt="" src="${esc(url)}" />` : fallbackHtml;
+  }
   function renderInFrame(src) {
     const tracks = src.tracks || [];
     const pat = tracks.find((t) => t.role === "patient");
@@ -1013,14 +1071,21 @@
     if (!pText) pText = pat ? (src.patient_in_bed_latched ? "в кровати" : "в кадре") : (src.patient_in_bed_latched ? "в кровати, под одеялом" : "не видно");
     const pRow = $("whoPatient");
     pRow.dataset.on = pat || src.patient_in_bed_latched ? "1" : "0";
-    if (pRow.children[2].textContent !== pText) pRow.children[2].textContent = pText;
+    pRow.dataset.tone = $("status").dataset.tone || "calm";
+    const pSpan = pRow.querySelector(".pcell-text span");
+    if (pSpan.textContent !== pText) pSpan.textContent = pText;
+    const faces = (S && S.faces) || {};
+    setAvatar($("avPatient"), faces.patient && faces.patient[0] ? withAuth("/api/faces/patient/photo/" + encodeURIComponent(faces.patient[0])) : "", "Б");
+
     const nVis = tracks.filter((t) => t.role === "visitor").length;
     const nUnk = realTracks(src).filter((t) => t.role !== "patient" && t.role !== "visitor").length;
-    let vText = nVis === 0 ? (src.door_visit_active ? "в комнате, не видно" : "никого") : nVis === 1 ? "1 человек рядом" : nVis + " человека рядом";
-    if (nUnk) vText += ` · ещё ${nUnk} не опознан`;
+    let vText = nVis === 0 ? (src.door_visit_active ? "в комнате, не видно" : "никого") : nVis === 1 ? "один рядом" : nVis + " рядом";
+    if (nUnk) vText += ` · ${nUnk} не опознан`;
     const vRow = $("whoVisitors");
     vRow.dataset.on = nVis || src.door_visit_active ? "1" : "0";
-    if (vRow.children[2].textContent !== vText) vRow.children[2].textContent = vText;
+    const vSpan = vRow.querySelector(".pcell-text span");
+    if (vSpan.textContent !== vText) vSpan.textContent = vText;
+    setAvatar($("avVisitors"), faces.visitor && faces.visitor[0] ? withAuth("/api/faces/visitor/photo/" + encodeURIComponent(faces.visitor[0])) : "", '<svg class="ico"><use href="#i-users"/></svg>');
   }
 
   /* ---------- Меню действий (поверх, ничего не сдвигает) ---------- */
@@ -1040,8 +1105,8 @@
     hideMenu();
     if (it && it.fn) it.fn();
   });
-  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".more")) hideMenu(); }, true);
-  function menuAt(el) { const r = el.getBoundingClientRect(); return [r.right - 228, r.bottom + 6]; }
+  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause")) hideMenu(); }, true);
+  function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
     const id = Number(t.track_id);
     return [
@@ -1109,7 +1174,7 @@
     } else if (cuBox && Date.now() - cuLastSeen < 15000) return { box: cuBox, label: "Бабушка крупно" };
     if (!b) return null;
     // Кадр 4:3 вокруг человека с запасом
-    const [W, H] = srcSize(), ar = 4 / 3;
+    const [W, H] = srcSize(), ar = Math.max(0.6, Math.min(2, (cuCanvas.clientWidth || 4) / (cuCanvas.clientHeight || 3)));
     let cx = (b[0] + b[2]) / 2 * W, cy = (b[1] + b[3]) / 2 * H;
     let w = Math.max((b[2] - b[0]) * W * 1.45, 0.2 * W), h = Math.max((b[3] - b[1]) * H * 1.45, w / ar);
     w = Math.max(w, h * ar); h = w / ar;
@@ -1145,6 +1210,7 @@
     } catch (_) {}
   }
   setInterval(drawCloseup, 80);
+  setInterval(() => { if (started) renderFast(); }, 15000);
 
   /* ---------- Тревога и пауза ---------- */
   let dismissedWarn = "";
@@ -1272,7 +1338,7 @@
     const on = me.mode === "falls";
     for (const b of $("modeSeg").children) b.setAttribute("aria-pressed", String((b.dataset.v === "falls") === on));
     $("modeWho").textContent = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
-    $("modeHint").textContent = on ? "Посадка и выход из кровати — без сигнала, только в журнал" : "Сигнал при посадке, выходе из кровати и падении";
+    $("modeHint").textContent = on ? "Посадка и выход — без сигнала, только в журнал" : "Сигнал при посадке, выходе из кровати и падении";
   }
   async function setMyMode(next) {
     if (next === me.mode) return;

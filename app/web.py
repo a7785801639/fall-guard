@@ -248,6 +248,9 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         m = method.upper()
         if m in ("GET", "HEAD") and path in _PUBLIC_SHELL_GET_PATHS:
             return True
+        # Шрифты интерфейса не секретны: нужны и экрану входа, и Mini App, где токен идёт в заголовке
+        if m in ("GET", "HEAD") and path.startswith("/static/fonts/") and ".." not in path:
+            return True
         if m == "POST" and path in _PUBLIC_AUTH_POST_PATHS:
             return True
         return False
