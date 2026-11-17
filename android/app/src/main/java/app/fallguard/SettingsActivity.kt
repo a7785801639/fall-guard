@@ -135,16 +135,16 @@ object ChecklistRow {
             setPadding(dp(16), dp(14), dp(12), dp(14))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
         }
-        row.addView(TextView(ctx).apply {
-            text = if (ok) "✓" else "!"
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(ctx.getColor(if (ok) R.color.calm else R.color.warn))
-            layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
+        row.addView(android.widget.ImageView(ctx).apply {
+            setImageResource(if (ok) R.drawable.ic_check else R.drawable.ic_alert)
+            setBackgroundResource(if (ok) R.drawable.dot_calm else R.drawable.dot_warn)
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+            contentDescription = null
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
         })
         row.addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(14) }
             addView(TextView(ctx).apply { text = title; textSize = 16f; setTextColor(ctx.getColor(R.color.text)) })
             addView(TextView(ctx).apply { text = if (ok) "Разрешено" else sub; textSize = 13f; setTextColor(ctx.getColor(R.color.muted)) })
         })

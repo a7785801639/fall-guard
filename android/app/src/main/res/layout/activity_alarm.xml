@@ -3,24 +3,49 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fitsSystemWindows="true"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     android:orientation="vertical"
     android:padding="20dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipChildren="false"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <TextView
+        <!-- Знак тревоги с расходящимися кольцами -->
+        <FrameLayout
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:background="@drawable/alarm_badge"
-            android:gravity="center"
-            android:text="!"
-            android:textColor="@color/alarm"
-            android:textSize="26sp"
-            android:textStyle="bold" />
+            android:clipChildren="false">
+
+            <View
+                android:id="@+id/alarmRing1"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:alpha="0"
+                android:background="@drawable/alarm_ring" />
+
+            <View
+                android:id="@+id/alarmRing2"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:alpha="0"
+                android:background="@drawable/alarm_ring" />
+
+            <TextView
+                android:id="@+id/alarmBadge"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/alarm_badge"
+                android:gravity="center"
+                android:text="!"
+                android:textColor="@color/alarm"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/alarmTime"

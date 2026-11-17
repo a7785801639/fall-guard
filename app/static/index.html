@@ -65,17 +65,56 @@
     .caption b { font-weight: 600; color: var(--text); font-size: 14px; }
 
     /* ================= Статус: человеческая фраза о бабушке ================= */
-    .hero { position: relative; height: 112px; padding: 14px 16px; border-radius: var(--r); background: var(--tile); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; isolation: isolate; transition: background 0.3s; }
+    /* Сетка фиксированной высоты: метка → заголовок + рисунок → пояснение. Ничего не прыгает */
+    .hero { position: relative; height: 146px; padding: 14px 14px 12px 16px; border-radius: var(--r); background: var(--tile); display: grid; grid-template-columns: minmax(0, 1fr) 102px; grid-template-rows: 18px minmax(0, 1fr) 22px; grid-template-areas: "meta meta" "title scene" "sub sub"; column-gap: 12px; row-gap: 6px; overflow: hidden; isolation: isolate; transition: background 0.3s; }
     .hero::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity 0.3s; }
-    .hero-meta { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); height: 18px; }
-    .hero-meta .since { margin-left: auto; font-weight: 500; color: var(--muted); }
+    .hero-meta { grid-area: meta; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); height: 18px; min-width: 0; }
+    .hero-meta .since { margin-left: auto; font-weight: 500; color: var(--muted); white-space: nowrap; }
     .hero-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
     .hero-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: 0; }
-    .hero-main { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
-    .hero-text { min-width: 0; flex: 1; }
-    .hero-title, .hero-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .hero-title { font-size: 25px; font-weight: 650; letter-spacing: -0.025em; line-height: 30px; }
-    .hero-sub { font-size: 14px; color: var(--muted); line-height: 20px; height: 20px; }
+    .hero-title { grid-area: title; align-self: center; font-size: 24px; font-weight: 650; letter-spacing: -0.025em; line-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-wrap: balance; }
+    .hero-title.swap { animation: swap-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    @keyframes swap-in { from { opacity: 0; transform: translateY(7px); filter: blur(2px); } }
+    .hero-sub { grid-area: sub; align-self: center; font-size: 14px; color: var(--muted); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- Рисунок состояния ---- */
+    .scene { grid-area: scene; align-self: center; justify-self: end; width: 102px; height: 68px; overflow: visible; color: var(--faint); --b1: #2A2F39; --b2: #363C49; --b3: #48505F; --line: #2C313B; transition: color 0.4s; }
+    .scene .g { opacity: 0; transition: opacity 0.45s ease, transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); transform-box: view-box; }
+    .scene .sc-floor { stroke: var(--line); stroke-width: 2; stroke-linecap: round; fill: none; }
+    .scene .sc-b1 { fill: var(--b1); } .scene .sc-b2 { fill: var(--b2); } .scene .sc-b3 { fill: var(--b3); }
+    .scene .sc-p { fill: currentColor; }
+    .scene .sc-blanket { fill: currentColor; fill-opacity: 0.3; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+    .scene .sc-limb, .scene .sc-climb { fill: none; stroke: currentColor; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+    .scene .sc-c { fill: var(--care); } .scene .sc-climb { stroke: var(--care); }
+    .scene .sc-door { fill: none; stroke: var(--b3); stroke-width: 2.5; stroke-linejoin: round; }
+    .scene .sc-badge { fill: var(--b3); } .scene .sc-bars { stroke: var(--text); stroke-width: 3; stroke-linecap: round; }
+    .scene .steps ellipse { fill: currentColor; opacity: 0; animation: step 2.4s ease-in-out infinite; }
+    .scene .steps ellipse:nth-child(2) { animation-delay: 0.3s; } .scene .steps ellipse:nth-child(3) { animation-delay: 0.6s; } .scene .steps ellipse:nth-child(4) { animation-delay: 0.9s; }
+    @keyframes step { 0%, 100% { opacity: 0; } 30%, 60% { opacity: 0.8; } }
+    .scene .sc-lens { fill: none; stroke: var(--b3); stroke-width: 3; }
+    .scene .sc-slash { stroke: currentColor; stroke-width: 4; stroke-linecap: round; }
+    .scene .g-zzz text { fill: currentColor; font: 700 9px var(--font); }
+    .scene .g-zzz text:nth-child(2) { font-size: 10.5px; } .scene .g-zzz text:nth-child(3) { font-size: 12px; }
+    /* Какие части видны — задаёт data-show; входящая поза плавно «встаёт» на место */
+    .scene .g-sit { transform: translate(-6px, 8px); } .scene .g-stand { transform: translateX(-8px); } .scene .g-care { transform: translateX(10px); }
+    .scene .g-floor { transform: translateY(-10px) rotate(-6deg); transform-origin: 100px 64px; } .scene .g-hand { transform: translateY(6px); }
+    .scene .g-lie { transform: translateY(-3px); } .scene .g-pause, .scene .g-cam { transform: scale(0.85); transform-origin: 60px 40px; }
+    .scene[data-show~="bed"] .g-bed, .scene[data-show~="flat"] .g-flat, .scene[data-show~="lie"] .g-lie, .scene[data-show~="zzz"] .g-zzz,
+    .scene[data-show~="hand"] .g-hand, .scene[data-show~="sit"] .g-sit, .scene[data-show~="stand"] .g-stand, .scene[data-show~="floor"] .g-floor,
+    .scene[data-show~="care"] .g-care, .scene[data-show~="door"] .g-door, .scene[data-show~="pause"] .g-pause, .scene[data-show~="cam"] .g-cam { opacity: 1; transform: none; }
+    .scene[data-show~="dim"] .g-lie { opacity: 0.35; }
+    .scene .breath { transform-box: fill-box; transform-origin: 50% 100%; animation: breath 4.2s ease-in-out infinite; }
+    @keyframes breath { 50% { transform: scaleY(1.07); } }
+    .scene .g-zzz text { animation: zzz 3.6s ease-in-out infinite; }
+    .scene .g-zzz text:nth-child(2) { animation-delay: 0.5s; } .scene .g-zzz text:nth-child(3) { animation-delay: 1s; }
+    @keyframes zzz { 0%, 100% { opacity: 0.25; transform: translateY(2px); } 50% { opacity: 1; transform: translateY(-1px); } }
+    .scene .wave { transform-box: view-box; transform-origin: 38px 39px; animation: wave 1.1s ease-in-out infinite; }
+    @keyframes wave { 50% { transform: rotate(16deg); } }
+    .scene .sc-pool { animation: pool 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes pool { 50% { opacity: 0.35; transform: scale(0.85); } }
+    .hero[data-tone="calm"] .scene { color: var(--calm); } .hero[data-tone="care"] .scene { color: var(--calm); }
+    .hero[data-tone="warn"] .scene { color: var(--warn); }
+    .hero[data-tone="alarm"] .scene { color: #fff; --b1: rgba(255, 255, 255, 0.16); --b2: rgba(255, 255, 255, 0.22); --b3: rgba(255, 255, 255, 0.3); --line: rgba(255, 255, 255, 0.3); }
     .hero[data-tone="calm"]::before { opacity: 1; background: radial-gradient(120% 140% at 0% 0%, rgba(91, 224, 161, 0.16), transparent 60%); }
     .hero[data-tone="calm"] .hero-meta { color: var(--calm); }
     .hero[data-tone="calm"] .hero-dot { background: var(--calm); color: var(--calm); }
@@ -87,7 +126,7 @@
     .hero[data-tone="warn"] .hero-meta { color: var(--warn); }
     .hero[data-tone="warn"] .hero-dot { background: var(--warn); color: var(--warn); }
     .hero[data-tone="warn"] .hero-dot::after { animation: breathe 1.4s ease-out infinite; }
-    .hero[data-tone="alarm"] { background: var(--alarm-strong); animation: alarm-bg 1.2s ease-in-out infinite; }
+    .hero[data-tone="alarm"] { background: var(--alarm-strong); }
     .hero[data-tone="alarm"] .hero-meta, .hero[data-tone="alarm"] .hero-meta .since, .hero[data-tone="alarm"] .hero-sub { color: rgba(255, 255, 255, 0.88); }
     .hero[data-tone="alarm"] .hero-dot { background: #fff; color: #fff; }
     .hero[data-tone="alarm"] .hero-dot::after { animation: breathe 1s ease-out infinite; }
@@ -96,13 +135,26 @@
     .player { position: relative; }
     .app[data-alarm="1"] .player::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); box-shadow: inset 0 0 0 3px var(--alarm); pointer-events: none; animation: ring 1.2s ease-in-out infinite; z-index: 6; }
     @keyframes ring { 50% { box-shadow: inset 0 0 0 3px rgba(255, 90, 95, 0.25); } }
-    @media (prefers-reduced-motion: reduce) { .hero, .hero-dot::after, .player::after { animation: none !important; } }
-    @media (max-width: 979px) { .hero { height: 98px; padding: 12px 14px; } .hero-title { font-size: 22px; line-height: 27px; } }
+    @media (max-width: 979px) {
+      .hero { height: 150px; padding: 12px 12px 10px 14px; grid-template-columns: minmax(0, 1fr) 86px; grid-template-rows: 18px minmax(0, 1fr) 38px; row-gap: 4px; }
+      .hero-title { font-size: 21px; line-height: 25px; }
+      .scene { width: 86px; height: 57px; }
+    }
 
     /* ================= Кто в комнате: две постоянные плитки ================= */
     .people { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .pcell { display: flex; align-items: center; gap: 12px; height: 68px; padding: 0 12px; border-radius: var(--r); background: var(--tile); min-width: 0; transition: background 0.15s; }
     .pcell:hover { background: var(--raise-2); }
+    .av-wrap { position: relative; flex: none; display: grid; }
+    .av-badge { position: absolute; right: -5px; bottom: -4px; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 999px; display: grid; place-items: center; background: var(--calm); color: #062716; font-size: 11px; font-weight: 750; box-shadow: 0 0 0 2.5px var(--tile); animation: pop-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.4) both; }
+    .av-badge svg { width: 12px; height: 12px; stroke-width: 2.4; }
+    .pcell.vis .av-badge { background: var(--care); color: #0B1A3A; }
+    .pcell[data-tone="warn"] .av-badge { background: var(--warn); color: #2B1A00; }
+    .pcell[data-tone="alarm"] .av-badge { background: var(--alarm-strong); color: #fff; }
+    .av-wrap.ping::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--calm); animation: ping 0.9s ease-out both; pointer-events: none; }
+    .pcell.vis .av-wrap.ping::after { border-color: var(--care); }
+    @keyframes ping { from { transform: scale(0.9); opacity: 0.9; } to { transform: scale(1.5); opacity: 0; } }
+    @keyframes pop-in { from { transform: scale(0.6); opacity: 0; } }
     .avatar { position: relative; width: 42px; height: 42px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--fill-2); color: var(--muted); font-weight: 650; font-size: 16px; overflow: hidden; box-shadow: 0 0 0 2px var(--tile), 0 0 0 4px transparent; transition: box-shadow 0.25s; }
     .avatar img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) brightness(0.65); transition: filter 0.25s; }
     .avatar svg { width: 20px; height: 20px; }
@@ -122,7 +174,7 @@
     @media (min-width: 980px) { .closeup { display: block; flex: 1 1 auto; aspect-ratio: auto; min-height: 200px; } }
     .closeup canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     .closeup-label { position: absolute; left: 10px; top: 10px; height: 24px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
-    .closeup-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 14px; }
+    .closeup-empty { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(90% 70% at 50% 45%, #14171D, #0B0C0F); }
 
     /* ================= Кнопки ================= */
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 44px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fill); font-weight: 600; font-size: 15px; transition: background 0.15s, transform 0.06s; white-space: nowrap; }
@@ -207,17 +259,19 @@
     .vp-alarm .btn.solid { background: #fff; color: #B81F2E; }
     .vp-alarm[data-level="warn"] .btn { background: rgba(0, 0, 0, 0.12); }
     .vp-alarm[data-level="warn"] .btn.solid { background: #2B1A00; color: #F5B23A; }
-    .status-actions { display: none; gap: 6px; flex: none; }
-    .status-actions .btn { background: rgba(255, 255, 255, 0.18); }
+    .status-actions { grid-area: sub; display: none; gap: 8px; min-width: 0; }
+    .status-actions .btn { flex: 1 1 0; min-width: 0; background: rgba(255, 255, 255, 0.18); }
     .status-actions .btn.solid { background: #fff; color: #B81F2E; }
     .hero[data-tone="warn"] .status-actions .btn.solid { background: var(--warn); color: #2B1A00; }
     @media (max-width: 979px) {
       .vp-alarm { display: none !important; }       /* на телефоне видео не закрываем — кнопки в блоке статуса */
-      .status-actions:not([hidden]) { display: flex; }
-      .hero { padding-right: 10px; }
+      .status-actions:not([hidden]) { display: flex; animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+      .hero.acting .hero-sub { visibility: hidden; }
     }
-    .vp-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: #9AA3B2; background: #000; font-size: 14px; }
-    .vp-msg b { display: block; color: #fff; font-size: 17px; margin-bottom: 4px; }
+    .vp-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; background: linear-gradient(100deg, #07080A 30%, #111318 50%, #07080A 70%) 0 0 / 300% 100%; animation: shimmer 2.4s linear infinite; z-index: 1; }
+    .vp-msg[data-err="1"] { animation: none; background: #07080A; }
+    .vp-msg[data-err="1"] .dots { display: none; }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
     .draw-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 16px; border-radius: 14px; font-size: 13.5px; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(12px); z-index: 5; }
     .draw-bar span { flex: 1; min-width: 0; }
     .draw-bar .btn.primary { background: #fff; color: #111; }
@@ -257,7 +311,10 @@
     /* ================= Меню действий ================= */
     .menu { position: fixed; z-index: 55; min-width: 220px; max-width: 280px; padding: 6px; border-radius: 14px; background: var(--raise-2); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--line); }
     .menu-title { padding: 8px 10px 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
-    .menu button { display: block; width: 100%; padding: 10px; border-radius: 9px; font-size: 14.5px; font-weight: 550; }
+    .menu button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px; border-radius: 9px; font-size: 14.5px; font-weight: 550; }
+    .menu button svg { width: 19px; height: 19px; color: var(--muted); }
+    .menu button.on svg { color: var(--calm); } .menu button.danger svg { color: var(--alarm); }
+    .menu button:disabled { opacity: 0.6; font-size: 13px; font-weight: 500; color: var(--muted); }
     .menu button:hover { background: var(--fill); }
     .menu button.on { color: var(--calm); }
     .menu button.danger { color: var(--alarm); }
@@ -275,8 +332,10 @@
     .icon-btn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--fill); flex: none; }
     .tabs { display: flex; gap: 4px; padding: 8px 16px 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
     .tabs::-webkit-scrollbar { display: none; }
-    .tab { min-height: 34px; padding: 0 14px; border-radius: 999px; white-space: nowrap; font-weight: 600; font-size: 14px; color: var(--muted); }
-    .tab[aria-selected="true"] { background: var(--text); color: var(--bg); }
+    .tab { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px 0 12px; border-radius: 999px; white-space: nowrap; font-weight: 600; font-size: 14px; color: var(--muted); transition: color 0.2s; }
+    .tab svg { width: 17px; height: 17px; }
+    .tab:hover { color: var(--text); }
+    .tab[aria-selected="true"] { color: var(--bg); background: var(--text); }
     .sheet-body { flex: 1; overflow-y: auto; padding: 18px 16px calc(28px + var(--safe-b)); display: grid; gap: 26px; align-content: start; -webkit-overflow-scrolling: touch; }
     @media (min-width: 760px) { .sheet-body, .tabs { padding-left: 20px; padding-right: 20px; } }
     .group h3 { margin: 0 0 4px; font-size: 16px; font-weight: 650; }
@@ -300,10 +359,39 @@
     .badge.warn { background: var(--warn-soft); color: var(--warn); }
     .badge.calm { background: var(--calm-soft); color: var(--calm); }
     .empty { color: var(--muted); padding: 8px 0; font-size: 14px; }
+    /* Пустые состояния: рисунок + короткое пояснение */
+    .empty-art { display: grid; justify-items: center; text-align: center; gap: 4px; padding: 14px 12px 10px; }
+    .empty-art .art { width: 150px; height: 94px; margin-bottom: 6px; overflow: visible; }
+    .empty-art .art.big { width: 190px; height: 119px; }
+    .empty-art b { font-size: 16px; font-weight: 650; color: var(--text); }
+    .empty-art span { color: var(--muted); font-size: 13.5px; max-width: 300px; line-height: 1.4; }
+    .art .tw { animation: twinkle 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes twinkle { 0%, 100% { opacity: 0.45; transform: scale(0.92); } 50% { opacity: 1; transform: scale(1); } }
+    .art .dots circle { animation: dot 1.2s ease-in-out infinite; }
+    .art .dots circle:nth-child(2) { animation-delay: 0.15s; } .art .dots circle:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes dot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
+    .closeup-empty .empty-art .art { width: 120px; height: 75px; }
+    .closeup-empty .empty-art span { font-size: 12.5px; max-width: 220px; }
+    @media (min-width: 980px) and (max-height: 860px) { .closeup-empty .empty-art span { display: none; } }
+    /* Иконка-плитка в начале строки настроек */
+    .ri { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--fill); color: var(--muted); font-weight: 700; font-size: 15px; }
+    .ri svg { width: 19px; height: 19px; }
+    .ri.calm { background: var(--calm-soft); color: var(--calm); } .ri.care { background: var(--care-soft); color: var(--care); }
+    .ri.warn { background: var(--warn-soft); color: var(--warn); } .ri.alarm { background: var(--alarm-soft); color: var(--alarm); }
+    .ri.tg { background: rgba(42, 171, 238, 0.15); color: #4CB8F0; }
+    .btn svg { width: 18px; height: 18px; }
+    .btn.sm svg { width: 16px; height: 16px; }
+    .btn.icon-only { padding: 0; width: 36px; }
     .faces { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 12px; }
-    .face { position: relative; width: 66px; height: 66px; }
-    .face img { width: 100%; height: 100%; border-radius: 14px; object-fit: cover; background: var(--fill-2); }
-    .face button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: var(--text); color: var(--bg); font-size: 12px; line-height: 22px; text-align: center; }
+    .face { position: relative; width: 72px; height: 72px; animation: pop-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); }
+    .face button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--text); color: var(--bg); box-shadow: 0 0 0 3px var(--raise); }
+    .face button svg { width: 13px; height: 13px; stroke-width: 2.6; }
+    .face.ph, .face.add { display: grid; place-items: center; border-radius: 16px; border: 1.5px dashed rgba(255, 255, 255, 0.14); color: var(--faint); }
+    .face.ph svg { width: 28px; height: 28px; }
+    .face.add { cursor: pointer; color: var(--muted); transition: border-color 0.2s, color 0.2s, background 0.2s; }
+    .face.add:hover { border-color: var(--calm); color: var(--calm); background: var(--calm-soft); }
+    .face.add svg { width: 24px; height: 24px; }
     .pair { display: grid; gap: 14px; justify-items: center; text-align: center; padding: 22px 16px; border-radius: 14px; background: var(--raise-2); margin-top: 12px; }
     .pair .qr { width: 212px; height: 212px; padding: 10px; background: #fff; color: #000; border-radius: 14px; }
     .pair .qr svg { width: 100%; height: 100%; display: block; }
@@ -314,7 +402,11 @@
     .list { display: grid; gap: 2px; }
     .item { display: flex; align-items: center; gap: 14px; padding: 8px; margin: 0 -8px; border-radius: 12px; width: calc(100% + 16px); min-width: 0; }
     button.item:hover { background: var(--fill); }
-    .item img.thumb, .item .thumb-ph { width: 112px; height: 63px; border-radius: 9px; object-fit: cover; background: var(--fill); flex: none; }
+    .thumb-wrap { position: relative; flex: none; width: 112px; height: 63px; }
+    .item img.thumb, .item .thumb-ph { display: block; width: 112px; height: 63px; border-radius: 9px; object-fit: cover; background: linear-gradient(100deg, #15181D 30%, #1E2229 50%, #15181D 70%) 0 0 / 300% 100%; animation: shimmer 2s linear infinite; }
+    .ev-ico { position: absolute; left: -6px; bottom: -6px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--warn); color: #2B1A00; box-shadow: 0 0 0 3px var(--raise); }
+    .ev-ico svg { width: 15px; height: 15px; stroke-width: 2.2; }
+    .ev-ico.alarm { background: var(--alarm-strong); color: #fff; } .ev-ico.muted { background: var(--raise-2); color: var(--muted); }
     .item-body { min-width: 0; flex: 1; }
     .item-title, .item-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .item-title { font-weight: 600; }
@@ -337,10 +429,82 @@
     .clip-foot { padding: 14px 18px calc(18px + var(--safe-b)); display: grid; gap: 12px; }
 
     .lock { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; padding: 28px; text-align: center; }
-    .lock-card { max-width: 360px; display: grid; gap: 14px; justify-items: center; }
+    .lock-card { max-width: 360px; display: grid; gap: 14px; justify-items: center; animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .lock-card .art { width: 190px; height: 119px; overflow: visible; }
     .lock-card h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
-    .toast { position: fixed; left: 50%; bottom: calc(24px + var(--safe-b)); transform: translate(-50%, 16px); z-index: 70; max-width: calc(100% - 32px); padding: 12px 18px; border-radius: 999px; background: var(--text); color: var(--bg); font-weight: 600; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; }
-    .toast.on { opacity: 1; transform: translate(-50%, 0); }
+    .toast { position: fixed; left: 50%; bottom: calc(24px + var(--safe-b)); transform: translate(-50%, 18px) scale(0.96); z-index: 70; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100% - 32px); padding: 11px 18px 11px 13px; border-radius: 999px; background: #F1F3F6; color: #0B0C0F; font-weight: 600; font-size: 14px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); opacity: 0; pointer-events: none; transition: opacity 0.22s, transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .toast svg { width: 21px; height: 21px; color: #0E9F62; stroke-width: 2.2; }
+    .toast[data-kind="error"] svg { color: #D92D35; } .toast[data-kind="info"] svg { color: #3B6FD9; }
+    .toast.on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    @media (max-width: 979px) { .toast { bottom: calc(86px + var(--safe-b)); } }
+
+    /* ================= Движение ================= */
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+    @keyframes fade-in { from { opacity: 0; } }
+    @keyframes fade-out { to { opacity: 0; } }
+    @keyframes sheet-up { from { transform: translateY(100%); } }
+    @keyframes sheet-down { to { transform: translateY(100%); } }
+    @keyframes card-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } }
+    @keyframes card-out { to { opacity: 0; transform: translateY(10px) scale(0.98); } }
+    @keyframes menu-in { from { opacity: 0; transform: scale(0.94) translateY(-4px); } }
+    @keyframes banner-in { from { opacity: 0; transform: translate(-50%, -12px) scale(0.96); } }
+    @keyframes rec { 50% { opacity: 0.3; } }
+    @keyframes now { 0% { box-shadow: 0 0 0 0 var(--now, var(--calm)); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+    /* Первое появление пульта — мягко, по очереди */
+    .intro .player, .intro .hero:not([data-tone="alarm"]), .intro .people, .intro .closeup, .intro .signal, .intro .tools { animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .intro .people { animation-delay: 0.05s; } .intro .closeup { animation-delay: 0.1s; } .intro .signal { animation-delay: 0.15s; } .intro .tools { animation-delay: 0.2s; }
+    .hero[data-tone="alarm"] { animation: alarm-bg 1.2s ease-in-out infinite; }
+    /* Листы: снизу на телефоне, «карточкой» на большом экране */
+    .scrim.opening { animation: fade-in 0.22s ease both; }
+    .scrim.closing { animation: fade-out 0.2s ease both; pointer-events: none; }
+    .scrim.opening > .sheet, .scrim.opening > .clip { animation: sheet-up 0.36s cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+    .scrim.closing > .sheet, .scrim.closing > .clip { animation: sheet-down 0.22s cubic-bezier(0.4, 0, 1, 1) both; }
+    @media (min-width: 760px) {
+      .scrim.opening > .sheet, .scrim.opening > .clip { animation-name: card-in; animation-duration: 0.3s; }
+      .scrim.closing > .sheet, .scrim.closing > .clip { animation-name: card-out; animation-duration: 0.18s; }
+    }
+    .scrim.opening > .ask { animation: card-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1.1) both; }
+    .scrim.closing > .ask { animation: card-out 0.16s ease-in both; }
+    .grab { display: none; }
+    @media (max-width: 759px) {
+      .grab { display: block; position: absolute; left: 50%; top: calc(6px + var(--safe-t)); width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: rgba(255, 255, 255, 0.18); }
+      .sheet, .clip { position: relative; border-radius: 0; }
+      .sheet-head { touch-action: none; padding-top: 20px; }
+    }
+    .sheet-body.fade > * { animation: rise 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .sheet-body.fade > *:nth-child(2) { animation-delay: 0.04s; } .sheet-body.fade > *:nth-child(3) { animation-delay: 0.08s; } .sheet-body.fade > *:nth-child(n+4) { animation-delay: 0.12s; }
+    .menu:not([hidden]) { animation: menu-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1.2) both; }
+    .vp-alarm:not([hidden]) { animation: banner-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.2) both; }
+    .chip.live::before { animation: rec 2s ease-in-out infinite; }
+    /* Нажатия ощущаются */
+    .tool, .pcell, .vp-btn, .icon-btn, .seg button, .tab, .item, .switch { transition-property: background, color, transform, opacity, box-shadow; transition-duration: 0.18s; }
+    .tool:active, .vp-btn:active, .icon-btn:active { transform: scale(0.92); }
+    .pcell:active, .item:active { transform: scale(0.985); }
+    .seg button:active, .tab:active { transform: scale(0.96); }
+    .switch:active::after { width: 26px; }
+    .switch[aria-checked="true"]:active::after { transform: translateX(14px); }
+    /* Скользящий «бегунок» в переключателях и вкладках */
+    .seg, .tabs { position: relative; isolation: isolate; }
+    .pill { position: absolute; left: 0; top: 3px; height: calc(100% - 6px); width: 0; border-radius: 9px; background: #323844; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); z-index: -1; pointer-events: none; transition: transform 0.32s cubic-bezier(0.3, 0.75, 0.2, 1), width 0.32s cubic-bezier(0.3, 0.75, 0.2, 1), background 0.25s, box-shadow 0.25s; }
+    .tabs > .pill { top: 8px; height: 36px; border-radius: 999px; background: var(--text); box-shadow: none; }
+    .has-pill > button[aria-pressed="true"], .has-pill > button[aria-selected="true"] { background: transparent !important; box-shadow: none !important; }
+    #modeSeg .pill[data-v="all"] { background: var(--calm-soft); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
+    #modeSeg .pill[data-v="falls"] { background: var(--alarm-soft); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
+    /* «Сейчас» на хронике дышит цветом текущего состояния */
+    .ribbon-wrap { position: relative; }
+    .now-dot { position: absolute; right: -4px; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--now, var(--calm)); animation: now 2s ease-out infinite; z-index: 3; pointer-events: none; }
+    /* Свой диалог подтверждения вместо системного */
+    #askScrim { z-index: 45; place-items: center; padding: 20px; }
+    .ask { width: min(380px, 100%); padding: 22px 20px 18px; border-radius: 22px; background: var(--raise-2); box-shadow: 0 0 0 1px var(--line), 0 30px 80px rgba(0, 0, 0, 0.6); display: grid; justify-items: center; text-align: center; gap: 6px; }
+    .ask-ico { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--alarm-soft); color: var(--alarm); margin-bottom: 6px; }
+    .ask-ico svg { width: 26px; height: 26px; }
+    .ask h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+    .ask p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+    .ask .row { width: 100%; }
+    .clip-nav { display: flex; gap: 6px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+    }
   </style>
 </head>
 <body>
@@ -364,19 +528,57 @@
       <symbol id="i-screen" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></symbol>
       <symbol id="i-screen-on" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3M9.5 9.5l2 2 3.5-3.5"/></symbol>
       <symbol id="i-camoff" viewBox="0 0 24 24"><path d="M4 7.5h9.5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM15.5 11l5-3v8l-5-3M3 4l18 17"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3.5 3 10.8l6.8 2.6 2.6 6.8L21 3.5Z"/><path d="m9.8 13.4 4.8-4.8"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></symbol>
+      <symbol id="i-phone-plus" viewBox="0 0 24 24"><path d="M14 21.5H9a2.5 2.5 0 0 1-2.5-2.5V5A2.5 2.5 0 0 1 9 2.5h6A2.5 2.5 0 0 1 17.5 5v6"/><path d="M10.5 18.5h1M18 15v6M15 18h6"/></symbol>
+      <symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 5.5v14M3 15.5h18M21 19.5v-7a2.5 2.5 0 0 0-2.5-2.5H11v5.5"/><circle cx="7" cy="12" r="1.9"/></symbol>
+      <symbol id="i-door" viewBox="0 0 24 24"><path d="M4.5 21h15M7 21V4.5A1.5 1.5 0 0 1 8.5 3h7A1.5 1.5 0 0 1 17 4.5V21"/><path d="M14 12.2v.6"/></symbol>
+      <symbol id="i-door-out" viewBox="0 0 24 24"><path d="M14 4.5V3.8a.8.8 0 0 0-.9-.8L5.6 4.3a.8.8 0 0 0-.6.8v14.8a.8.8 0 0 0 .6.8l7.5 1.3a.8.8 0 0 0 .9-.8v-.7"/><path d="M10.5 12h.01M14 12h7m-2.5-2.8L21 12l-2.5 2.8"/></symbol>
+      <symbol id="i-floor" viewBox="0 0 24 24"><path d="M3.5 18.5 7.5 6.5h9l4 12Z"/><path d="M5.5 12.5h13M10.5 6.5l-1 12M13.5 6.5l1 12"/></symbol>
+      <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.6c.46-.07.93-.1 1.4-.1 6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.6 3.4M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.3-1.1M9.9 10a2.6 2.6 0 0 0 3.7 3.7"/></symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5V8H16"/></symbol>
+      <symbol id="i-flip" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8.5 7 3.5 17h5V7ZM15.5 7l5 10h-5V7Z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+      <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5zM9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.8"/><path d="M4.5 20.5c.8-3.9 3.8-6 7.5-6s6.7 2.1 7.5 6"/></symbol>
+      <symbol id="i-user-check" viewBox="0 0 24 24"><circle cx="10" cy="8" r="3.6"/><path d="M3 20c.7-3.6 3.5-5.6 7-5.6 1.4 0 2.6.3 3.7.9"/><path d="m15.5 18 2 2 4-4.2"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.3l1.6-2.2h7.2L17.2 7h2.3A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z"/><circle cx="12" cy="12.8" r="3.4"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.6"/><circle cx="10" cy="17" r="2.6"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.6A8.2 8.2 0 1 1 9.4 4a6.6 6.6 0 0 0 10.6 10.6Z"/></symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v5.5M17 11.5V9.5a1.5 1.5 0 0 1 3 0v5a6.5 6.5 0 0 1-6.5 6.5h-1a6.2 6.2 0 0 1-4.9-2.4L4.3 15a1.6 1.6 0 0 1 2.4-2.1L8 14.3"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+      <symbol id="i-turn" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6M20 12a8 8 0 0 1-13.7 5.6"/><path d="M18 3v3.8h-3.8M6 21v-3.8h3.8"/></symbol>
+      <symbol id="i-fall" viewBox="0 0 24 24"><circle cx="17.5" cy="5" r="2"/><path d="m15.8 8-4.6 2.6-3.7-1.4M11.2 10.6l.9 4.6-3.6 3.4M12.1 15.2l5 .3 1.6 3.4M3 21h18"/></symbol>
+      <symbol id="i-sit" viewBox="0 0 24 24"><circle cx="9" cy="4.5" r="2"/><path d="M9 8v6.5h6l1.5 6M9 10.5l4.5 1.5M4.5 13.5V21M4.5 17.5h4"/></symbol>
+      <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13.5" cy="4.5" r="2"/><path d="m10 21 2.2-6.2-2.7-2.3.8-4.8 3.7 3 3.5.6M10.3 7.7 7 9.6l-1.5 3.3M12.2 14.8l3.3 2.4.5 3.8"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></symbol>
+      <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.2 9.5"/></symbol>
+      <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10.2 11v5M13.8 11v5"/></symbol>
+      <symbol id="i-box" viewBox="0 0 24 24"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5Z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/></symbol>
+      <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+      <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.7-6.8a.8.8 0 0 0 0-1.4L8.7 4.5a.8.8 0 0 0-1.2.7Z"/></symbol>
+      <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8.5"/><path d="M6.6 6.5a7.6 7.6 0 1 0 10.8 0"/></symbol>
+      <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V10M9.5 2.5h5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 3.5v5h5M12 7.5V12l3 2"/></symbol>
+      <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M2 8.8a14.5 14.5 0 0 1 4.2-2.6M10.3 5.1A14.5 14.5 0 0 1 22 8.8M5.2 12.3a9.5 9.5 0 0 1 3.6-2.1M15.4 10.4a9.5 9.5 0 0 1 3.4 1.9M8.6 15.8a4.8 4.8 0 0 1 6.8 0M3.5 3.5l17 17"/><path d="M12 19.4v.1"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="m11.2 11.8 8.8-8.8M16.5 6.5l2.5 2.5M14 9l2 2"/></symbol>
     </defs>
   </svg>
 
   <div class="lock" id="lock" hidden>
     <div class="lock-card">
-      <svg class="ico" style="width:48px;height:48px;color:var(--calm)"><use href="#i-shield"/></svg>
+      <svg class="art big" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="52" r="44" fill="rgba(91,224,161,.06)"/><circle cx="80" cy="52" r="31" fill="rgba(91,224,161,.07)"/><path d="M80 19 57 28v17c0 15.5 9.7 29 23 34 13.3-5 23-18.5 23-34V28Z" fill="#12261C" stroke="#5BE0A1" stroke-width="3" stroke-linejoin="round"/><path d="m69.5 49 7.5 7.5 14.5-15" fill="none" stroke="#5BE0A1" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><g class="tw" stroke="#5BE0A1" stroke-width="2.2" stroke-linecap="round"><path d="M123 20v10M118 25h10"/><path d="M35 64v8M31 68h8"/><path d="M128 69v6M125 72h6"/></g></svg>
       <h1>Доступ только для семьи</h1>
       <p class="muted" id="lockText">Откройте пульт через кнопку «Пульт» в Telegram-боте или из приложения FallGuard.</p>
       <a class="btn primary big" id="lockLink" href="https://t.me/" target="_blank" rel="noopener">Открыть бота</a>
     </div>
   </div>
 
-  <div class="app" id="app">
+  <div class="app intro" id="app">
     <div class="layout">
       <div class="main" id="stage">
         <div class="player">
@@ -387,7 +589,7 @@
               <div class="scrub" id="scrub" hidden><img id="scrubImg" alt="Снимок из хроники" /></div>
             </div>
             <canvas id="overlay"></canvas>
-            <div class="vp-msg" id="vpMsg"><div><b>Нет связи с камерой</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
+            <div class="vp-msg" id="vpMsg"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="48" r="40" fill="rgba(255,255,255,.035)"/><rect x="44" y="30" width="54" height="38" rx="9" fill="#1F232A" stroke="#48505F" stroke-width="3"/><path d="m98 42 18-9v32l-18-9Z" fill="#1F232A" stroke="#48505F" stroke-width="3" stroke-linejoin="round"/><circle cx="71" cy="49" r="9.5" fill="none" stroke="#48505F" stroke-width="3"/><g class="dots" fill="#959CA9"><circle cx="66" cy="88" r="3"/><circle cx="80" cy="88" r="3"/><circle cx="94" cy="88" r="3"/></g></svg><b id="vpMsgTitle">Подключаемся к камере</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
             <div class="vp-top">
               <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span></div>
               <div class="vp-btns">
@@ -397,7 +599,7 @@
               </div>
             </div>
             <div class="vp-alarm" id="vpAlarm" data-level="alarm" hidden role="alert">
-              <svg class="ico"><use href="#i-alert"/></svg>
+              <svg class="ico"><use id="vpAlarmIco" href="#i-alert"/></svg>
               <div class="vp-alarm-text"><b id="vpAlarmTitle"></b><span id="vpAlarmSub"></span></div>
               <button class="btn sm" onclick="falseAlarmCurrent()">Ложная</button>
               <button class="btn sm solid" id="vpAlarmAck" onclick="ackAlarm()">Принято</button>
@@ -415,7 +617,7 @@
               <button aria-pressed="false" onclick="setWindow(86400)">24 ч</button>
             </div>
             <div class="tl-track">
-              <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div></div>
+              <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div><span class="now-dot" id="nowDot"></span></div>
               <div class="axis num" id="axis"></div>
             </div>
           </section>
@@ -425,26 +627,58 @@
       <aside class="rail">
         <section class="hero" id="status" data-tone="offline" role="status" aria-live="polite">
           <div class="hero-meta"><span class="hero-dot"></span><span id="statusEyebrow">Подключение</span><span class="since num" id="statusSince"></span></div>
-          <div class="hero-main">
-            <div class="hero-text">
-              <div class="hero-title" id="statusTitle">Подключаемся к камере…</div>
-              <div class="hero-sub num" id="statusSub"></div>
-            </div>
-            <div class="status-actions" id="statusActions" hidden>
-              <button class="btn sm" onclick="falseAlarmCurrent()">Ложная</button>
-              <button class="btn sm solid" id="statusAck" onclick="ackAlarm()">Принято</button>
-            </div>
+          <div class="hero-title" id="statusTitle">Подключаемся к камере…</div>
+          <!-- Рисунок того, что происходит: позы сменяют друг друга плавно -->
+          <svg class="scene" id="scene" viewBox="0 0 120 80" data-show="cam" aria-hidden="true">
+            <defs>
+              <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="currentColor" stop-opacity=".45"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient>
+            </defs>
+            <g class="g g-bed">
+              <path class="sc-floor" d="M6 73h108"/>
+              <rect class="sc-b1" x="11" y="29" width="7" height="44" rx="3.5"/>
+              <rect class="sc-b1" x="15" y="46" width="78" height="13" rx="4.5"/>
+              <rect class="sc-b2" x="15" y="43.5" width="78" height="7" rx="3.5"/>
+              <rect class="sc-b1" x="86" y="56" width="6" height="17" rx="2.5"/>
+              <rect class="sc-b3" x="19" y="37" width="18" height="8.5" rx="4.25"/>
+            </g>
+            <g class="g g-flat"><path class="sc-b3" d="M37 46.5c4-3.6 46-3.6 52.5 0Z"/></g>
+            <g class="g g-lie">
+              <circle class="sc-p" cx="30" cy="36.5" r="6"/>
+              <g class="breath"><path class="sc-blanket" d="M35.5 46.5c1.8-9.4 16.5-11.4 27-9.3 10.2 2 21 1.6 27.5 9.3Z"/></g>
+            </g>
+            <g class="g g-zzz"><text x="40" y="27">z</text><text x="46" y="19">z</text><text x="53" y="11">z</text></g>
+            <g class="g g-hand"><g class="wave"><path class="sc-limb" d="M38 39 42.5 22"/><circle class="sc-p" cx="43" cy="19.5" r="3.2"/></g></g>
+            <g class="g g-sit"><circle class="sc-p" cx="83" cy="21.5" r="6"/><path class="sc-limb" d="M84.6 30.5 86.3 44l12 1 .9 18"/><path class="sc-limb" d="m85.2 33.6 7.2 7.4"/></g>
+            <g class="g g-stand"><circle class="sc-p" cx="105" cy="19.5" r="6"/><path class="sc-limb" d="M105 28.5v18.5m0 0-4 21.5m4-21.5 4 21.5M105 31.5l-6 12m6-12 6 12"/></g>
+            <g class="g g-floor">
+              <ellipse class="sc-pool" cx="80" cy="71" rx="38" ry="9" fill="url(#glow)"/>
+              <circle class="sc-p" cx="104" cy="65" r="6"/><path class="sc-limb" d="M97 67.8 58 68.6M91 66.8l-4.2-8.3"/>
+            </g>
+            <g class="g g-care"><circle class="sc-c" cx="106" cy="19.5" r="6"/><path class="sc-climb" d="M106 28.5v18.5m0 0-4 21.5m4-21.5 4 21.5M106 31.5l-6 12m6-12 6 12"/></g>
+            <g class="g g-door"><path class="sc-door" d="M100 73V25h15v48"/><path class="sc-b2" d="M100 25 108.5 29v44H100Z"/><g class="steps"><ellipse cx="66" cy="76.5" rx="2.6" ry="1.4"/><ellipse cx="76" cy="78" rx="2.6" ry="1.4"/><ellipse cx="86" cy="76.5" rx="2.6" ry="1.4"/><ellipse cx="95" cy="78" rx="2.6" ry="1.4"/></g></g>
+            <g class="g g-pause"><circle class="sc-badge" cx="104" cy="19" r="11"/><path class="sc-bars" d="M100.8 14.5v9M107.2 14.5v9"/></g>
+            <g class="g g-cam">
+              <rect class="sc-b2" x="33" y="25" width="40" height="29" rx="7"/>
+              <path class="sc-b2" d="m73 34.5 14-7.5v25l-14-7.5Z"/>
+              <circle class="sc-lens" cx="53" cy="39.5" r="7.5"/>
+              <path class="sc-slash" d="M29 19l62 42"/>
+            </g>
+          </svg>
+          <div class="hero-sub num" id="statusSub"></div>
+          <div class="status-actions" id="statusActions" hidden>
+            <button class="btn sm" onclick="falseAlarmCurrent()">Ложная тревога</button>
+            <button class="btn sm solid" id="statusAck" onclick="ackAlarm()">Принято, иду</button>
           </div>
         </section>
 
         <section class="people" aria-label="Кто в комнате">
-          <button class="pcell" id="whoPatient" onclick="patientMenu(this)"><span class="avatar" id="avPatient">Б</span><span class="pcell-text"><b>Бабушка</b><span>—</span></span></button>
-          <button class="pcell vis" id="whoVisitors" onclick="visitorsMenu(this)"><span class="avatar" id="avVisitors"><svg class="ico"><use href="#i-users"/></svg></span><span class="pcell-text"><b>Свои</b><span>—</span></span></button>
+          <button class="pcell" id="whoPatient" onclick="patientMenu(this)"><span class="av-wrap"><span class="avatar" id="avPatient">Б</span><span class="av-badge" id="bdgPatient" hidden></span></span><span class="pcell-text"><b>Бабушка</b><span>—</span></span></button>
+          <button class="pcell vis" id="whoVisitors" onclick="visitorsMenu(this)"><span class="av-wrap"><span class="avatar" id="avVisitors"><svg class="ico"><use href="#i-users"/></svg></span><span class="av-badge" id="bdgVisitors" hidden></span></span><span class="pcell-text"><b>Свои</b><span>—</span></span></button>
         </section>
 
         <section class="closeup" id="closeup" aria-label="Бабушка крупно">
           <canvas id="closeupCanvas"></canvas>
-          <div class="closeup-empty" id="closeupEmpty">Бабушки не видно</div>
+          <div class="closeup-empty" id="closeupEmpty"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><path d="M20 86h120" stroke="#2C313B" stroke-width="2.5" stroke-linecap="round"/><rect x="30" y="40" width="9" height="46" rx="4.5" fill="#2A2F39"/><rect x="35" y="60" width="92" height="15" rx="5" fill="#2A2F39"/><rect x="35" y="56.5" width="92" height="8.5" rx="4.25" fill="#363C49"/><rect x="119" y="70" width="7" height="16" rx="3" fill="#2A2F39"/><rect x="40" y="48" width="21" height="10" rx="5" fill="#48505F"/><path d="M64 60c5-4.5 54-4.5 60 0Z" fill="#48505F"/><g class="tw"><circle cx="104" cy="27" r="15" fill="rgba(255,255,255,.04)" stroke="#48505F" stroke-width="2"/><path d="M99.5 23.5a4.6 4.6 0 1 1 6.2 4.3c-1.1.4-1.7 1.3-1.7 2.4v.8M104 35v.3" fill="none" stroke="#959CA9" stroke-width="2.4" stroke-linecap="round"/></g></svg><b>Бабушки не видно</b><span>Крупный план появится, как только она будет в кадре</span></div></div>
           <span class="closeup-label" id="closeupLabel">Крупно</span>
         </section>
 
@@ -472,15 +706,16 @@
 
   <div class="scrim" id="sheetScrim" hidden onclick="if(event.target===this)closeSheet()">
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="grab"></div>
       <div class="sheet-head">
         <h2 id="sheetTitle">Настройки</h2>
         <button class="icon-btn" onclick="closeSheet()" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
       </div>
       <nav class="tabs" role="tablist" id="tabs">
-        <button class="tab" role="tab" data-tab="recipients" onclick="showTab('recipients')">Кому сигналить</button>
-        <button class="tab" role="tab" data-tab="zones" onclick="showTab('zones')">Зоны и камера</button>
-        <button class="tab" role="tab" data-tab="people" onclick="showTab('people')">Бабушка и свои</button>
-        <button class="tab" role="tab" data-tab="care" onclick="showTab('care')">Чувствительность</button>
+        <button class="tab" role="tab" data-tab="recipients" onclick="showTab('recipients')"><svg class="ico"><use href="#i-bell"/></svg>Кому сигналить</button>
+        <button class="tab" role="tab" data-tab="zones" onclick="showTab('zones')"><svg class="ico"><use href="#i-bed"/></svg>Зоны и камера</button>
+        <button class="tab" role="tab" data-tab="people" onclick="showTab('people')"><svg class="ico"><use href="#i-users"/></svg>Бабушка и свои</button>
+        <button class="tab" role="tab" data-tab="care" onclick="showTab('care')"><svg class="ico"><use href="#i-sliders"/></svg>Чувствительность</button>
       </nav>
       <div class="sheet-body" id="sheetBody"></div>
     </div>
@@ -488,19 +723,34 @@
 
   <div class="scrim" id="clipScrim" hidden onclick="if(event.target===this)closeClip()">
     <div class="clip" role="dialog" aria-modal="true" aria-label="Запись события">
+      <div class="grab"></div>
       <div class="sheet-head">
+        <span class="ri" id="clipIco"></span>
         <h2 id="clipTitle" style="font-size:17px"></h2>
+        <div class="clip-nav">
+          <button class="icon-btn" id="clipOlder" onclick="stepClip(1)" aria-label="Предыдущая запись" title="Раньше (←)"><svg class="ico"><use href="#i-chev-l"/></svg></button>
+          <button class="icon-btn" id="clipNewer" onclick="stepClip(-1)" aria-label="Следующая запись" title="Позже (→)"><svg class="ico"><use href="#i-chev-r"/></svg></button>
+        </div>
         <button class="icon-btn" onclick="closeClip()" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
       </div>
       <div class="clip-media" id="clipMedia"></div>
       <div class="clip-foot">
         <div class="muted small num" id="clipMeta"></div>
         <div class="row" style="align-items:center">
-          <button class="btn" id="clipFalse" style="flex:0 1 auto" onclick="falseAlarmClip()">Это ложная тревога</button>
+          <button class="btn" id="clipFalse" style="flex:0 1 auto" onclick="falseAlarmClip()"><svg class="ico"><use href="#i-x-circle"/></svg>Это ложная тревога</button>
           <span style="flex:1"></span>
-          <button class="btn sm ghost red-text" style="flex:0 0 auto" onclick="deleteClip()">Удалить запись</button>
+          <button class="btn sm ghost red-text" style="flex:0 0 auto" onclick="deleteClip()"><svg class="ico"><use href="#i-trash"/></svg>Удалить запись</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="scrim" id="askScrim" hidden onclick="if(event.target===this)askDone(false)">
+    <div class="ask" role="alertdialog" aria-modal="true" aria-labelledby="askTitle">
+      <div class="ask-ico" id="askIco"></div>
+      <h3 id="askTitle"></h3>
+      <p id="askText"></p>
+      <div class="row"><button class="btn big" onclick="askDone(false)">Отмена</button><button class="btn big danger" id="askYes" onclick="askDone(true)">Удалить</button></div>
     </div>
   </div>
 
@@ -557,9 +807,13 @@
     const h = tg() && tg().HapticFeedback;
     try { if (h) (kind === "success" || kind === "error" || kind === "warning") ? h.notificationOccurred(kind) : h.impactOccurred("light"); } catch (_) {}
   }
-  function toast(msg) {
+  const ico = (id) => `<svg class="ico"><use href="#${id}"/></svg>`;
+  function toast(msg, kind) {
     const el = $("toast");
-    el.textContent = msg;
+    kind = kind || "ok";
+    el.dataset.kind = kind;
+    el.innerHTML = ico(kind === "error" ? "i-x-circle" : kind === "info" ? "i-info" : "i-check-circle") + `<span>${esc(msg)}</span>`;
+    el.classList.remove("on"); void el.offsetWidth;
     el.classList.add("on");
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.remove("on"), 2800);
@@ -580,10 +834,10 @@
       const r = await api(url, opts);
       let d = {};
       try { d = await r.json(); } catch (_) {}
-      if (!r.ok) { toast(d.detail || d.message || "Не получилось, попробуйте ещё раз"); haptic("error"); return null; }
+      if (!r.ok) { toast(d.detail || d.message || "Не получилось, попробуйте ещё раз", "error"); haptic("error"); return null; }
       if (okMsg) toast(okMsg);
       return d;
-    } catch (_) { toast("Нет связи с сервером"); return null; }
+    } catch (_) { toast("Нет связи с сервером", "error"); return null; }
   }
   const pad = (n) => String(n).padStart(2, "0");
   const clock = (ts) => { const d = new Date(ts * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
@@ -990,7 +1244,7 @@
     tws.onclose = () => { tws = null; clearTimeout(twsTimer); twsTimer = setTimeout(connectTelemetry, 1500); };
   }
   function camOnline() { return Boolean(S && (S.camera_connected || (S.camera && S.camera.connected))); }
-  const CALM_SUB = { idle: "Сигнал придёт, как только что-то случится", in_bed: "Лежит спокойно", caregiver: "Посадка и выход не сигналят, пока рядом свои" };
+  const CALM_SUB = { idle: "Сигнал придёт, как только что-то случится", in_bed: "Лежит спокойно", caregiver: "Пока свои рядом, подъём не тревожит" };
   function sinceText(state) {
     const tl = S && S.timeline, spans = (tl && tl.spans) || [];
     const last = spans[spans.length - 1];
@@ -999,6 +1253,22 @@
     if (sec < 60) return "только что";
     const m = Math.floor(sec / 60), h = Math.floor(m / 60);
     return h ? `${h} ч ${pad(m % 60)} мин` : `${m} мин`;
+  }
+  // Что нарисовать: кровать, поза бабушки, кто рядом. Ночью над спящей — «z z z»
+  function sceneShow(st, online, camIssue, src) {
+    if (!online || camIssue) return "cam";
+    const h = new Date().getHours(), night = Boolean(src.is_night_ir) || h >= 22 || h < 7;
+    switch (st) {
+      case "in_bed": return "bed lie" + (night ? " zzz" : "");
+      case "caregiver": return "bed lie care";
+      case "help_call": return "bed lie hand";
+      case "sitting_up": return "bed flat sit";
+      case "left_bed": return "bed flat stand";
+      case "missing": return "bed flat door";
+      case "fallen": return "bed flat floor";
+      case "paused": return "bed lie dim pause";
+      default: return src.patient_in_bed_latched ? "bed lie" : "bed flat";
+    }
   }
   function cap(t) { t = String(t || ""); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; }
   function renderFast() {
@@ -1019,12 +1289,24 @@
     $("status").dataset.tone = tone;
     $("statusEyebrow").textContent = eyebrow || EYEBROW[tone] || "";
     $("statusSince").textContent = online ? sinceText(st) : "";
-    $("statusTitle").textContent = title;
+    const tEl = $("statusTitle");
+    if (tEl.textContent !== title) {
+      tEl.textContent = title;
+      if (tEl._shown) { tEl.classList.remove("swap"); void tEl.offsetWidth; tEl.classList.add("swap"); }
+      tEl._shown = true;
+    }
+    const show = sceneShow(st, online, camIssue, src);
+    if ($("scene").dataset.show !== show) $("scene").dataset.show = show;
     $("statusSub").textContent = cap(sub);
     $("status").title = title + (sub ? " — " + cap(sub) : "");
     $("app").dataset.alarm = lvl === "alarm" ? "1" : "0";
     $("vpMsg").hidden = online;
-    $("vpMsgSub").textContent = cap(sub);
+    if (!online) {
+      const err = S.camera_configured === false || Boolean(S.camera_error);
+      $("vpMsg").dataset.err = err ? "1" : "0";
+      $("vpMsgTitle").textContent = err ? "Нет связи с камерой" : "Подключаемся к камере";
+      $("vpMsgSub").textContent = cap(sub);
+    }
     $("chipLight").hidden = !online;
     $("chipLight").textContent = clock(Date.now() / 1000) + (src.is_night_ir ? " · ночь" : "");
     $("chipVisit").hidden = !src.door_visit_active;
@@ -1039,16 +1321,19 @@
       $("vpAlarmTitle").textContent = title;
       $("vpAlarmSub").textContent = cap(sub);
       $("vpAlarmAck").textContent = lvl === "alarm" ? "Принято" : "Скрыть";
+      $("vpAlarmIco").setAttribute("href", "#" + (st === "fallen" ? "i-fall" : EV_ICON[st] || "i-alert"));
       banner._warnKey = warnKey;
     }
     $("statusActions").hidden = !showBanner;
-    $("statusAck").textContent = lvl === "alarm" ? "Принято" : "Скрыть";
+    $("status").classList.toggle("acting", Boolean(showBanner));
+    $("statusAck").textContent = lvl === "alarm" ? "Принято, иду" : "Скрыть";
     // Пауза — плитка внизу панели
     const paused = st === "paused";
     $("btnPause").setAttribute("aria-pressed", String(paused));
     $("pauseLabel").textContent = paused ? (src.pause_remaining_sec > 0 ? timer(src.pause_remaining_sec) : "Пауза") : "Пауза";
     // Статус в полноэкранном режиме
     $("chipStatusText").textContent = title;
+    $("nowDot").style.setProperty("--now", { calm: "var(--calm)", care: "var(--care)", warn: "var(--warn)", alarm: "var(--alarm)", offline: "var(--faint)" }[tone] || "var(--calm)");
     $("chipStatus").querySelector("i").style.background = { calm: "var(--calm)", care: "var(--care)", warn: "var(--warn)", alarm: "var(--alarm)", offline: "var(--faint)" }[tone] || "var(--calm)";
     renderInFrame(src);
     document.title = (lvl === "alarm" ? "🚨 " : "") + title + " — FallGuard";
@@ -1057,6 +1342,20 @@
   /* ---------- В кадре: две неизменные строки ---------- */
   const PATIENT_TEXT = { in_bed: "в кровати", sitting_up: "садится", help_call: "зовёт рукой", left_bed: "встала, ходит", missing: "ушла из кадра", fallen: "на полу!" };
   function realTracks(src) { return (src.tracks || []).filter((t) => t && Number(t.track_id) >= 0 && !t.virtual_presence && Array.isArray(t.bbox)); }
+  // Появился человек — кольцо аватара коротко «пульсирует»
+  function setOn(row, on) {
+    const v = on ? "1" : "0";
+    if (row.dataset.on === v) return;
+    const wasKnown = row.dataset.on !== undefined;
+    row.dataset.on = v;
+    if (on && wasKnown) { const w = row.querySelector(".av-wrap"); w.classList.remove("ping"); void w.offsetWidth; w.classList.add("ping"); setTimeout(() => w.classList.remove("ping"), 950); }
+  }
+  function setBadge(el, html) {
+    if (el._h === html) return;
+    el._h = html;
+    el.hidden = !html;
+    el.innerHTML = html;
+  }
   function setAvatar(el, url, fallbackHtml) {
     const key = url || fallbackHtml;
     if (el._k === key) return;
@@ -1070,19 +1369,22 @@
     let pText = PATIENT_TEXT[st] || "";
     if (!pText) pText = pat ? (src.patient_in_bed_latched ? "в кровати" : "в кадре") : (src.patient_in_bed_latched ? "в кровати, под одеялом" : "не видно");
     const pRow = $("whoPatient");
-    pRow.dataset.on = pat || src.patient_in_bed_latched ? "1" : "0";
+    setOn(pRow, pat || src.patient_in_bed_latched);
     pRow.dataset.tone = $("status").dataset.tone || "calm";
     const pSpan = pRow.querySelector(".pcell-text span");
     if (pSpan.textContent !== pText) pSpan.textContent = pText;
     const faces = (S && S.faces) || {};
     setAvatar($("avPatient"), faces.patient && faces.patient[0] ? withAuth("/api/faces/patient/photo/" + encodeURIComponent(faces.patient[0])) : "", "Б");
+    const poseIco = { in_bed: "i-bed", sitting_up: "i-sit", left_bed: "i-walk", fallen: "i-fall", help_call: "i-hand", missing: "i-door-out", caregiver: src.patient_in_bed_latched ? "i-bed" : "" }[st] || (src.patient_in_bed_latched ? "i-bed" : "");
+    setBadge($("bdgPatient"), poseIco ? ico(poseIco) : "");
 
     const nVis = tracks.filter((t) => t.role === "visitor").length;
     const nUnk = realTracks(src).filter((t) => t.role !== "patient" && t.role !== "visitor").length;
-    let vText = nVis === 0 ? (src.door_visit_active ? "в комнате, не видно" : "никого") : nVis === 1 ? "один рядом" : nVis + " рядом";
+    let vText = nVis === 0 ? (src.door_visit_active ? "в комнате, за кадром" : "никого") : nVis === 1 ? "один рядом" : nVis + " рядом";
     if (nUnk) vText += ` · ${nUnk} не опознан`;
     const vRow = $("whoVisitors");
-    vRow.dataset.on = nVis || src.door_visit_active ? "1" : "0";
+    setOn(vRow, nVis || src.door_visit_active);
+    setBadge($("bdgVisitors"), nVis > 1 ? String(nVis) : "");
     const vSpan = vRow.querySelector(".pcell-text span");
     if (vSpan.textContent !== vText) vSpan.textContent = vText;
     setAvatar($("avVisitors"), faces.visitor && faces.visitor[0] ? withAuth("/api/faces/visitor/photo/" + encodeURIComponent(faces.visitor[0])) : "", '<svg class="ico"><use href="#i-users"/></svg>');
@@ -1091,8 +1393,9 @@
   /* ---------- Меню действий (поверх, ничего не сдвигает) ---------- */
   function showMenu(x, y, title, items) {
     const m = $("menu");
-    m.innerHTML = (title ? `<div class="menu-title">${esc(title)}</div>` : "") + items.map((it, i) => `<button data-i="${i}" class="${it.cls || ""}" ${it.disabled ? "disabled" : ""}>${esc(it.label)}</button>`).join("");
+    m.innerHTML = (title ? `<div class="menu-title">${esc(title)}</div>` : "") + items.map((it, i) => `<button data-i="${i}" class="${it.cls || ""}" ${it.disabled ? "disabled" : ""}>${it.icon ? ico(it.icon) : ""}<span>${esc(it.label)}</span></button>`).join("");
     m._items = items;
+    m.style.transformOrigin = "0 0";
     m.hidden = false;
     const w = m.offsetWidth, h = m.offsetHeight;
     m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x)) + "px";
@@ -1110,25 +1413,27 @@
   function trackMenuItems(t) {
     const id = Number(t.track_id);
     return [
-      { label: "Это бабушка", cls: t.role === "patient" ? "on" : "", fn: () => assign(id, "patient") },
-      { label: "Это свой (родственник, сиделка)", cls: t.role === "visitor" ? "on" : "", fn: () => assign(id, "visitor") },
-      { label: "Это вещь, не человек", fn: () => ignoreThing(id) },
+      { label: "Это бабушка", icon: "i-user", cls: t.role === "patient" ? "on" : "", fn: () => assign(id, "patient") },
+      { label: "Это свой (родственник, сиделка)", icon: "i-users", cls: t.role === "visitor" ? "on" : "", fn: () => assign(id, "visitor") },
+      { label: "Это вещь, не человек", icon: "i-box", fn: () => ignoreThing(id) },
     ];
   }
   function patientMenu(el) {
     const src = live || S || {};
     const pat = realTracks(src).find((t) => t.role === "patient");
     const items = [];
-    if (pat) items.push({ label: "Это не бабушка, а свой", fn: () => assign(Number(pat.track_id), "visitor") }, { label: "Это вещь, не человек", fn: () => ignoreThing(Number(pat.track_id)) });
-    if (src.patient_in_bed_latched) items.push({ label: "Её нет в кровати", fn: () => act("/api/bed_presence/clear", "Отмечено: в кровати никого нет") });
-    if (!items.length) items.push({ label: "Нажмите на человека на видео, чтобы указать, кто это", disabled: true });
+    if (pat) items.push({ label: "Это не бабушка, а свой", icon: "i-users", fn: () => assign(Number(pat.track_id), "visitor") }, { label: "Это вещь, не человек", icon: "i-box", fn: () => ignoreThing(Number(pat.track_id)) });
+    if (src.patient_in_bed_latched) items.push({ label: "Её нет в кровати", icon: "i-bed", fn: () => act("/api/bed_presence/clear", "Отмечено: в кровати никого нет") });
+    items.push({ label: "Фото бабушки", icon: "i-camera", fn: () => openSheet("people") });
+    if (!pat) items.push({ label: "Нажмите на человека на видео, чтобы указать, кто это", icon: "i-info", disabled: true });
     const [x, y] = menuAt(el); showMenu(x, y, "Бабушка", items);
   }
   function visitorsMenu(el) {
     const src = live || S || {};
     const items = [];
-    if (src.door_visit_active) items.push({ label: "Родственник вышел из комнаты", fn: () => act("/api/door_visit/clear", "Отмечено: родственник вышел") });
-    items.push({ label: "Нажмите на человека на видео, чтобы указать, кто это", disabled: true });
+    if (src.door_visit_active) items.push({ label: "Родственник вышел из комнаты", icon: "i-door-out", fn: () => act("/api/door_visit/clear", "Отмечено: родственник вышел") });
+    items.push({ label: "Фото своих", icon: "i-camera", fn: () => openSheet("people") });
+    items.push({ label: "Нажмите на человека на видео, чтобы указать, кто это", icon: "i-info", disabled: true });
     const [x, y] = menuAt(el); showMenu(x, y, "Свои", items);
   }
   function trackAt(e) {
@@ -1224,10 +1529,10 @@
     const r = el.getBoundingClientRect();
     const x = r.left + r.width / 2 - 114, y = r.top - 8;
     const items = src.state === "paused"
-      ? [{ label: "Включить охрану сейчас", fn: () => resumeGuard() }, { label: "Продлить на 15 минут", fn: () => pauseGuard(900) }]
-      : [{ label: "Пауза на 15 минут", fn: () => pauseGuard(900) }, { label: "Пауза на 1 час", fn: () => pauseGuard(3600) }];
+      ? [{ label: "Включить охрану сейчас", icon: "i-power", cls: "on", fn: () => resumeGuard() }, { label: "Продлить на 15 минут", icon: "i-timer", fn: () => pauseGuard(900) }]
+      : [{ label: "Пауза на 15 минут", icon: "i-timer", fn: () => pauseGuard(900) }, { label: "Пауза на 1 час", icon: "i-clock", fn: () => pauseGuard(3600) }];
     showMenu(x, y, "Падение ловится и на паузе, если рядом никого", items);
-    const m = $("menu"); m.style.top = Math.max(8, r.top - m.offsetHeight - 8) + "px";
+    const m = $("menu"); m.style.top = Math.max(8, r.top - m.offsetHeight - 8) + "px"; m.style.transformOrigin = "50% 100%";
   }
 
   /* ---------- Увеличение: кровать крупно, колесо, щипок, двойной щелчок ---------- */
@@ -1309,11 +1614,16 @@
   viewport.addEventListener("pointercancel", endPointer);
   document.addEventListener("keydown", (e) => {
     if (e.target.closest && e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (!$("sheetScrim").hidden || !$("clipScrim").hidden) return;
+    if (isOpen($("askScrim"))) { if (e.key === "Enter") askDone(true); return; }
+    if (isOpen($("clipScrim"))) { if (e.key === "ArrowLeft") stepClip(1); else if (e.key === "ArrowRight") stepClip(-1); return; }
+    if (isOpen($("sheetScrim"))) return;
     const k = e.key.toLowerCase();
     if (k === "f" || k === "а") toggleFullscreen();
     else if (k === "z" || k === "я") toggleBedZoom();
     else if (k === "j" || k === "о") openJournal();
+    else if (k === "s" || k === "ы") openSheet();
+    else if (k === "p" || k === "з") pauseMenu($("btnPause"));
+    else if ((k === "m" || k === "ь") && !native) toggleSound();
   });
 
   /* ---------- Охрана ---------- */
@@ -1336,9 +1646,10 @@
   /* ---------- Мой режим: только падение и сползание ---------- */
   function renderMode() {
     const on = me.mode === "falls";
-    for (const b of $("modeSeg").children) b.setAttribute("aria-pressed", String((b.dataset.v === "falls") === on));
+    for (const b of $("modeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String((b.dataset.v === "falls") === on));
     $("modeWho").textContent = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
     $("modeHint").textContent = on ? "Посадка и выход — без сигнала, только в журнал" : "Сигнал при посадке, выходе из кровати и падении";
+    syncPills($("modeSeg").parentNode);
   }
   async function setMyMode(next) {
     if (next === me.mode) return;
@@ -1359,7 +1670,8 @@
   let thumbs = [];
   function setWindow(sec) {
     windowSec = sec; lsSet("fg_win", String(sec));
-    [...$("winSeg").children].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (sec === 21600))));
+    [...$("winSeg").querySelectorAll("button")].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (sec === 21600))));
+    syncPills($("winSeg").parentNode);
     poll();
   }
   function renderTimeline(tl) {
@@ -1490,8 +1802,15 @@
   }
 
   /* ---------- Журнал ---------- */
+  // Значок события: что случилось — видно ещё до чтения
+  const EV_ICON = { fallen: "i-fall", sitting_up: "i-sit", left_bed: "i-walk", help_call: "i-hand", missing: "i-door-out", prolonged_absence: "i-clock", immobile: "i-turn", immobility: "i-turn" };
+  function evIcon(c) {
+    const tone = c.false_alarm ? "muted" : c.state === "fallen" ? "alarm" : "";
+    return `<span class="ev-ico ${tone}">${ico(EV_ICON[c.state] || "i-alert")}</span>`;
+  }
   function clipItem(c) {
-    const thumb = c.jpg_url ? `<img class="thumb" loading="lazy" alt="" src="${esc(withAuth(c.jpg_url))}" />` : `<span class="thumb-ph"></span>`;
+    const img = c.jpg_url ? `<img class="thumb" loading="lazy" alt="" src="${esc(withAuth(c.jpg_url))}" />` : `<span class="thumb-ph"></span>`;
+    const thumb = `<span class="thumb-wrap">${img}${evIcon(c)}</span>`;
     const badge = c.false_alarm ? `<span class="badge">ложная</span>` : "";
     const fall = c.state === "fallen" && !c.false_alarm;
     return `<button class="item" onclick="openClip('${esc(c.id)}')">${thumb}<span class="item-body"><span class="item-title${fall ? " fall" : ""}">${esc(c.title || c.state)}</span><span class="item-sub num">${esc((c.time || clock(c.ts)).slice(0, 5))} · ${ago(c.ts)}</span></span>${badge}</button>`;
@@ -1508,17 +1827,17 @@
     const st = S.clips_stats || {};
     let body = "";
     if (journalView === "alerts") {
-      if (!clips.length) body = `<div class="empty">Тревог пока не было</div>`;
+      if (!clips.length) body = emptyArt("shield", "Тревог пока не было", "Здесь появятся записи падений, подъёмов и других событий — с видео");
       else {
         let last = "";
         body = `<div class="list">` + clips.map((c) => { const dl = dayLabel(c.ts); const h = dl !== last ? `<div class="day">${dl}</div>` : ""; last = dl; return h + clipItem(c); }).join("") + `</div>`;
       }
       body = `<div class="group">${body}</div><div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div>
-        <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ. Старые удаляются автоматически.</p><button class="btn red-text" onclick="clearArchive()">Очистить архив</button></div>`;
+        <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ. Старые удаляются автоматически.</p><button class="btn red-text" onclick="clearArchive()">${ico("i-trash")}Очистить архив</button></div>`;
     } else {
       const evs = (S.events || []).filter((e) => logFilter === "all" || e.category === logFilter);
       body = `<div class="group"><div style="margin-bottom:12px" class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div>`
-        + (evs.length ? `<div class="rows">` + evs.slice(0, 150).map((e) => `<div class="logrow ${esc(e.level)}"><time class="num" title="${esc(e.date)}">${esc((e.time || "").slice(0, 5))}</time><span style="flex:1;min-width:0">${esc(e.text)}</span>${e.clip_id && clips.some((c) => c.id === e.clip_id) ? `<button class="btn sm ghost" onclick="openClip('${esc(e.clip_id)}')">Запись</button>` : ""}</div>`).join("") + `</div>` : `<div class="empty">Записей нет</div>`) + `</div>`;
+        + (evs.length ? `<div class="rows">` + evs.slice(0, 150).map((e) => `<div class="logrow ${esc(e.level)}"><time class="num" title="${esc(e.date)}">${esc((e.time || "").slice(0, 5))}</time><span style="flex:1;min-width:0">${esc(e.text)}</span>${e.clip_id && clips.some((c) => c.id === e.clip_id) ? `<button class="btn sm ghost" onclick="openClip('${esc(e.clip_id)}')">Запись</button>` : ""}</div>`).join("") + `</div>` : emptyArt("shield", "Записей нет", "")) + `</div>`;
     }
     return `<div>${seg}</div>` + body;
   }
@@ -1532,18 +1851,139 @@
       ? `<video controls autoplay loop muted playsinline poster="${esc(withAuth(c.jpg_url || ""))}" src="${esc(withAuth(c.mp4_url))}"></video>`
       : c.jpg_url ? `<img alt="Кадр события" src="${esc(withAuth(c.jpg_url))}" />` : `<div class="empty">Нет изображения</div>`;
     $("clipFalse").disabled = Boolean(c.false_alarm);
-    $("clipScrim").hidden = false;
+    $("clipIco").className = "ri " + (c.false_alarm ? "" : c.state === "fallen" ? "alarm" : "warn");
+    $("clipIco").innerHTML = ico(EV_ICON[c.state] || "i-alert");
+    const idx = clips.findIndex((x) => x.id === id);
+    $("clipOlder").disabled = idx < 0 || idx >= clips.length - 1;
+    $("clipNewer").disabled = idx <= 0;
+    showLayer($("clipScrim"));
     syncBack();
   }
-  function closeClip() { $("clipScrim").hidden = true; $("clipMedia").innerHTML = ""; openClipId = null; syncBack(); }
+  function stepClip(dir) {
+    const idx = clips.findIndex((x) => x.id === openClipId), next = clips[idx + dir];
+    if (idx >= 0 && next) openClip(next.id);
+  }
+  function closeClip(now) {
+    openClipId = null;
+    const clear = () => { $("clipMedia").innerHTML = ""; };
+    if (now === true) clear(); else hideLayer($("clipScrim"), clear);
+  }
   async function falseAlarmClip() { if (openClipId && await reportFalse(openClipId)) closeClip(); }
   async function deleteClip() {
-    if (!openClipId || !confirm("Удалить эту запись из архива?")) return;
+    if (!openClipId || !(await ask("Удалить запись?", "Видео этой тревоги будет удалено из архива."))) return;
     if (await call("/api/clips/" + encodeURIComponent(openClipId), { method: "DELETE" }, "Запись удалена")) { closeClip(); poll(); }
   }
   async function clearArchive() {
-    if (!confirm("Удалить все записи тревог из архива?")) return;
+    if (!(await ask("Очистить архив?", "Все записи тревог будут удалены. Журнал событий останется.", "Очистить"))) return;
     if (await call("/api/clips", { method: "DELETE" }, "Архив очищен")) poll();
+  }
+
+  /* ---------- Рисунки для пустых состояний ---------- */
+  const ART = {
+    shield: `<svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="52" r="44" fill="rgba(91,224,161,.06)"/><circle cx="80" cy="52" r="31" fill="rgba(91,224,161,.07)"/><path d="M80 19 57 28v17c0 15.5 9.7 29 23 34 13.3-5 23-18.5 23-34V28Z" fill="#12261C" stroke="#5BE0A1" stroke-width="3" stroke-linejoin="round"/><path d="m69.5 49 7.5 7.5 14.5-15" fill="none" stroke="#5BE0A1" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><g class="tw" stroke="#5BE0A1" stroke-width="2.2" stroke-linecap="round"><path d="M123 20v10M118 25h10"/><path d="M35 64v8M31 68h8"/><path d="M128 69v6M125 72h6"/></g></svg>`,
+    phone: `<svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="50" r="42" fill="rgba(126,168,255,.07)"/><rect x="62" y="14" width="36" height="70" rx="8" fill="#1F232A" stroke="#7EA8FF" stroke-width="3"/><path d="M75 76h10" stroke="#7EA8FF" stroke-width="3" stroke-linecap="round"/><g class="bell"><path d="M80 33a9 9 0 0 1 9 9v7l3 4H68l3-4v-7a9 9 0 0 1 9-9Z" fill="#7EA8FF"/><path d="M76.8 56.5a3.2 3.2 0 0 0 6.4 0" stroke="#7EA8FF" stroke-width="2.5" fill="none" stroke-linecap="round"/></g><g class="tw" stroke="#7EA8FF" stroke-width="2.4" stroke-linecap="round" fill="none"><path d="M108 33a15 15 0 0 1 0 19"/><path d="M52 33a15 15 0 0 0 0 19"/></g></svg>`,
+    room: `<svg class="art" viewBox="0 0 160 100" aria-hidden="true"><path d="M20 86h120" stroke="#2C313B" stroke-width="2.5" stroke-linecap="round"/><rect x="30" y="40" width="9" height="46" rx="4.5" fill="#2A2F39"/><rect x="35" y="60" width="92" height="15" rx="5" fill="#2A2F39"/><rect x="35" y="56.5" width="92" height="8.5" rx="4.25" fill="#363C49"/><rect x="119" y="70" width="7" height="16" rx="3" fill="#2A2F39"/><rect x="40" y="48" width="21" height="10" rx="5" fill="#48505F"/><path d="M64 60c5-4.5 54-4.5 60 0Z" fill="#48505F"/><g class="tw"><circle cx="104" cy="27" r="15" fill="rgba(255,255,255,.04)" stroke="#48505F" stroke-width="2"/><path d="M99.5 23.5a4.6 4.6 0 1 1 6.2 4.3c-1.1.4-1.7 1.3-1.7 2.4v.8M104 35v.3" fill="none" stroke="#959CA9" stroke-width="2.4" stroke-linecap="round"/></g></svg>`,
+  };
+  const emptyArt = (kind, title, text) => `<div class="empty-art">${ART[kind] || ""}<b>${esc(title)}</b>${text ? `<span>${esc(text)}</span>` : ""}</div>`;
+  const ri = (icon, tone) => `<span class="ri ${tone || ""}">${ico(icon)}</span>`;
+  const initial = (name) => esc((String(name || "?").trim()[0] || "?").toUpperCase());
+
+  /* ---------- Слои: плавно открываются и закрываются ---------- */
+  const isOpen = (el) => !el.hidden && !el.classList.contains("closing");
+  function showLayer(el) {
+    clearTimeout(el._t);
+    const panel = el.firstElementChild;
+    if (panel) panel.style.transform = "";
+    el.classList.remove("closing");
+    if (el.hidden) { el.hidden = false; el.classList.add("opening"); el._t = setTimeout(() => el.classList.remove("opening"), 420); }
+  }
+  function hideLayer(el, after) {
+    if (el.hidden || el.classList.contains("closing")) return;
+    clearTimeout(el._t);
+    el.classList.remove("opening");
+    el.classList.add("closing");
+    el._t = setTimeout(() => {
+      el.hidden = true; el.classList.remove("closing");
+      const panel = el.firstElementChild; if (panel) { panel.style.transform = ""; panel.style.transition = ""; }
+      if (after) after();
+      syncBack();
+    }, 210);
+  }
+  // На телефоне лист можно смахнуть вниз за шапку
+  function swipeToClose(scrim, close) {
+    const panel = scrim.firstElementChild, head = panel.querySelector(".sheet-head");
+    let y0 = 0, dy = 0, t0 = 0, active = false;
+    head.addEventListener("pointerdown", (e) => {
+      if (window.innerWidth >= 760 || e.pointerType === "mouse" || e.target.closest("button")) return;
+      active = true; y0 = e.clientY; dy = 0; t0 = Date.now();
+      head.setPointerCapture(e.pointerId);
+      panel.style.transition = "none";
+    });
+    head.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      dy = Math.max(0, e.clientY - y0);
+      panel.style.transform = `translateY(${dy}px)`;
+    });
+    const end = () => {
+      if (!active) return;
+      active = false;
+      const fast = dy > 40 && dy / Math.max(1, Date.now() - t0) > 0.6;
+      panel.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      if (dy > 120 || fast) {
+        panel.style.transform = "translateY(100%)";
+        scrim.classList.add("closing");
+        setTimeout(() => { scrim.classList.remove("closing"); scrim.hidden = true; panel.style.transform = ""; panel.style.transition = ""; close(true); syncBack(); }, 230);
+      } else panel.style.transform = "";
+    };
+    head.addEventListener("pointerup", end);
+    head.addEventListener("pointercancel", end);
+  }
+
+  swipeToClose($("sheetScrim"), closeSheet);
+  swipeToClose($("clipScrim"), closeClip);
+
+  /* ---------- Скользящий бегунок в переключателях ---------- */
+  const pillMem = new Map();
+  function syncPills(root, prefix) {
+    (root || document).querySelectorAll(".seg, .tabs").forEach((box, i) => {
+      if (!box.offsetParent) return;
+      const on = box.querySelector(':scope > button[aria-pressed="true"], :scope > button[aria-selected="true"]');
+      let pill = box.querySelector(":scope > .pill");
+      if (!on) { if (pill) pill.style.opacity = "0"; return; }
+      const key = box.id || (prefix || "") + i;
+      const x = on.offsetLeft, w = on.offsetWidth;
+      if (!pill) {
+        pill = document.createElement("span"); pill.className = "pill";
+        box.prepend(pill); box.classList.add("has-pill");
+        const prev = pillMem.get(key);
+        pill.style.transition = "none";
+        pill.style.transform = `translateX(${prev ? prev[0] : x}px)`; pill.style.width = (prev ? prev[1] : w) + "px";
+        void pill.offsetWidth; pill.style.transition = "";
+      }
+      pill.style.opacity = "";
+      pill.dataset.v = on.dataset.v || "";
+      pill.style.transform = `translateX(${x}px)`; pill.style.width = w + "px";
+      pillMem.set(key, [x, w]);
+    });
+  }
+  window.addEventListener("resize", () => syncPills());
+
+  /* ---------- Подтверждение ---------- */
+  let askResolve = null;
+  function ask(title, text, yes, icon) {
+    $("askTitle").textContent = title;
+    $("askText").textContent = text || "";
+    $("askText").hidden = !text;
+    $("askYes").textContent = yes || "Удалить";
+    $("askIco").innerHTML = ico(icon || "i-trash");
+    showLayer($("askScrim"));
+    if (matchMedia("(pointer: fine)").matches) setTimeout(() => $("askYes").focus({ focusVisible: false }), 50);
+    return new Promise((res) => { askResolve = res; });
+  }
+  function askDone(ok) {
+    const r = askResolve; askResolve = null;
+    hideLayer($("askScrim"));
+    if (r) r(Boolean(ok));
   }
 
   /* ---------- Настройки ---------- */
@@ -1551,23 +1991,29 @@
     sheetMode = "settings";
     $("sheetTitle").textContent = "Настройки";
     $("tabs").hidden = false;
-    $("sheetScrim").hidden = false; hideMenu();
+    showLayer($("sheetScrim")); hideMenu();
     showTab(tab || activeTab); syncBack();
   }
   function openJournal() {
     sheetMode = "journal";
     $("sheetTitle").textContent = "Журнал";
     $("tabs").hidden = true;
-    $("sheetScrim").hidden = false; hideMenu();
-    $("sheetBody")._h = null; renderSheet(); $("sheetBody").scrollTop = 0; syncBack();
+    showLayer($("sheetScrim")); hideMenu();
+    $("sheetBody")._h = null; fadeBody(); renderSheet(); $("sheetBody").scrollTop = 0; syncBack();
   }
-  function closeSheet() { $("sheetScrim").hidden = true; clearInterval(pairTimer); pairInfo = null; syncBack(); }
+  function closeSheet(now) {
+    clearInterval(pairTimer); pairInfo = null;
+    if (now !== true) hideLayer($("sheetScrim"));
+  }
+  function fadeBody() { const b = $("sheetBody"); b.classList.remove("fade"); void b.offsetWidth; b.classList.add("fade"); clearTimeout(b._f); b._f = setTimeout(() => b.classList.remove("fade"), 600); }
   function showTab(tab) {
     if (tab === "journal") return openJournal();
     activeTab = tab;
-    for (const b of $("tabs").children) { const on = b.dataset.tab === tab; b.setAttribute("aria-selected", String(on)); if (on) b.scrollIntoView({ inline: "center", block: "nearest" }); }
+    for (const b of $("tabs").querySelectorAll(".tab")) { const on = b.dataset.tab === tab; b.setAttribute("aria-selected", String(on)); if (on) b.scrollIntoView({ inline: "center", block: "nearest" }); }
     $("sheetBody")._h = null;
+    fadeBody();
     renderSheet();
+    syncPills($("tabs").parentNode);
     $("sheetBody").scrollTop = 0;
   }
   const sw = (on, onclick, label) => `<button class="switch" role="switch" aria-checked="${on ? "true" : "false"}" aria-label="${esc(label)}" onclick="${onclick}"></button>`;
@@ -1577,33 +2023,33 @@
     const subs = S.telegram_subscribers || [], devs = S.devices || [];
     const bot = S.telegram_bot_username || "";
     let h = `<div class="group"><h3>Telegram</h3><p>Каждый получатель сам выбирает, что ему присылать. То же можно переключить кнопкой в боте.</p>`;
-    if (!S.telegram_configured) h += `<div class="empty">Бот не настроен: укажите TG_BOT_TOKEN в файле .env</div>`;
-    else if (!subs.length) h += `<div class="empty">Пока никто не подключён. Откройте бота и нажмите «Старт».</div>`;
+    if (!S.telegram_configured) h += `<div class="rows"><div class="rowi">${ri("i-send", "tg")}<div class="rowi-body"><div class="rowi-title">Бот не настроен</div><div class="rowi-sub">Укажите TG_BOT_TOKEN в файле .env</div></div></div></div>`;
+    else if (!subs.length) h += emptyArt("phone", "Пока никто не подключён", "Откройте бота и нажмите «Старт» — тревоги начнут приходить в Telegram");
     else h += `<div class="rows">` + subs.map((s) => {
       const cid = esc(s.chat_id), mine = me.kind === "telegram" && me.id === String(s.chat_id);
-      return `<div class="rowi" style="flex-wrap:wrap"><div class="rowi-body"><div class="rowi-title">${esc(s.name)}${mine ? ' <span class="badge calm">это вы</span>' : ""}</div><div class="rowi-sub">${s.enabled ? "уведомления включены" : "уведомления выключены"}${s.username ? " · @" + esc(s.username) : ""}</div></div>
-        <div class="rowi-actions">${modeSeg(s.mode, `(m=>setSubMode('${cid}',m))`)}${sw(s.enabled, `toggleSub('${cid}')`, "Уведомления")}${s.removable ? `<button class="btn sm ghost red-text" onclick="removeSub('${cid}')" aria-label="Удалить">✕</button>` : ""}</div></div>`;
+      return `<div class="rowi">${`<span class="ri tg">${initial(s.name)}</span>`}<div class="rowi-body"><div class="rowi-title">${esc(s.name)}${mine ? ' <span class="badge calm">это вы</span>' : ""}</div><div class="rowi-sub">${s.enabled ? "уведомления включены" : "уведомления выключены"}${s.username ? " · @" + esc(s.username) : ""}</div></div>
+        <div class="rowi-actions">${modeSeg(s.mode, `(m=>setSubMode('${cid}',m))`)}${sw(s.enabled, `toggleSub('${cid}')`, "Уведомления")}${s.removable ? `<button class="btn sm ghost red-text icon-only" onclick="removeSub('${cid}')" aria-label="Удалить" title="Отключить чат">${ico("i-trash")}</button>` : ""}</div></div>`;
     }).join("") + `</div>`;
-    if (S.telegram_configured) h += `<div class="row" style="margin-top:10px"><a class="btn" href="${esc(S.telegram_bot_url || "https://t.me/" + bot)}" target="_blank" rel="noopener">Открыть @${esc(bot)}</a><button class="btn" onclick="testTelegram()">Проверочный кадр всем</button></div>`;
+    if (S.telegram_configured) h += `<div class="row" style="margin-top:10px"><a class="btn" href="${esc(S.telegram_bot_url || "https://t.me/" + bot)}" target="_blank" rel="noopener">${ico("i-send")}Открыть @${esc(bot)}</a><button class="btn" onclick="testTelegram()">${ico("i-camera")}Проверочный кадр всем</button></div>`;
     h += `</div><div class="group"><h3>Телефоны с приложением</h3><p>Приложение FallGuard для Android поднимает громкую тревогу на весь экран, даже в беззвучном режиме.</p>`;
     if (devs.length) h += `<div class="rows">` + devs.map((d) => {
-      const id = esc(d.id), mine = me.kind === "device" && me.id === d.id;
-      return `<div class="rowi" style="flex-wrap:wrap"><div class="rowi-body"><div class="rowi-title">${esc(d.name)}${mine ? ' <span class="badge calm">этот телефон</span>' : ""}</div><div class="rowi-sub">${d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь"}</div></div>
-        <div class="rowi-actions">${modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`)}${sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги")}<button class="btn sm ghost red-text" onclick="removeDevice('${id}')" aria-label="Отвязать">✕</button></div></div>`;
+      const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && Date.now() / 1000 - d.last_seen < 600;
+      return `<div class="rowi">${ri("i-phone", fresh ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">${esc(d.name)}${mine ? ' <span class="badge calm">этот телефон</span>' : ""}</div><div class="rowi-sub">${d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь"}</div></div>
+        <div class="rowi-actions">${modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`)}${sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги")}<button class="btn sm ghost red-text icon-only" onclick="removeDevice('${id}')" aria-label="Отвязать" title="Отвязать телефон">${ico("i-trash")}</button></div></div>`;
     }).join("") + `</div>`;
     if (pairInfo) {
       h += `<div class="pair"><div class="qr">${pairInfo.qr_svg}</div><div><div class="muted small">Код привязки</div><code class="num">${esc(pairInfo.code)}</code></div>
-        <div class="small muted">В приложении нажмите «Сканировать QR» или введите адрес <b style="color:var(--text)">${esc(pairInfo.server_url)}</b> и этот код.<br>Код действует ещё <span class="num" id="pairLeft"></span>.</div></div>`;
-    } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">Подключить телефон</button>`;
-    if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">Настройки приложения на этом телефоне</button>`;
+        <div class="small muted">Наведите камеру телефона на QR-код или введите в приложении адрес <b style="color:var(--text)">${esc(pairInfo.server_url)}</b> и этот код.<br>Код действует ещё <span class="num" id="pairLeft"></span>.</div></div>`;
+    } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">${ico("i-phone-plus")}Подключить телефон</button>`;
+    if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">${ico("i-gear")}Настройки приложения на этом телефоне</button>`;
     return h + `</div>`;
   }
   async function setSubMode(cid, mode) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/mode", { json: { mode } })) await refreshMe(); }
   async function toggleSub(cid) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/toggle", { method: "POST" })) poll(); }
-  async function removeSub(cid) { if (confirm("Отключить этот чат от тревог?") && await call("/api/subscribers/" + encodeURIComponent(cid), { method: "DELETE" }, "Чат отключён")) poll(); }
+  async function removeSub(cid) { if (await ask("Отключить чат?", "Тревоги в этот чат Telegram приходить перестанут.", "Отключить") && await call("/api/subscribers/" + encodeURIComponent(cid), { method: "DELETE" }, "Чат отключён")) poll(); }
   async function testTelegram() { const d = await call("/api/test-telegram", { method: "POST" }); if (d) toast(d.message || "Отправлено"); }
   async function patchDevice(id, patch) { if (await call("/api/devices/" + encodeURIComponent(id), { json: patch })) await refreshMe(); }
-  async function removeDevice(id) { if (confirm("Отвязать этот телефон? Тревоги на него приходить перестанут.") && await call("/api/devices/" + encodeURIComponent(id), { method: "DELETE" }, "Телефон отвязан")) poll(); }
+  async function removeDevice(id) { if (await ask("Отвязать телефон?", "Тревоги на него приходить перестанут. Подключить снова можно по QR-коду.", "Отвязать", "i-phone") && await call("/api/devices/" + encodeURIComponent(id), { method: "DELETE" }, "Телефон отвязан")) poll(); }
   async function pairPhone() {
     const d = await call("/api/devices/pair-code", { method: "POST" });
     if (!d) return;
@@ -1619,15 +2065,15 @@
 
   function tabZones() {
     const z = zones, has = (p, n) => Array.isArray(p) && p.length >= n;
-    const zrow = (mode, title, sub, ok, clearPayload) => `<div class="rowi"><div class="rowi-body"><div class="rowi-title">${title} ${ok ? '<span class="badge calm">задана</span>' : '<span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
+    const zrow = (mode, icon, title, sub, ok, clearPayload) => `<div class="rowi">${ri(icon, ok ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${title} ${ok ? '<span class="badge calm">задана</span>' : '<span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
       <div class="rowi-actions">${ok && clearPayload ? `<button class="btn sm ghost" onclick='clearZone(${JSON.stringify(clearPayload)})'>Убрать</button>` : ""}<button class="btn sm" onclick="startDraw('${mode}')">${ok ? "Перерисовать" : "Нарисовать"}</button></div></div>`;
     const ig = (z.ignore_polygons || []).length;
     let h = `<div class="group"><h3>Зоны на видео</h3><p>Кровать обязательна: по ней система понимает, где бабушка лежит, а где пол. Дверь помогает отличать вошедших родственников.</p><div class="rows">
-      <div class="rowi"><div class="rowi-body"><div class="rowi-title">Показывать зоны поверх видео</div><div class="rowi-sub">Обычно выключено, чтобы не мешать смотреть</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
-      + zrow("bed", "Кровать", "Обведите матрас по углам", has(z.bed_polygon, 3), null)
-      + zrow("door", "Дверь", "Кто вошёл через дверь — тот «свой»", has(z.door_polygon, 3), { door_polygon: [] })
-      + zrow("floor", "Пол у кровати", "4 точки — для оценки роста и расстояний", has(z.floor_polygon, 4), { floor_polygon: [] })
-      + `<div class="rowi"><div class="rowi-body"><div class="rowi-title">Игнор-зоны ${ig ? `<span class="badge">${ig}</span>` : ""}</div><div class="rowi-sub">Вешалка, халат на стуле, зеркало — что система принимает за человека</div></div>
+      <div class="rowi">${ri("i-eye")}<div class="rowi-body"><div class="rowi-title">Показывать зоны поверх видео</div><div class="rowi-sub">Обычно выключено, чтобы не мешать смотреть</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
+      + zrow("bed", "i-bed", "Кровать", "Обведите матрас по углам", has(z.bed_polygon, 3), null)
+      + zrow("door", "i-door", "Дверь", "Кто вошёл через дверь — тот «свой»", has(z.door_polygon, 3), { door_polygon: [] })
+      + zrow("floor", "i-floor", "Пол у кровати", "4 точки — для оценки роста и расстояний", has(z.floor_polygon, 4), { floor_polygon: [] })
+      + `<div class="rowi">${ri("i-eyeoff")}<div class="rowi-body"><div class="rowi-title">Игнор-зоны ${ig ? `<span class="badge">${ig}</span>` : ""}</div><div class="rowi-sub">Вешалка, халат на стуле, зеркало — что система принимает за человека</div></div>
         <div class="rowi-actions">${ig ? `<button class="btn sm ghost" onclick="clearIgnore()">Убрать все</button>` : ""}<button class="btn sm" onclick="startDraw('ignore')">Добавить</button></div></div></div></div>`;
     if (has(z.floor_polygon, 4)) h += `<div class="group"><h3>Размеры в сантиметрах</h3><p>Реальные размеры размеченного прямоугольника пола и высота матраса.</p><div class="rows">
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Ширина</div></div><input type="number" id="inFloorW" min="40" max="1000" value="${Math.round(z.floor_width_cm)}" /></div>
@@ -1636,15 +2082,15 @@
       </div><button class="btn block" style="margin-top:10px" onclick="saveDims()">Сохранить размеры</button></div>`;
     const rot = Number(cam.rotate) || 0;
     h += `<div class="group"><h3>Камера</h3><div class="rows">
-        <div class="rowi" style="flex-wrap:wrap"><div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Зеркально</div></div>${sw(cam.flip_h, `setCam({flip_h:${!cam.flip_h}})`, "Зеркально")}</div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Обработка</div><div class="rowi-sub num">${esc(techLine || "—")}</div></div></div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Осветлять тёмный кадр</div><div class="rowi-sub">Помогает видеть ночью и в сумерках</div></div>${sw(cam.enhance, `setCam({enhance:${!cam.enhance}})`, "Осветление")}</div>
+        <div class="rowi">${ri("i-rotate")}<div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
+        <div class="rowi">${ri("i-flip")}<div class="rowi-body"><div class="rowi-title">Зеркально</div></div>${sw(cam.flip_h, `setCam({flip_h:${!cam.flip_h}})`, "Зеркально")}</div>
+        <div class="rowi">${ri("i-sun")}<div class="rowi-body"><div class="rowi-title">Осветлять тёмный кадр</div><div class="rowi-sub">Помогает видеть ночью и в сумерках</div></div>${sw(cam.enhance, `setCam({enhance:${!cam.enhance}})`, "Осветление")}</div>
+        <div class="rowi">${ri("i-chip")}<div class="rowi-body"><div class="rowi-title">Обработка</div><div class="rowi-sub num">${esc(techLine || "—")}</div></div></div>
       </div></div>`;
     return h;
   }
-  async function clearZone(payload) { if (confirm("Убрать эту зону?")) await pushZones(payload, "Зона убрана"); }
-  async function clearIgnore() { if (!confirm("Убрать все игнор-зоны?")) return; const d = await call("/api/zones/ignore", { method: "DELETE" }, "Игнор-зоны убраны"); if (d && d.zones) { zones = d.zones; draw(); renderSheet(); } }
+  async function clearZone(payload) { if (await ask("Убрать зону?", "Её можно будет нарисовать заново.", "Убрать", "i-eyeoff")) await pushZones(payload, "Зона убрана"); }
+  async function clearIgnore() { if (!(await ask("Убрать все игнор-зоны?", "Предметы снова могут приниматься за людей.", "Убрать", "i-eyeoff"))) return; const d = await call("/api/zones/ignore", { method: "DELETE" }, "Игнор-зоны убраны"); if (d && d.zones) { zones = d.zones; draw(); renderSheet(); } }
   async function saveDims() {
     const clamp = (id, lo, hi, def) => Math.max(lo, Math.min(hi, Number($(id).value) || def));
     await pushZones({ floor_width_cm: clamp("inFloorW", 40, 1000, 200), floor_depth_cm: clamp("inFloorD", 40, 1000, 120), mattress_height_cm: clamp("inMatH", 15, 140, 55) }, "Размеры сохранены");
@@ -1655,25 +2101,26 @@
     const faces = S.faces || {}, tracks = (live && live.tracks) || S.tracks || [];
     const gal = (role, title, sub) => {
       const arr = faces[role] || [];
+      const ph = Math.max(0, 3 - arr.length);
       return `<div class="group"><h3>${title}</h3><p>${sub}</p>
-        <div class="faces">${arr.map((fn) => `<span class="face"><img loading="lazy" alt="" src="${esc(withAuth("/api/faces/" + role + "/photo/" + encodeURIComponent(fn)))}" /><button onclick="removeFace('${role}','${esc(fn)}')" aria-label="Удалить фото">✕</button></span>`).join("") || `<span class="muted small">Фото пока нет</span>`}</div>
-        <div class="row"><button class="btn" onclick="captureFace('${role}')">Снять с камеры сейчас</button><label class="btn">Загрузить фото<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div></div>`;
+        <div class="faces">${arr.map((fn) => `<span class="face"><img loading="lazy" alt="" src="${esc(withAuth("/api/faces/" + role + "/photo/" + encodeURIComponent(fn)))}" /><button onclick="removeFace('${role}','${esc(fn)}')" aria-label="Удалить фото">${ico("i-x")}</button></span>`).join("")}${`<span class="face ph">${ico("i-user")}</span>`.repeat(Math.max(0, ph - 1))}<label class="face add" title="Загрузить фото">${ico("i-plus")}<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div>
+        <div class="row"><button class="btn" onclick="captureFace('${role}')">${ico("i-camera")}Снять с камеры сейчас</button><label class="btn">${ico("i-upload")}Загрузить фото<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div></div>`;
     };
     let h = `<div class="group"><h3>Кто сейчас в кадре</h3><p>Если система перепутала — поправьте: она запомнит одежду и лицо. То же можно сделать, нажав на человека прямо на видео.</p>`;
     const real = tracks.filter((t) => Number(t.track_id) >= 0 && !t.virtual_presence && Array.isArray(t.bbox));
     h += real.length ? `<div class="rows">` + real.map((t) => {
       const id = Number(t.track_id);
-      return `<div class="rowi" style="flex-wrap:wrap"><div class="rowi-body"><div class="rowi-title">${t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Не определён"}</div><div class="rowi-sub">${esc(t.reason_ru || "")}</div></div>
+      return `<div class="rowi">${ri(t.role === "patient" ? "i-user" : t.role === "visitor" ? "i-users" : "i-user", t.role === "patient" ? "calm" : t.role === "visitor" ? "care" : "")}<div class="rowi-body"><div class="rowi-title">${t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Не определён"}</div><div class="rowi-sub">${esc(t.reason_ru || "")}</div></div>
         <div class="rowi-actions"><button class="btn sm" aria-pressed="${t.role === "patient"}" onclick="assign(${id},'patient')">Бабушка</button><button class="btn sm" aria-pressed="${t.role === "visitor"}" onclick="assign(${id},'visitor')">Свой</button><button class="btn sm ghost" onclick="ignoreThing(${id})">Вещь</button></div></div>`;
-    }).join("") + `</div>` : `<div class="empty">В кадре никого не видно</div>`;
+    }).join("") + `</div>` : emptyArt("room", "В кадре никого не видно", "");
     const flags = [];
-    if (S.door_visit_active) flags.push(`<div class="rowi"><div class="rowi-body"><div class="rowi-title">Отмечен визит родственника</div><div class="rowi-sub">Пока идёт визит, посадка и выход из кровати не сигналят</div></div><button class="btn sm" onclick="act('/api/door_visit/clear','Отмечено: родственник вышел')">Он вышел</button></div>`);
-    if (S.patient_in_bed_latched) flags.push(`<div class="rowi"><div class="rowi-body"><div class="rowi-title">Считается, что бабушка в кровати</div><div class="rowi-sub">Даже если под одеялом её не видно</div></div><button class="btn sm" onclick="act('/api/bed_presence/clear','Отмечено: в кровати никого нет')">Её там нет</button></div>`);
+    if (S.door_visit_active) flags.push(`<div class="rowi">${ri("i-door-out", "care")}<div class="rowi-body"><div class="rowi-title">Отмечен визит родственника</div><div class="rowi-sub">Пока идёт визит, посадка и выход из кровати не сигналят</div></div><button class="btn sm" onclick="act('/api/door_visit/clear','Отмечено: родственник вышел')">Он вышел</button></div>`);
+    if (S.patient_in_bed_latched) flags.push(`<div class="rowi">${ri("i-bed", "calm")}<div class="rowi-body"><div class="rowi-title">Считается, что бабушка в кровати</div><div class="rowi-sub">Даже если под одеялом её не видно</div></div><button class="btn sm" onclick="act('/api/bed_presence/clear','Отмечено: в кровати никого нет')">Её там нет</button></div>`);
     if (flags.length) h += `<div class="rows" style="margin-top:10px">${flags.join("")}</div>`;
     h += `</div>`
       + gal("patient", "Фото бабушки", "2–4 фото лица анфас и вполоборота. Главный способ не путать её с родственниками.")
       + gal("visitor", "Фото своих", "Родственники и сиделка. Когда они рядом, система не поднимает тревогу о подъёме.")
-      + `<div class="group"><h3>Если роли путаются постоянно</h3><p>Сброс заставит систему заново запомнить, как выглядит бабушка и в какой позе она спит.</p><div class="row"><button class="btn" onclick="act('/api/reset-anchor','Память о внешности сброшена')">Забыть внешность</button><button class="btn" onclick="act('/api/recalibrate-baseline','Поза сна будет снята заново')">Переснять позу сна</button></div></div>`;
+      + `<div class="group"><h3>Если роли путаются постоянно</h3><p>Сброс заставит систему заново запомнить, как выглядит бабушка и в какой позе она спит.</p><div class="row"><button class="btn" onclick="act('/api/reset-anchor','Память о внешности сброшена')">${ico("i-user")}Забыть внешность</button><button class="btn" onclick="act('/api/recalibrate-baseline','Поза сна будет снята заново')">${ico("i-bed")}Переснять позу сна</button></div></div>`;
     return h;
   }
   async function captureFace(role) { if (await call("/api/faces/" + role + "/from-camera", { json: {} }, "Лицо сохранено")) poll(); }
@@ -1693,21 +2140,22 @@
         <div class="seg wide">${[["high", "Быстро"], ["standard", "Обычно"], ["gentle", "Спокойно"]].map(([v, l]) => `<button aria-pressed="${preset === v}" onclick="setPrefs({sensitivity_preset:'${v}'})">${l}</button>`).join("")}</div>
         <div class="muted small" style="margin-top:8px">Падение подтверждается за ${esc(p.fall_confirm_seconds)} с, посадка — за ${esc(diag.effective_sit_confirm_sec ?? p.sit_confirm_seconds)} с${diag.night_active ? " (сейчас ночной режим)" : ""}</div></div>
       <div class="group"><h3>О чём сигналить</h3><div class="rows">
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Любой человек на полу</div><div class="rowi-sub">Тревога, если кто-то неподвижно лежит на полу и рядом никого — даже если система не узнала бабушку</div></div>${sw(p.floor_safety_net !== false, `setPrefs({floor_safety_net:${p.floor_safety_net === false}})`, "Любой человек на полу")}</div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Поднятая рука — зов на помощь</div><div class="rowi-sub">Если бабушка держит руку над головой ${esc(p.help_confirm_seconds)} с</div></div>${sw(p.enable_help_gesture, `setPrefs({enable_help_gesture:${!p.enable_help_gesture}})`, "Жест рукой")}</div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Ночью реагировать быстрее</div><div class="rowi-sub">С ${pad(p.night_start_hour ?? 22)}:00 до ${pad(p.night_end_hour ?? 7)}:00</div></div>${sw(p.night_strict_mode, `setPrefs({night_strict_mode:${!p.night_strict_mode}})`, "Ночной режим")}</div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div><div class="rowi-sub">Повторная тревога, если не вернулась</div></div><select onchange="setPrefs({prolonged_absence_minutes:Number(this.value)})">${opt(p.prolonged_absence_minutes, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]])}</select></div>
-        <div class="rowi"><div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div><div class="rowi-sub">Профилактика пролежней</div></div><select onchange="setPrefs({immobility_reminder_minutes:Number(this.value)})">${opt(p.immobility_reminder_minutes, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]])}</select></div>
+        <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Любой человек на полу</div><div class="rowi-sub">Тревога, если кто-то неподвижно лежит на полу и рядом никого — даже если система не узнала бабушку</div></div>${sw(p.floor_safety_net !== false, `setPrefs({floor_safety_net:${p.floor_safety_net === false}})`, "Любой человек на полу")}</div>
+        <div class="rowi">${ri("i-hand", "warn")}<div class="rowi-body"><div class="rowi-title">Поднятая рука — зов на помощь</div><div class="rowi-sub">Если бабушка держит руку над головой ${esc(p.help_confirm_seconds)} с</div></div>${sw(p.enable_help_gesture, `setPrefs({enable_help_gesture:${!p.enable_help_gesture}})`, "Жест рукой")}</div>
+        <div class="rowi">${ri("i-moon", "care")}<div class="rowi-body"><div class="rowi-title">Ночью реагировать быстрее</div><div class="rowi-sub">С ${pad(p.night_start_hour ?? 22)}:00 до ${pad(p.night_end_hour ?? 7)}:00</div></div>${sw(p.night_strict_mode, `setPrefs({night_strict_mode:${!p.night_strict_mode}})`, "Ночной режим")}</div>
+        <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div><div class="rowi-sub">Повторная тревога, если не вернулась</div></div><select onchange="setPrefs({prolonged_absence_minutes:Number(this.value)})">${opt(p.prolonged_absence_minutes, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]])}</select></div>
+        <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div><div class="rowi-sub">Профилактика пролежней</div></div><select onchange="setPrefs({immobility_reminder_minutes:Number(this.value)})">${opt(p.immobility_reminder_minutes, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]])}</select></div>
       </div><p class="muted small" style="margin-top:8px">Режим «только падение и сползание» каждый получатель включает себе сам — на главном экране или во вкладке «Кому сигналить».</p></div>`;
   }
   async function setPrefs(patch) { const d = await call("/api/prefs", { json: patch }); if (d && S) { S.prefs = d.prefs; S.care = d.care || S.care; renderSheet(); } }
 
   function renderSheet() {
-    if ($("sheetScrim").hidden || !S) return;
+    if (!isOpen($("sheetScrim")) || !S) return;
     const active = document.activeElement;
     if (active && $("sheetBody").contains(active) && /^(INPUT|SELECT)$/.test(active.tagName)) return;
     const html = sheetMode === "journal" ? journalHtml() : ({ recipients: tabRecipients, zones: tabZones, people: tabPeople, care: tabCare }[activeTab] || tabRecipients)();
     setHtml($("sheetBody"), html);
+    syncPills($("sheetBody"), (sheetMode === "journal" ? "j" : activeTab) + ":");
   }
 
   /* ---------- Опрос и запуск ---------- */
@@ -1755,12 +2203,13 @@
   }
   function syncBack() {
     const t = tg(); if (!t || !t.BackButton) return;
-    try { ($("sheetScrim").hidden && $("clipScrim").hidden) ? t.BackButton.hide() : t.BackButton.show(); } catch (_) {}
+    try { (!isOpen($("sheetScrim")) && !isOpen($("clipScrim")) && !isOpen($("askScrim"))) ? t.BackButton.hide() : t.BackButton.show(); } catch (_) {}
   }
   function goBack() {
-    if (!$("clipScrim").hidden) { closeClip(); return true; }
+    if (isOpen($("askScrim"))) { askDone(false); return true; }
+    if (isOpen($("clipScrim"))) { closeClip(); return true; }
     if (!$("menu").hidden) { hideMenu(); return true; }
-    if (!$("sheetScrim").hidden) { closeSheet(); return true; }
+    if (isOpen($("sheetScrim"))) { closeSheet(); return true; }
     if (drawMode) { cancelDraw(); return true; }
     return false;
   }
@@ -1774,7 +2223,9 @@
     $("lock").hidden = true; $("app").hidden = false;
     const sp = String(startParam || "");
     if (sp.startsWith("clip_")) pendingClip = sp.slice(5);
-    [...$("winSeg").children].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (windowSec === 21600))));
+    [...$("winSeg").querySelectorAll("button")].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (windowSec === 21600))));
+    setTimeout(() => { $("app").classList.remove("intro"); syncPills(); }, 1100);
+    requestAnimationFrame(() => syncPills());
     $("btnOverlay").setAttribute("aria-pressed", String(showOverlay));
     syncSoundBtn();
     startStream(true);

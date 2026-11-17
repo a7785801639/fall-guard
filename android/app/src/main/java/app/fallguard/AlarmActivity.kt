@@ -1,6 +1,9 @@
 package app.fallguard
 
 import android.app.Activity
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -20,6 +23,7 @@ import java.util.Locale
 class AlarmActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private var alarmTs = 0L
+    private val pulses = mutableListOf<AnimatorSet>()
     private val tick = object : Runnable {
         override fun run() {
             updateElapsed()
@@ -46,17 +50,67 @@ class AlarmActivity : Activity() {
             }
         }
         bind()
+        enter()
+    }
+
+    /** Экран тревоги появляется не скачком: блоки по очереди поднимаются на место */
+    private fun enter() {
+        val root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as? android.view.ViewGroup ?: return
+        val dy = resources.displayMetrics.density * 22
+        for (i in 0 until root.childCount) {
+            val v = root.getChildAt(i)
+            v.alpha = 0f
+            v.translationY = dy
+            v.animate().alpha(1f).translationY(0f).setStartDelay(i * 45L).setDuration(340)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+        }
     }
 
     override fun onResume() {
         super.onResume()
         ui.removeCallbacks(tick)
         ui.post(tick)
+        startPulse()
     }
 
     override fun onPause() {
         ui.removeCallbacks(tick)
+        stopPulse()
         super.onPause()
+    }
+
+    /** Кольца расходятся от знака тревоги, второе — со сдвигом на полпериода */
+    private fun startPulse() {
+        stopPulse()
+        val badge = findViewById<View>(R.id.alarmBadge)
+        listOf(R.id.alarmRing1 to 0L, R.id.alarmRing2 to 700L).forEach { (id, delay) ->
+            val ring = findViewById<View>(id)
+            val set = AnimatorSet().apply {
+                playTogether(
+                    ObjectAnimator.ofFloat(ring, View.SCALE_X, 1f, 1.9f).apply { repeatCount = ValueAnimator.INFINITE },
+                    ObjectAnimator.ofFloat(ring, View.SCALE_Y, 1f, 1.9f).apply { repeatCount = ValueAnimator.INFINITE },
+                    ObjectAnimator.ofFloat(ring, View.ALPHA, 0.7f, 0f).apply { repeatCount = ValueAnimator.INFINITE },
+                )
+                duration = 1400
+                startDelay = delay
+            }
+            set.start()
+            pulses += set
+        }
+        val beat = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(badge, View.SCALE_X, 1f, 1.08f).apply { repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE },
+                ObjectAnimator.ofFloat(badge, View.SCALE_Y, 1f, 1.08f).apply { repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE },
+            )
+            duration = 700
+        }
+        beat.start()
+        pulses += beat
+    }
+
+    private fun stopPulse() {
+        pulses.forEach { it.cancel() }
+        pulses.clear()
     }
 
     private fun updateElapsed() {
@@ -123,6 +177,7 @@ class AlarmActivity : Activity() {
 
     override fun onDestroy() {
         ui.removeCallbacks(tick)
+        stopPulse()
         AlertService.onAlarmStopped = null
         super.onDestroy()
     }
