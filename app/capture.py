@@ -741,15 +741,22 @@ class VideoStreamCapture:
         if is_rtsp:
             if transport == "udp":
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                    "rtsp_transport;udp|stimeout;5000000|max_delay;500000"
+                    "rtsp_transport;udp|timeout;5000000|max_delay;500000"
                     "|fflags;nobuffer+discardcorrupt|flags;low_delay"
                 )
             else:
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                    "rtsp_transport;tcp|stimeout;5000000"
+                    "rtsp_transport;tcp|timeout;5000000"
                     "|fflags;nobuffer+discardcorrupt|flags;low_delay"
                 )
-        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+            open_t = getattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC", None)
+            read_t = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
+            if open_t is not None and read_t is not None:
+                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG, [open_t, 6000, read_t, 6000])
+            else:
+                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        else:
+            cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return cap
 
@@ -855,6 +862,7 @@ class VideoStreamCapture:
         backoff = 1.5
         consecutive_failures = 0
         cuvid_failures = 0
+        cuvid_ever_proven = False
         cuvid_fallback_latched = False
         last_decode_ts = 0.0
         min_decode_interval = 1.0 / max(2.0, self._capture_fps * 1.35)
@@ -869,6 +877,7 @@ class VideoStreamCapture:
                         cap = None
                     consecutive_failures = 0
                     cuvid_failures = 0
+                    cuvid_ever_proven = False
                     cuvid_fallback_latched = False
                     backoff = 1.5
 
@@ -898,18 +907,27 @@ class VideoStreamCapture:
                             continue
                         if frames_read >= 30:
                             # Стабильная долгая сессия (обычный сетевой реконнект камеры)
+                            cuvid_ever_proven = True
                             cuvid_failures = 0
                             with self._lock:
                                 self._connected = False
                                 self._last_error = "Поток NVDEC прерван, переподключение..."
                             self._stop_event.wait(1.0)
                             continue
-                        cuvid_failures += 1
+                        if not cuvid_ever_proven:
+                            cuvid_failures += 1
                     else:
                         self._close_active_cuvid()
+                        if cuvid_ever_proven:
+                            with self._lock:
+                                self._connected = False
+                                self._last_error = "Ожидание ответа камеры (NVDEC реконнект)..."
+                            self._stop_event.wait(backoff)
+                            backoff = min(6.0, backoff * 1.5)
+                            continue
                         cuvid_failures += 1
 
-                    if cuvid_failures >= 2:
+                    if not cuvid_ever_proven and cuvid_failures >= 2:
                         cuvid_fallback_latched = True
                         logger.warning(
                             "h264_cuvid завершился ошибкой %d раз(а) подряд — прозрачный переход на %s",
@@ -917,7 +935,7 @@ class VideoStreamCapture:
                             BACKEND_CPU,
                         )
                     else:
-                        self._stop_event.wait(0.25)
+                        self._stop_event.wait(0.5)
                         continue
 
                 # Ветка 2: Штатный декодер cv2.VideoCapture (CPU FFmpeg, автоподбор TCP -> UDP)
@@ -957,7 +975,8 @@ class VideoStreamCapture:
                 grabbed = cap.grab()
                 if not grabbed:
                     consecutive_failures += 1
-                    if consecutive_failures < 8:
+                    max_grab_misses = 2 if _is_rtsp_url(current_url) else 8
+                    if consecutive_failures < max_grab_misses:
                         self._stop_event.wait(0.05)
                         continue
                     with self._lock:
