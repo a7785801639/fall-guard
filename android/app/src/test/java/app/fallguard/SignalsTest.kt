@@ -100,4 +100,13 @@ class SignalsTest {
         // Часы поправили — расхождение ушло
         assertEquals(100L, ServerClock.nextOffset(300_000, 1_000_000_100, 1_000_000_000))
     }
+
+    @Test fun alarmRingFitsTheSpareHeight() {
+        assertEquals(180f, AlarmLayout.ringSize(400f)!!, 0.01f)   // высокий экран — полный размер
+        assertEquals(132f, AlarmLayout.ringSize(140f)!!, 0.01f)   // места меньше — кольцо меньше
+        assertEquals(97f, AlarmLayout.ringSize(105f)!!, 0.01f)    // Pixel 5 с панелями: ~105 dp свободно
+        assertEquals(null, AlarmLayout.ringSize(80f))             // совсем мало — убираем
+        assertEquals(1f, AlarmLayout.textScale(180f), 0.01f)
+        assertTrue(AlarmLayout.textScale(97f) > 0.55f)            // цифры остаются читаемыми
+    }
 }

@@ -27,6 +27,7 @@ class AlarmActivity : Activity() {
     private val tick = object : Runnable {
         override fun run() {
             updateElapsed()
+            findViewById<View>(R.id.alarmRing)?.invalidate() // без системных анимаций кольцо иначе замрёт
             ui.postDelayed(this, 1000)
         }
     }
@@ -37,6 +38,9 @@ class AlarmActivity : Activity() {
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         getSystemService(KeyguardManager::class.java)?.requestDismissKeyguard(this, null)
+        // Телефон в руке поворачивается как попало — на телефоне экран тревоги всегда вертикальный;
+        // планшет на подставке показывает его как стоит
+        if (resources.configuration.smallestScreenWidthDp < 600) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         setContentView(R.layout.activity_alarm)
         edgeToEdge()
         // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
@@ -48,8 +52,8 @@ class AlarmActivity : Activity() {
     }
 
     /**
-     * Сколько места осталось под секундомер. Если верх и так не помещается — убираем его совсем
-     * (кадр важнее); если места чуть меньше — уменьшаем кольцо; совсем мало — прячем.
+     * Кольцо секундомера занимает свободное место под кадром: большое на высоких экранах,
+     * поменьше — где места меньше, и убирается, если верх и так не помещается (кадр важнее).
      * Пересчитывается при каждой разметке: кадр с камеры приходит позже и меняет высоту.
      */
     private fun fitTimer(box: View) {
@@ -61,10 +65,20 @@ class AlarmActivity : Activity() {
             box.post { box.visibility = View.GONE }
             return
         }
-        val need = ring.measuredHeight + resources.displayMetrics.density * 12
-        val scale = (box.height / need).coerceAtMost(1f)
-        ring.visibility = if (scale < 0.55f) View.INVISIBLE else View.VISIBLE
-        ring.scaleX = scale; ring.scaleY = scale
+        val d = resources.displayMetrics.density
+        val size = AlarmLayout.ringSize(box.height / d)
+        if (size == null) { if (ring.visibility != View.INVISIBLE) ring.visibility = View.INVISIBLE; return }
+        val px = (size * d).toInt()
+        if (ring.layoutParams.width != px) {
+            box.post {
+                ring.layoutParams = ring.layoutParams.apply { width = px; height = px }
+                // Цифры внутри кольца уменьшаются вместе с ним
+                val ts = AlarmLayout.textScale(size)
+                findViewById<View>(R.id.alarmRingText)?.let { it.scaleX = ts; it.scaleY = ts }
+                findViewById<View>(R.id.alarmElapsedLabel)?.visibility = if (size >= AlarmLayout.LABEL_MIN_DP) View.VISIBLE else View.GONE
+                ring.visibility = View.VISIBLE
+            }
+        } else if (ring.visibility != View.VISIBLE) ring.visibility = View.VISIBLE
     }
 
     /**
@@ -208,12 +222,13 @@ class AlarmActivity : Activity() {
         iconLabel(findViewById(R.id.btnSilence), R.drawable.ic_b_mute, "Выключить звук на этом телефоне")
         findViewById<Button>(R.id.btnAck).setOnClickListener { v ->
             if (closing) return@setOnClickListener
-            AlertService.start(this, AlertService.ACTION_ACK, info.id)
-            confirm(v, true, "Принято", "Идите к ней — сирена выключена")
+            // Проверочная тревога (без сервера) только замолкает — охрану на паузу не ставим
+            AlertService.start(this, if (info.base.isEmpty()) AlertService.ACTION_SILENCE else AlertService.ACTION_ACK, info.id)
+            confirm(v, true, "Принято", if (info.base.isEmpty()) "Это была проверка — так и сработает" else "Идите к ней — сирена выключена")
         }
         findViewById<Button>(R.id.btnFalse).setOnClickListener { v ->
             if (closing) return@setOnClickListener
-            AlertService.start(this, AlertService.ACTION_FALSE, info.id)
+            AlertService.start(this, if (info.base.isEmpty()) AlertService.ACTION_SILENCE else AlertService.ACTION_FALSE, info.id)
             confirm(v, false, "Ложная тревога", "Отметили — так система станет точнее")
         }
         findViewById<Button>(R.id.btnSilence).setOnClickListener {

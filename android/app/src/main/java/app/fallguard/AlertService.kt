@@ -68,6 +68,7 @@ class AlertService : Service() {
 
     // ---------------------------------------------------------------- смена сети
     @Volatile private var activeConn: java.net.HttpURLConnection? = null
+    private val wake = Object()
     @Volatile private var netChanged = false
     private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
@@ -79,10 +80,12 @@ class AlertService : Service() {
         val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
         val cb = object : android.net.ConnectivityManager.NetworkCallback() {
             private var current: android.net.Network? = null
+            private var seen = false // первый вызов приходит сразу при регистрации — это не смена сети
             override fun onAvailable(network: android.net.Network) {
-                val first = current == null
+                val changed = seen && network != current
+                seen = true
                 current = network
-                if (!first) reconnectNow()
+                if (changed) reconnectNow()
             }
             override fun onLost(network: android.net.Network) {
                 if (network == current) { current = null; reconnectNow() }
@@ -95,7 +98,8 @@ class AlertService : Service() {
         netChanged = true
         val c = activeConn
         if (c != null) Thread { try { c.disconnect() } catch (_: Exception) {} }.start()
-        worker?.interrupt() // будит из паузы между попытками
+        // Будим из паузы между попытками. Не interrupt(): флаг прерывания сорвал бы следующий запрос
+        synchronized(wake) { wake.notifyAll() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -187,7 +191,7 @@ class AlertService : Service() {
                     }
                     // Сеть сменилась — пробуем сразу, без нарастающей паузы
                     if (netChanged) continue
-                    try { Thread.sleep(backoff) } catch (_: InterruptedException) { if (!running) return; continue }
+                    try { synchronized(wake) { if (!netChanged) wake.wait(backoff) } } catch (_: InterruptedException) { return }
                     backoff = (backoff * 2).coerceAtMost(15000L)
                 }
             }

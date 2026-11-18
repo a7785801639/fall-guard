@@ -14,7 +14,6 @@
         android:id="@+id/alarmContent"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clipChildren="false"
         android:clipToPadding="false"
         android:orientation="vertical"
         android:padding="20dp">
@@ -161,9 +160,10 @@
 
                 <FrameLayout
                     android:id="@+id/alarmRingBox"
-                    android:layout_width="180dp"
-                    android:layout_height="180dp"
-                    android:layout_gravity="center">
+                    android:layout_width="1dp"
+                    android:layout_height="1dp"
+                    android:layout_gravity="center"
+                    android:visibility="invisible">
 
                     <app.fallguard.ElapsedRing
                         android:id="@+id/alarmRing"
@@ -171,6 +171,7 @@
                         android:layout_height="match_parent" />
 
                     <LinearLayout
+                        android:id="@+id/alarmRingText"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="center"
