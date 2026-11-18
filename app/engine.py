@@ -2149,6 +2149,7 @@ class FallGuardEngine:
                     "summary_24h": summary_24h,
                 },
                 "clips_stats": clips_stats,
+                "clip_pre_sec": float(self.settings.pre_event_seconds),
                 "feedback_stats": feedback_stats,
                 "recent_clips": recent_clips,
             }
