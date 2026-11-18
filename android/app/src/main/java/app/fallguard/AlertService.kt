@@ -63,6 +63,39 @@ class AlertService : Service() {
         prefs = Prefs(this)
         nm = getSystemService(NotificationManager::class.java)
         createChannels()
+        watchNetwork()
+    }
+
+    // ---------------------------------------------------------------- смена сети
+    @Volatile private var activeConn: java.net.HttpURLConnection? = null
+    @Volatile private var netChanged = false
+    private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Ушли из дома или вернулись: запрос по старой сети висел бы до таймаута (до 40 с) —
+     * рвём его сразу и переподключаемся, заново выбирая адрес (дома — домашний).
+     */
+    private fun watchNetwork() {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            private var current: android.net.Network? = null
+            override fun onAvailable(network: android.net.Network) {
+                val first = current == null
+                current = network
+                if (!first) reconnectNow()
+            }
+            override fun onLost(network: android.net.Network) {
+                if (network == current) { current = null; reconnectNow() }
+            }
+        }
+        try { cm.registerDefaultNetworkCallback(cb); netCallback = cb } catch (_: Exception) {}
+    }
+
+    private fun reconnectNow() {
+        netChanged = true
+        val c = activeConn
+        if (c != null) Thread { try { c.disconnect() } catch (_: Exception) {} }.start()
+        worker?.interrupt() // будит из паузы между попытками
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,6 +139,7 @@ class AlertService : Service() {
         running = false
         worker?.interrupt()
         stopAlarm()
+        netCallback?.let { try { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(it) } catch (_: Exception) {} }
         super.onDestroy()
     }
 
@@ -116,6 +150,7 @@ class AlertService : Service() {
         var lostWarned = false
         var backoff = 2000L
         while (running) {
+            if (netChanged) { netChanged = false; base = null; backoff = 2000L }
             if (base == null) base = Api.reachableBase(prefs)
             val res = if (base == null) HttpResult(-1, "") else Api.request(
                 base,
@@ -123,7 +158,9 @@ class AlertService : Service() {
                 token = prefs.token,
                 connectMs = 5000,
                 readMs = 40000,
+                onOpen = { activeConn = it },
             )
+            activeConn = null
             when {
                 res.ok -> {
                     backoff = 2000L
@@ -148,7 +185,9 @@ class AlertService : Service() {
                         notifyEvent(NOTIF_LOST, "Нет связи с FallGuard", "Тревоги сейчас не дойдут до этого телефона. Проверьте интернет и сервер.")
                         if (Sounds.style(this, Signals.Kind.LINK) != Signals.Style.SILENT) Sounds.playNotify(this, Signals.Kind.LINK)
                     }
-                    try { Thread.sleep(backoff) } catch (_: InterruptedException) { return }
+                    // Сеть сменилась — пробуем сразу, без нарастающей паузы
+                    if (netChanged) continue
+                    try { Thread.sleep(backoff) } catch (_: InterruptedException) { if (!running) return; continue }
                     backoff = (backoff * 2).coerceAtMost(15000L)
                 }
             }

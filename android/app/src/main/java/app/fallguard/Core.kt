@@ -103,10 +103,13 @@ object Api {
         body: JSONObject? = null,
         connectMs: Int = 4000,
         readMs: Int = 10000,
+        /** Отдаёт соединение наружу: его можно оборвать из другого потока (смена сети). */
+        onOpen: ((HttpURLConnection) -> Unit)? = null,
     ): HttpResult {
         var conn: HttpURLConnection? = null
         return try {
             conn = URL(base + path).openConnection() as HttpURLConnection
+            onOpen?.invoke(conn)
             conn.requestMethod = method
             conn.connectTimeout = connectMs
             conn.readTimeout = readMs
