@@ -98,6 +98,7 @@ class Settings:
     stream_h264_enabled: bool = True
     video_encoder: str = "auto"
     door_visit_idle_timeout_sec: float = 14400.0
+    notify_camera_offline: bool = False
 
     @property
     def camera_configured(self) -> bool:
@@ -174,6 +175,7 @@ class Settings:
                 get_float("DOOR_VISIT_IDLE_TIMEOUT_SEC", 14400.0),
             ),
         )
+        notify_camera_offline = get_bool("NOTIFY_CAMERA_OFFLINE", False)
 
         data_dir = Path(get_raw("DATA_DIR") or str(base_dir / "data"))
         models_dir = Path(get_raw("MODELS_DIR") or str(data_dir / "models"))
@@ -213,4 +215,5 @@ class Settings:
             stream_h264_enabled=stream_h264_enabled,
             video_encoder=video_encoder,
             door_visit_idle_timeout_sec=door_visit_idle_timeout_sec,
+            notify_camera_offline=notify_camera_offline,
         )

@@ -2907,7 +2907,8 @@ class FallGuardEngine:
                     if self._camera_was_online and not self._camera_offline_alerted:
                         self._camera_offline_alerted = True
                         self._log_event("warning", "Потерян сигнал камеры (>20 с)", category="system")
-                        self.notifier.send_text("⚠️ FallGuard: потерян видеосигнал с IP-камеры (>20 с)!")
+                        if self.settings.notify_camera_offline:
+                            self.notifier.send_text("⚠️ FallGuard: потерян видеосигнал с IP-камеры (>20 с)!")
                     self._stop_event.wait(0.5)
                     next_tick = time.monotonic() + target_period
                     last_tick_mono = 0.0
@@ -2916,7 +2917,8 @@ class FallGuardEngine:
                     if self._camera_offline_alerted:
                         self._camera_offline_alerted = False
                         self._log_event("info", "Сигнал камеры восстановлен", category="system")
-                        self.notifier.send_text("✅ FallGuard: связь с IP-камерой восстановлена.")
+                        if self.settings.notify_camera_offline:
+                            self.notifier.send_text("✅ FallGuard: связь с IP-камерой восстановлена.")
                     self._camera_was_online = True
 
                 if frame_ts == last_processed_frame_ts:

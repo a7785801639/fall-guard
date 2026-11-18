@@ -1009,3 +1009,24 @@ def test_wave9_notifier_menu_button_app_command_and_webapp_whitelist(tmp_path: P
     assert len(alert_mk["inline_keyboard"][0]) == 2
 
 
+def test_notify_camera_offline_disabled_by_default(tmp_path: Path) -> None:
+    from app.config import Settings
+
+    env_default = tmp_path / "def.env"
+    env_default.write_text(
+        "RTSP_URL=rtsp://127.0.0.1/live\nTG_BOT_TOKEN=123456:TEST\n",
+        encoding="utf-8",
+    )
+    s_def = Settings.from_env(dotenv_path=env_default)
+    assert s_def.notify_camera_offline is False
+
+    env_on = tmp_path / "on.env"
+    env_on.write_text(
+        "RTSP_URL=rtsp://127.0.0.1/live\nTG_BOT_TOKEN=123456:TEST\nNOTIFY_CAMERA_OFFLINE=true\n",
+        encoding="utf-8",
+    )
+    s_on = Settings.from_env(dotenv_path=env_on)
+    assert s_on.notify_camera_offline is True
+
+
+
