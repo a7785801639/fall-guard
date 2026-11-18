@@ -28,6 +28,10 @@ class Prefs(ctx: Context) {
     var keepScreenOn: Boolean
         get() = sp.getBoolean("keep_screen_on", false)
         set(v) = sp.edit().putBoolean("keep_screen_on", v).apply()
+    /** Видео в маленьком окне поверх других приложений, когда пульт сворачивают. */
+    var pipEnabled: Boolean
+        get() = sp.getBoolean("pip_enabled", true)
+        set(v) = sp.edit().putBoolean("pip_enabled", v).apply()
     var onboardingShown: Boolean
         get() = sp.getBoolean("onboarding_shown", false)
         set(v) = sp.edit().putBoolean("onboarding_shown", v).apply()

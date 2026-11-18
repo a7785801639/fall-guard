@@ -575,6 +575,24 @@
     .vp-alarm:not([hidden]) { animation: banner-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.2) both; }
     .chip.live::before { animation: rec 2s ease-in-out infinite; }
     .viewport.shot::after { content: ""; position: absolute; inset: 0; z-index: 7; background: #fff; pointer-events: none; animation: fade-out 0.45s ease-out both; }
+    /* ---- Маленькое окно поверх (Android PiP): только видео и статус ---- */
+    .pip-status { display: none; position: absolute; left: 6px; bottom: 6px; z-index: 6; align-items: center; gap: 5px; max-width: calc(100% - 12px); height: 20px; padding: 0 8px 0 6px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); font-size: 11px; font-weight: 650; white-space: nowrap; overflow: hidden; }
+    .pip-status i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--calm); }
+    .pip-status span { overflow: hidden; text-overflow: ellipsis; }
+    .pip-status[data-tone="alarm"] { background: var(--alarm-strong); } .pip-status[data-tone="alarm"] i { background: #fff; animation: rec 0.8s infinite; }
+    .pip-status[data-tone="warn"] { background: rgba(255, 181, 71, 0.95); color: #2B1A00; } .pip-status[data-tone="warn"] i { background: #2B1A00; }
+    .pip-status[data-tone="care"] i { background: var(--care); } .pip-status[data-tone="offline"] i { background: var(--faint); }
+    body.pip { overflow: hidden; }
+    body.pip .app { padding: 0 !important; height: 100vh; }
+    body.pip .layout { display: block; height: 100%; }
+    body.pip .main { width: 100% !important; height: 100%; }
+    body.pip .player { height: 100%; border-radius: 0; box-shadow: none; animation: none !important; }
+    body.pip .viewport { aspect-ratio: auto; height: 100vh; }
+    body.pip .rail, body.pip .timeline, body.pip .vp-btns, body.pip .draw-bar, body.pip .scrim, body.pip .menu, body.pip .toast, body.pip .tip, body.pip #chipVisit, body.pip .vp-alarm, body.pip .scrub-badge { display: none !important; }
+    body.pip .pip-status { display: flex; }
+    body.pip .vp-top { top: 6px; left: 6px; right: 6px; }
+    body.pip .chip { height: 20px; font-size: 10.5px; padding: 0 7px; }
+    body.pip .app[data-alarm="1"] .player::after { box-shadow: inset 0 0 0 3px var(--alarm); }
     .chip.warn-chip { background: rgba(255, 181, 71, 0.92); color: #2B1A00; animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .app[data-lost="1"] .viewport video, .app[data-lost="1"] .viewport img.live, .app[data-lost="1"] .closeup canvas { filter: grayscale(1) brightness(0.45); transition: filter 0.6s; }
     .app[data-lost="1"] .viewport canvas#overlay { opacity: 0; }
@@ -675,6 +693,7 @@
       <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1.5V4M12 20v2.5M1.5 12H4M20 12h2.5"/></symbol>
       <symbol id="i-pause-f" viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-play-f" viewBox="0 0 24 24"><path d="M7.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.7-6.8a.8.8 0 0 0 0-1.4L8.7 4.5a.8.8 0 0 0-1.2.7Z" fill="currentColor"/></symbol>
+      <symbol id="i-pip" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11.5" width="7" height="5.5" rx="1.2" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="m11.2 11.8 8.8-8.8M16.5 6.5l2.5 2.5M14 9l2 2"/></symbol>
     </defs>
   </svg>
@@ -699,10 +718,12 @@
               <div class="scrub" id="scrub" hidden><img id="scrubImg" alt="Снимок из хроники" /></div>
             </div>
             <canvas id="overlay"></canvas>
+            <div class="pip-status" id="pipStatus"><i></i><span></span></div>
             <div class="vp-msg" id="vpMsg"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="48" r="40" fill="rgba(255,255,255,.035)"/><rect x="44" y="30" width="54" height="38" rx="9" fill="#1F232A" stroke="#48505F" stroke-width="3"/><path d="m98 42 18-9v32l-18-9Z" fill="#1F232A" stroke="#48505F" stroke-width="3" stroke-linejoin="round"/><circle cx="71" cy="49" r="9.5" fill="none" stroke="#48505F" stroke-width="3"/><g class="dots" fill="#959CA9"><circle cx="66" cy="88" r="3"/><circle cx="80" cy="88" r="3"/><circle cx="94" cy="88" r="3"/></g></svg><b id="vpMsgTitle">Подключаемся к камере</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
             <div class="vp-top">
               <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span><span class="chip warn-chip" id="chipStall" hidden>Видео подвисло · переподключаю</span><span class="chip warn-chip" id="chipLost" hidden></span></div>
               <div class="vp-btns">
+                <button class="vp-btn" id="btnPip" hidden onclick="enterPip()" aria-label="Маленькое окно" title="Видео в маленьком окне поверх других приложений"><svg class="ico"><use href="#i-pip"/></svg></button>
                 <button class="vp-btn" id="btnShot" onclick="saveFrame()" aria-label="Сохранить кадр" title="Сохранить кадр (C)"><svg class="ico"><use href="#i-camera"/></svg></button>
                 <button class="vp-btn" id="btnZoom" aria-pressed="false" onclick="toggleBedZoom()" aria-label="Кровать крупно" title="Кровать крупно (Z, двойной щелчок)"><svg class="ico"><use href="#i-zoom"/></svg></button>
                 <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
@@ -917,6 +938,7 @@
   /* ---------- Утилиты ---------- */
   const tg = () => (window.Telegram && window.Telegram.WebApp) || null;
   function haptic(kind) {
+    if (window.FallGuardAndroid && typeof FallGuardAndroid.haptic === "function") { try { FallGuardAndroid.haptic(String(kind || "tap")); } catch (_) {} return; }
     const h = tg() && tg().HapticFeedback;
     try { if (h) (kind === "success" || kind === "error" || kind === "warning") ? h.notificationOccurred(kind) : h.impactOccurred("light"); } catch (_) {}
   }
@@ -1217,13 +1239,14 @@
     ctx.setLineDash([]);
   }
   function label(x, y, text, color) {
-    ctx.font = "600 12px -apple-system, system-ui, sans-serif";
-    const w = ctx.measureText(text).width + 16, h = 22;
+    const small = document.body.classList.contains("pip");
+    ctx.font = (small ? "600 9px " : "600 12px ") + "-apple-system, system-ui, sans-serif";
+    const w = ctx.measureText(text).width + (small ? 10 : 16), h = small ? 15 : 22;
     x = Math.max(rect.x + 2, Math.min(x, rect.x + rect.w - w - 2));
     y = Math.max(rect.y + 2, y - h - 4);
     ctx.fillStyle = color;
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, 11); ctx.fill();
-    ctx.fillStyle = "#0B0D11"; ctx.textBaseline = "middle"; ctx.fillText(text, x + 8, y + h / 2 + 0.5);
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = "#0B0D11"; ctx.textBaseline = "middle"; ctx.fillText(text, x + (small ? 5 : 8), y + h / 2 + 0.5);
   }
   function draw() {
     if (rafPending) return;
@@ -1281,6 +1304,7 @@
     showOverlay = !showOverlay;
     lsSet("fg_overlay", showOverlay ? "1" : "0");
     $("btnOverlay").setAttribute("aria-pressed", String(showOverlay));
+    pipReport();
     draw();
   }
   async function toggleFullscreen() {
@@ -1408,6 +1432,10 @@
     else if (camIssue === "moved") { title = "Камеру сдвинули"; tone = "warn"; sub = "Проверьте разметку кровати в настройках"; }
     else if (camIssue === "frozen") { title = "Изображение застыло"; tone = "warn"; sub = "Камера шлёт один и тот же кадр"; }
     $("status").dataset.tone = tone;
+    if (native && typeof native.setBarColor === "function") {
+      const bar = tone === "alarm" ? "#E5383F" : "#0B0C0F";
+      if (renderFast._bar !== bar) { renderFast._bar = bar; try { native.setBarColor(bar); } catch (_) {} }
+    }
     $("statusEyebrow").textContent = eyebrow || EYEBROW[tone] || "";
     $("statusSince").textContent = online && !serverLost ? sinceText(st) : "";
     const tEl = $("statusTitle");
@@ -1454,6 +1482,11 @@
     $("pauseLabel").textContent = paused ? (src.pause_remaining_sec > 0 ? timer(src.pause_remaining_sec) : "Пауза") : "Пауза";
     // Статус в полноэкранном режиме
     $("chipStatusText").textContent = title;
+    const ps = $("pipStatus");
+    if (ps.dataset.tone !== tone) ps.dataset.tone = tone;
+    const pt = serverLost && !lvl ? "Нет связи" : title.replace(/^Бабушка /, "").replace(/^./, (c) => c.toUpperCase());
+    if (ps.lastChild.textContent !== pt) ps.lastChild.textContent = pt;
+    pipReport(lvl === "alarm");
     $("nowDot").style.setProperty("--now", { calm: "var(--calm)", care: "var(--care)", warn: "var(--warn)", alarm: "var(--alarm)", offline: "var(--faint)" }[tone] || "var(--calm)");
     $("chipStatus").querySelector("i").style.background = { calm: "var(--calm)", care: "var(--care)", warn: "var(--warn)", alarm: "var(--alarm)", offline: "var(--faint)" }[tone] || "var(--calm)";
     renderInFrame(src);
@@ -1638,6 +1671,35 @@
   setInterval(drawCloseup, 80);
   setInterval(() => { if (started) renderFast(); }, 15000);
 
+  /* ---------- Маленькое окно поверх (Android) ---------- */
+  var pipNative = Boolean(native && typeof native.setPipState === "function");
+  var pipKey = "", pipAlarmNow = false;
+  function pipReport(alarm) {
+    if (!pipNative) return;
+    if (alarm !== undefined) pipAlarmNow = alarm;
+    const [w, h] = srcSize();
+    const key = [pipAlarmNow, zoom.s > 1.01, showOverlay, Math.round(w), Math.round(h)].join();
+    if (key === pipKey) return;
+    pipKey = key;
+    try { native.setPipState(pipAlarmNow, zoom.s > 1.01, showOverlay, Math.round(w), Math.round(h)); } catch (_) {}
+  }
+  function enterPip() {
+    if (!pipNative) return;
+    pipReport();
+    let ok = false; try { ok = native.enterPip(); } catch (_) {}
+    if (!ok) toast("Маленькое окно выключено в настройках или не поддерживается телефоном", "info");
+  }
+  window.fallguardPip = (on) => {
+    document.body.classList.toggle("pip", Boolean(on));
+    if (on) { hideMenu(); $("tip").hidden = true; }
+    setTimeout(() => { layout(); syncPills(); }, 60);
+  };
+  function togglePipSetting() {
+    let on = true; try { on = !native.isPipEnabled(); native.setPipEnabled(on); } catch (_) {}
+    toast(on ? "При сворачивании видео останется в маленьком окне" : "Маленькое окно выключено");
+    renderSheet();
+  }
+
   /* ---------- Сохранить кадр: в той же ориентации, что на экране ---------- */
   function frameCanvas() {
     const [W, H] = srcSize(), c = document.createElement("canvas");
@@ -1654,11 +1716,22 @@
     else return null;
     return c;
   }
+  function shutter() { const vp = $("viewport"); vp.classList.remove("shot"); void vp.offsetWidth; vp.classList.add("shot"); haptic(); }
   function saveFrame() {
     let c = null;
     try { c = frameCanvas(); } catch (_) {}
     if (!c) { toast("Кадра пока нет", "info"); return; }
     const d = new Date(), name = `fallguard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+    if (native && typeof native.saveImage === "function") {
+      const b64 = c.toDataURL("image/jpeg", 0.92).split(",")[1];
+      shutter();
+      const [x, y] = menuAt($("btnShot"));
+      showMenu(x - 180, y, "Кадр " + clock(Date.now() / 1000), [
+        { label: "Сохранить в галерею", icon: "i-download", fn: () => { native.saveImage(b64, name) ? toast("Кадр в галерее, папка FallGuard") : toast("Не получилось — нужен Android 10 или новее", "error"); } },
+        { label: "Отправить…", icon: "i-send", fn: () => { if (!native.shareImage(b64, name)) toast("Не получилось отправить", "error"); } },
+      ]);
+      return;
+    }
     c.toBlob(async (blob) => {
       if (!blob) { toast("Не получилось сохранить кадр", "error"); return; }
       const file = new File([blob], name, { type: "image/jpeg" });
@@ -1668,7 +1741,7 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       toast("Кадр сохранён");
-      const vp = $("viewport"); vp.classList.remove("shot"); void vp.offsetWidth; vp.classList.add("shot");
+      shutter();
     }, "image/jpeg", 0.92);
   }
 
@@ -1698,6 +1771,7 @@
     inner.style.transition = animate ? "" : "none";
     inner.style.transform = zoom.s > 1.001 ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` : "";
     $("btnZoom").setAttribute("aria-pressed", String(zoom.s > 1.01));
+    if (typeof pipReport === "function") pipReport();
     viewport.classList.toggle("zoomed", zoom.s > 1.01);
     draw();
   }
@@ -1777,7 +1851,7 @@
     else if (k === "z" || k === "я") toggleBedZoom();
     else if (k === "j" || k === "о") openJournal();
     else if (k === "s" || k === "ы") openSheet();
-    else if ((k === "c" || k === "с") && !native) saveFrame();
+    else if (k === "c" || k === "с") saveFrame();
     else if (k === "p" || k === "з") pauseMenu($("btnPause"));
     else if ((k === "m" || k === "ь") && !native) toggleSound();
   });
@@ -2086,7 +2160,7 @@
           <button class="pl-btn moment" data-a="moment" hidden title="К моменту тревоги (M)">${ico("i-target")}<span>Момент</span></button>
           <button class="pl-btn num" data-a="speed" title="Скорость — медленно, чтобы разглядеть падение">1×</button>
           <button class="pl-btn hide-s" data-a="loop" aria-pressed="true" title="По кругу">${ico("i-repeat")}</button>
-          <a class="pl-btn hide-s" data-a="dl" href="${esc(o.src)}" download="${esc(o.name)}" title="Скачать видео">${ico("i-download")}</a>
+          <a class="pl-btn ${native ? "" : "hide-s"}" data-a="dl" href="${esc(o.src)}" download="${esc(o.name)}" title="Скачать видео">${ico("i-download")}</a>
           <button class="pl-btn" data-a="full" title="На весь экран (F)">${ico("i-full")}</button>
         </div>
       </div></div>`;
@@ -2148,6 +2222,7 @@
       else if (a === "speed") { setSpeed((speedI + 1) % SPEEDS.length); toast("Скорость " + b.textContent, "info"); }
       else if (a === "loop") { v.loop = !v.loop; b.setAttribute("aria-pressed", String(v.loop)); }
       else if (a === "full") full();
+      else if (a === "dl" && native && typeof native.downloadVideo === "function") { e.preventDefault(); if (!native.downloadVideo(o.src, o.name)) toast("Не получилось скачать", "error"); }
     });
     v.addEventListener("ended", syncPlay);
     syncPlay(); wake();
@@ -2356,6 +2431,10 @@
             <span class="ring-left" title="Код действует ограниченное время"><svg viewBox="0 0 44 44"><circle class="bg" cx="22" cy="22" r="19"/><circle class="fg" id="pairRing" cx="22" cy="22" r="19" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="0"/></svg><span class="num" id="pairLeft"></span></span></div>
         </div></div>`;
     } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">${ico("i-phone-plus")}Подключить телефон</button>`;
+    if (native && typeof native.isPipEnabled === "function") {
+      let pipOn = true; try { pipOn = native.isPipEnabled(); } catch (_) {}
+      h += `<div class="rows" style="margin-top:10px"><div class="rowi">${ri("i-pip", pipOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Видео в маленьком окне</div><div class="rowi-sub">Свернули приложение — видео продолжает идти поверх других, как в YouTube</div></div>${sw(pipOn, "togglePipSetting()", "Маленькое окно")}</div></div>`;
+    }
     if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">${ico("i-gear")}Настройки приложения на этом телефоне</button>`;
     return h + `</div>`;
   }
@@ -2561,7 +2640,8 @@
     setTimeout(() => { $("app").classList.remove("intro"); syncPills(); }, 1100);
     requestAnimationFrame(() => syncPills());
     $("btnOverlay").setAttribute("aria-pressed", String(showOverlay));
-    $("btnShot").hidden = Boolean(native);
+    $("btnShot").hidden = Boolean(native) && typeof native.saveImage !== "function";
+    $("btnPip").hidden = !(native && typeof native.enterPip === "function");
     syncSoundBtn();
     startStream(true);
     connectTelemetry();
