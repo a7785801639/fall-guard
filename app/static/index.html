@@ -65,13 +65,13 @@
     .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 4px 8px; }
     .caption b { font-weight: 600; color: var(--text); font-size: 14px; }
     .link { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: 13px; font-weight: 600; padding: 6px 4px; margin: -6px -4px; border-radius: 8px; }
-    .link:hover { color: var(--text); }
+    @media (hover: hover) { .link:hover { color: var(--text); } }
     .link svg { width: 15px; height: 15px; }
     /* ---- Последние события: занимают место под видео, если оно есть ---- */
     .recent { margin-top: 14px; padding: 12px 14px 14px; border-radius: var(--r); background: var(--panel); animation: rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
     .recent-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; row-gap: 0; column-gap: 10px; overflow: hidden; }
     .rcard { display: grid; gap: 7px; min-width: 0; padding: 6px; margin: -6px; border-radius: 12px; text-align: left; transition: background 0.15s, transform 0.15s; }
-    .rcard:hover { background: var(--fill); }
+    @media (hover: hover) { .rcard:hover { background: var(--fill); } }
     .rcard:active { transform: scale(0.98); }
     .rcard .thumb-wrap { width: 100%; height: auto; aspect-ratio: 16 / 9; }
     .rcard .thumb-wrap img, .rcard .thumb-wrap .thumb-ph { width: 100%; height: 100%; border-radius: 10px; object-fit: cover; display: block; background: linear-gradient(100deg, #15181D 30%, #1E2229 50%, #15181D 70%) 0 0 / 300% 100%; animation: shimmer 2s linear infinite; }
@@ -168,7 +168,7 @@
     /* ================= Кто в комнате: две постоянные плитки ================= */
     .people { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .pcell { display: flex; align-items: center; gap: 12px; height: 68px; padding: 0 12px; border-radius: var(--r); background: var(--tile); min-width: 0; transition: background 0.15s; }
-    .pcell:hover { background: var(--raise-2); }
+    @media (hover: hover) { .pcell:hover { background: var(--raise-2); } }
     .av-wrap { position: relative; flex: none; display: grid; }
     .av-badge { position: absolute; right: -5px; bottom: -4px; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 999px; display: grid; place-items: center; background: var(--calm); color: #062716; font-size: 11px; font-weight: 750; box-shadow: 0 0 0 2.5px var(--tile); animation: pop-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.4) both; }
     .av-badge svg { width: 12px; height: 12px; stroke-width: 2.4; }
@@ -203,12 +203,12 @@
     /* ================= Кнопки ================= */
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 44px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fill); font-weight: 600; font-size: 15px; transition: background 0.15s, transform 0.06s; white-space: nowrap; }
     a.btn, label.btn { text-decoration: none; color: inherit; cursor: pointer; }
-    .btn:hover { background: var(--fill-2); }
+    @media (hover: hover) { .btn:hover { background: var(--fill-2); } }
     .btn:active { transform: scale(0.98); }
     .btn.big { min-height: 54px; font-size: 16px; border-radius: 14px; }
     .btn.block { width: 100%; }
     .btn.solid { background: var(--text); color: var(--bg); }
-    .btn.solid:hover { background: #fff; }
+    @media (hover: hover) { .btn.solid:hover { background: #fff; } }
     .btn.primary { background: var(--calm); color: #062716; }
     .btn.danger { background: var(--alarm-strong); color: #fff; }
     .btn.ghost { background: transparent; }
@@ -222,7 +222,7 @@
     .signal { padding: 12px; border-radius: var(--r); background: var(--tile); }
     .seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--fill); }
     .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; transition: background 0.15s, color 0.15s; }
-    .seg button:hover { color: var(--text); }
+    @media (hover: hover) { .seg button:hover { color: var(--text); } }
     .seg button[aria-pressed="true"] { background: #323844; color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
     .seg.wide { display: flex; width: 100%; }
     .seg.wide button { flex: 1 1 0; min-width: 0; min-height: 40px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
@@ -238,7 +238,7 @@
     /* ================= Док: пауза, звук, журнал, настройки ================= */
     .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
     .tool { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 58px; border-radius: 14px; font-size: 12px; font-weight: 600; color: var(--muted); transition: background 0.15s, color 0.15s; }
-    .tool:hover { background: var(--fill); color: var(--text); }
+    @media (hover: hover) { .tool:hover { background: var(--fill); color: var(--text); } }
     .tool svg { width: 22px; height: 22px; }
     .tool[aria-pressed="true"] { color: var(--calm); }
     #btnPause[aria-pressed="true"] { color: var(--warn); background: var(--warn-soft); }
@@ -349,7 +349,7 @@
     .menu button svg { width: 19px; height: 19px; color: var(--muted); }
     .menu button.on svg { color: var(--calm); } .menu button.danger svg { color: var(--alarm); }
     .menu button:disabled { opacity: 0.6; font-size: 13px; font-weight: 500; color: var(--muted); }
-    .menu button:hover { background: var(--fill); }
+    @media (hover: hover) { .menu button:hover { background: var(--fill); } }
     .menu button.on { color: var(--calm); }
     .menu button.danger { color: var(--alarm); }
 
@@ -369,7 +369,7 @@
     .tabs::-webkit-scrollbar { display: none; }
     .tab { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px 0 12px; border-radius: 999px; white-space: nowrap; font-weight: 600; font-size: 14px; color: var(--muted); transition: color 0.2s; }
     .tab svg { width: 17px; height: 17px; }
-    .tab:hover { color: var(--text); }
+    @media (hover: hover) { .tab:hover { color: var(--text); } }
     .tab[aria-selected="true"] { color: var(--bg); background: var(--text); }
     .sheet-body { flex: 1; overflow-y: auto; padding: 18px 16px calc(28px + var(--safe-b)); display: grid; gap: 26px; align-content: start; -webkit-overflow-scrolling: touch; }
     @media (min-width: 760px) { .sheet-body, .tabs { padding-left: 20px; padding-right: 20px; } }
@@ -420,7 +420,7 @@
     .btn.icon-only { padding: 0; width: 36px; }
     .icon-btn.more { background: transparent; color: var(--muted); }
     .more-ph { width: 36px; flex: none; }
-    .icon-btn.more:hover { background: var(--fill); color: var(--text); }
+    @media (hover: hover) { .icon-btn.more:hover { background: var(--fill); color: var(--text); } }
     .rowi.rcp { flex-wrap: wrap; }
     .rowi.rcp .rowi-body { flex: 1 1 0; }
     .rcp-ctrl { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding-left: 48px; }
@@ -430,14 +430,14 @@
     .face { position: relative; width: 72px; height: 72px; animation: pop-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
     .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); display: block; }
     button.face { padding: 0; border-radius: 16px; transition: transform 0.15s, box-shadow 0.15s; }
-    button.face:hover { box-shadow: 0 0 0 2px var(--fill-2); }
+    @media (hover: hover) { button.face:hover { box-shadow: 0 0 0 2px var(--fill-2); } }
     button.face:active { transform: scale(0.96); }
     .face button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--text); color: var(--bg); box-shadow: 0 0 0 3px var(--raise); }
     .face button svg { width: 13px; height: 13px; stroke-width: 2.6; }
     .face.ph, .face.add { display: grid; place-items: center; border-radius: 16px; border: 1.5px dashed rgba(255, 255, 255, 0.14); color: var(--faint); }
     .face.ph svg { width: 28px; height: 28px; }
     .face.add { cursor: pointer; color: var(--muted); transition: border-color 0.2s, color 0.2s, background 0.2s; }
-    .face.add:hover { border-color: var(--calm); color: var(--calm); background: var(--calm-soft); }
+    @media (hover: hover) { .face.add:hover { border-color: var(--calm); color: var(--calm); background: var(--calm-soft); } }
     .face.add svg { width: 24px; height: 24px; }
     /* Привязка телефона: QR слева, шаги справа, кольцо обратного отсчёта */
     .pair { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px; align-items: center; padding: 20px; border-radius: 18px; background: var(--raise-2); margin-top: 12px; animation: rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
@@ -473,7 +473,7 @@
     .setup .bar { height: 5px; border-radius: 3px; background: var(--fill-2); overflow: hidden; margin-bottom: 8px; }
     .setup .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--care), var(--calm)); transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .setup-step { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 6px; margin: 0 -6px; border-radius: 10px; font-size: 14px; font-weight: 550; }
-    .setup-step:hover:not(:disabled) { background: var(--fill); }
+    @media (hover: hover) { .setup-step:hover:not(:disabled) { background: var(--fill); } }
     .setup-step:disabled { opacity: 1; cursor: default; }
     .setup-step .ri { width: 28px; height: 28px; border-radius: 50%; }
     .setup-step .ri svg { width: 15px; height: 15px; stroke-width: 2.2; }
@@ -484,7 +484,7 @@
     /* Журнал */
     .list { display: grid; gap: 2px; }
     .item { display: flex; align-items: center; gap: 14px; padding: 8px; margin: 0 -8px; border-radius: 12px; width: calc(100% + 16px); min-width: 0; }
-    button.item:hover { background: var(--fill); }
+    @media (hover: hover) { button.item:hover { background: var(--fill); } }
     .thumb-wrap { position: relative; flex: none; width: 112px; height: 63px; }
     .item img.thumb, .item .thumb-ph { display: block; width: 112px; height: 63px; border-radius: 9px; object-fit: cover; background: linear-gradient(100deg, #15181D 30%, #1E2229 50%, #15181D 70%) 0 0 / 300% 100%; animation: shimmer 2s linear infinite; }
     .ev-ico { position: absolute; left: -6px; bottom: -6px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--warn); color: #2B1A00; box-shadow: 0 0 0 3px var(--raise); }
@@ -535,18 +535,21 @@
     .pl.idle:not(.paused) { cursor: none; }
     .pl-bar { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
     .pl-track { position: relative; flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); transition: height 0.15s; }
-    .pl-bar:hover .pl-track, .pl.drag .pl-track { height: 6px; }
+    .pl.drag .pl-track { height: 6px; }
+    @media (hover: hover) { .pl-bar:hover .pl-track { height: 6px; } }
     .pl-buf, .pl-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; }
     .pl-buf { background: rgba(255, 255, 255, 0.35); }
     .pl-fill { background: var(--acc); }
     .pl-knob { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.25); transform: scale(0); transition: transform 0.15s; }
-    .pl-bar:hover .pl-knob, .pl.drag .pl-knob, .pl.touch .pl-knob { transform: scale(1); }
+    .pl.drag .pl-knob, .pl.touch .pl-knob { transform: scale(1); }
+    @media (hover: hover) { .pl-bar:hover .pl-knob { transform: scale(1); } }
     .pl-mark { position: absolute; top: 50%; width: 4px; height: 12px; margin: -6px 0 0 -2px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35); }
     .pl-hover { position: absolute; bottom: 22px; transform: translateX(-50%); padding: 3px 7px; border-radius: 6px; background: rgba(0, 0, 0, 0.8); font-size: 12px; font-weight: 650; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.12s; }
-    .pl-bar:hover .pl-hover, .pl.drag .pl-hover { opacity: 1; }
+    .pl.drag .pl-hover { opacity: 1; }
+    @media (hover: hover) { .pl-bar:hover .pl-hover { opacity: 1; } }
     .pl-row { display: flex; align-items: center; gap: 2px; margin-top: 2px; }
     .pl-btn { height: 38px; min-width: 38px; padding: 0 8px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: 650; color: #fff; transition: background 0.15s, transform 0.12s; }
-    .pl-btn:hover { background: rgba(255, 255, 255, 0.12); }
+    @media (hover: hover) { .pl-btn:hover { background: rgba(255, 255, 255, 0.12); } }
     .pl-btn:active { transform: scale(0.92); }
     .pl-btn svg { width: 22px; height: 22px; }
     .pl-btn[aria-pressed="false"] { opacity: 0.55; }
@@ -609,7 +612,8 @@
     @media (max-width: 759px) {
       .grab { display: block; position: absolute; left: 50%; top: calc(6px + var(--safe-t)); width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: rgba(255, 255, 255, 0.18); }
       .sheet, .clip { position: relative; border-radius: 0; }
-      .sheet-head { touch-action: none; padding-top: 20px; }
+      .sheet-head { padding-top: 20px; }
+      .sheet-body { overscroll-behavior-y: contain; }
     }
     .sheet-body.fade > * { animation: rise 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
     .sheet-body.fade > *:nth-child(2) { animation-delay: 0.04s; } .sheet-body.fade > *:nth-child(3) { animation-delay: 0.08s; } .sheet-body.fade > *:nth-child(n+4) { animation-delay: 0.12s; }
@@ -2360,6 +2364,7 @@
     // Касания: один тап — показать/скрыть панель (на мыши — пауза), двойной по краю — ±5 с
     let lastTap = 0, tapT = 0;
     $q(".pl-tap").addEventListener("pointerup", (e) => {
+      if (Date.now() - swipeEndedAt < 400) return;
       const r = root.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, now = Date.now();
       if (e.pointerType === "mouse") { if (now - lastTap < 280) { clearTimeout(tapT); full(); lastTap = 0; } else { lastTap = now; tapT = setTimeout(toggle, 200); } return; }
       root.classList.add("touch");
@@ -2459,23 +2464,33 @@
     }, 210);
   }
   // На телефоне лист можно смахнуть вниз за шапку
-  function swipeToClose(scrim, close) {
-    const panel = scrim.firstElementChild, head = panel.querySelector(".sheet-head");
-    let y0 = 0, dy = 0, t0 = 0, active = false;
-    head.addEventListener("pointerdown", (e) => {
-      if (window.innerWidth >= 760 || e.pointerType === "mouse" || e.target.closest("button")) return;
-      active = true; y0 = e.clientY; dy = 0; t0 = Date.now();
-      head.setPointerCapture(e.pointerId);
-      panel.style.transition = "none";
-    });
-    head.addEventListener("pointermove", (e) => {
-      if (!active) return;
-      dy = Math.max(0, e.clientY - y0);
+  // На телефоне лист закрывается свайпом вниз из любого места, если он прокручен в самый верх
+  let swipeEndedAt = 0;
+  function swipeToClose(scrim, close, scroller) {
+    const panel = scrim.firstElementChild;
+    let x0 = 0, y0 = 0, dy = 0, t0 = 0, state = 0; // 0 — ждём, 1 — следим, 2 — тянем, -1 — не наш жест
+    panel.addEventListener("touchstart", (e) => {
+      state = -1;
+      if (window.innerWidth >= 760 || e.touches.length !== 1) return;
+      if (e.target.closest(".tabs, input, select, textarea, .pl-bar, .pl-row, .seg, .faces, .menu")) return;
+      if (scroller && scroller.scrollTop > 0) return;
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); dy = 0; state = 1;
+    }, { passive: true });
+    panel.addEventListener("touchmove", (e) => {
+      if (state < 1) return;
+      const t = e.touches[0], ddx = t.clientX - x0, ddy = t.clientY - y0;
+      if (state === 1) {
+        if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return;
+        if (ddy > 0 && ddy > Math.abs(ddx) * 1.3 && (!scroller || scroller.scrollTop <= 0)) { state = 2; panel.style.transition = "none"; hideMenu(); }
+        else { state = -1; return; }
+      }
+      e.preventDefault();
+      dy = Math.max(0, ddy);
       panel.style.transform = `translateY(${dy}px)`;
-    });
+    }, { passive: false });
     const end = () => {
-      if (!active) return;
-      active = false;
+      if (state !== 2) { state = 0; return; }
+      state = 0; swipeEndedAt = Date.now();
       const fast = dy > 40 && dy / Math.max(1, Date.now() - t0) > 0.6;
       panel.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1)";
       if (dy > 120 || fast) {
@@ -2484,12 +2499,12 @@
         setTimeout(() => { scrim.classList.remove("closing"); scrim.hidden = true; panel.style.transform = ""; panel.style.transition = ""; close(true); syncBack(); }, 230);
       } else panel.style.transform = "";
     };
-    head.addEventListener("pointerup", end);
-    head.addEventListener("pointercancel", end);
+    panel.addEventListener("touchend", end);
+    panel.addEventListener("touchcancel", end);
   }
 
-  swipeToClose($("sheetScrim"), closeSheet);
-  swipeToClose($("clipScrim"), closeClip);
+  swipeToClose($("sheetScrim"), closeSheet, $("sheetBody"));
+  swipeToClose($("clipScrim"), closeClip, null);
 
   /* ---------- Скользящий бегунок в переключателях ---------- */
   const pillMem = new Map();
@@ -2516,6 +2531,7 @@
     });
   }
   window.addEventListener("resize", () => syncPills());
+  if (matchMedia("(hover: none)").matches) document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".tool, .vp-btn, .icon-btn, .pcell"); if (b) setTimeout(() => b.blur(), 0); }, true);
 
   /* ---------- Подтверждение ---------- */
   let askResolve = null;
