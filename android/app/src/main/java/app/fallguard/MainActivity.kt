@@ -430,6 +430,10 @@ class MainActivity : Activity() {
             }
         }
         web.webChromeClient = object : WebChromeClient() {
+            // Без этого WebView рисует серую заглушку с большим «плей», пока видео не получило кадр
+            override fun getDefaultVideoPoster(): android.graphics.Bitmap =
+                android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
+
             override fun onShowCustomView(view: View, callback: CustomViewCallback) {
                 customView = view
                 customCallback = callback

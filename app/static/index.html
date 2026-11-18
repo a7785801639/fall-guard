@@ -307,6 +307,12 @@
     .vp-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; background: linear-gradient(100deg, #07080A 30%, #111318 50%, #07080A 70%) 0 0 / 300% 100%; animation: shimmer 2.4s linear infinite; z-index: 1; }
     .vp-msg[data-err="1"] { animation: none; background: #07080A; }
     .vp-msg[data-err="1"] .dots { display: none; }
+    /* Подключение: два кольца расходятся от камеры */
+    .vp-msg .wave { opacity: 0; transform-box: fill-box; transform-origin: center; animation: wave 2.2s ease-out infinite; }
+    .vp-msg .wave.w2 { animation-delay: 1.1s; }
+    .vp-msg[data-err="1"] .wave { display: none; }
+    @keyframes wave { 0% { transform: scale(0.55); opacity: 0.55; } 100% { transform: scale(1.5); opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .vp-msg .wave { animation: none; } }
     @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
     .draw-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 16px; border-radius: 14px; font-size: 13.5px; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(12px); z-index: 5; }
     .draw-bar span { flex: 1; min-width: 0; }
@@ -829,13 +835,13 @@
         <div class="player">
           <div class="viewport" id="viewport">
             <div class="vp-inner" id="vpInner">
-              <video id="liveVideo" muted playsinline autoplay hidden></video>
+              <video id="liveVideo" muted playsinline autoplay hidden poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
               <img class="live" id="liveImg" alt="" hidden />
               <div class="scrub" id="scrub" hidden><img id="scrubImg" alt="Снимок из хроники" /></div>
             </div>
             <canvas id="overlay"></canvas>
             <div class="pip-status" id="pipStatus"><i></i><span></span></div>
-            <div class="vp-msg" id="vpMsg"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="48" r="40" fill="rgba(255,255,255,.035)"/><rect x="44" y="30" width="54" height="38" rx="9" fill="#1F232A" stroke="#48505F" stroke-width="3"/><path d="m98 42 18-9v32l-18-9Z" fill="#1F232A" stroke="#48505F" stroke-width="3" stroke-linejoin="round"/><circle cx="71" cy="49" r="9.5" fill="none" stroke="#48505F" stroke-width="3"/><g class="dots" fill="#959CA9"><circle cx="66" cy="88" r="3"/><circle cx="80" cy="88" r="3"/><circle cx="94" cy="88" r="3"/></g></svg><b id="vpMsgTitle">Подключаемся к камере</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
+            <div class="vp-msg" id="vpMsg"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle class="wave" cx="80" cy="48" r="40" fill="none" stroke="#5BE0A1" stroke-width="1.5"/><circle class="wave w2" cx="80" cy="48" r="40" fill="none" stroke="#5BE0A1" stroke-width="1.5"/><circle cx="80" cy="48" r="40" fill="rgba(255,255,255,.035)"/><rect x="44" y="30" width="54" height="38" rx="9" fill="#1F232A" stroke="#48505F" stroke-width="3"/><path d="m98 42 18-9v32l-18-9Z" fill="#1F232A" stroke="#48505F" stroke-width="3" stroke-linejoin="round"/><circle cx="71" cy="49" r="9.5" fill="none" stroke="#48505F" stroke-width="3"/><g class="dots" fill="#959CA9"><circle cx="66" cy="88" r="3"/><circle cx="80" cy="88" r="3"/><circle cx="94" cy="88" r="3"/></g></svg><b id="vpMsgTitle">Подключаемся к камере</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
             <div class="vp-top">
               <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span><span class="chip warn-chip" id="chipStall" hidden>Видео подвисло · переподключаю</span><span class="chip warn-chip" id="chipLost" hidden></span></div>
               <div class="vp-btns">
@@ -1235,6 +1241,14 @@
   const MSE = window.ManagedMediaSource || window.MediaSource || null;
   let ws = null, ms = null, sb = null, msUrl = "", queue = [], session = 0, fails = 0, lastChunk = Date.now(), reTimer = 0, mjpeg = false;
 
+  // Пока кадра ещё нет (запуск, возвращение из фона), поверх видео — «Подключаемся к камере», а не серая заглушка
+  let vpOnline = false, waitingFrame = true;
+  function syncVpMsg() {
+    const m = $("vpMsg");
+    m.hidden = vpOnline && !waitingFrame;
+    if (vpOnline && waitingFrame) { m.dataset.err = "0"; $("vpMsgTitle").textContent = "Подключаемся к камере"; $("vpMsgSub").textContent = "Секунду…"; }
+  }
+  function frameOk() { if (!waitingFrame) return; waitingFrame = false; syncVpMsg(); }
   function teardown(keepWs) {
     if (!keepWs && ws) { const w = ws; ws = null; w.onmessage = w.onclose = w.onerror = null; try { w.close(); } catch (_) {} }
     queue = []; sb = null;
@@ -1352,7 +1366,9 @@
     trimBuffer();
     if (video.paused) video.play().catch(() => {});
   }, 1500);
-  img.addEventListener("load", () => { lastChunk = Date.now(); layout(); });
+  img.addEventListener("load", () => { lastChunk = Date.now(); layout(); frameOk(); });
+  video.addEventListener("playing", frameOk);
+  video.addEventListener("loadeddata", () => { if (video.videoWidth) frameOk(); });
   video.addEventListener("loadedmetadata", () => { layout(); if (!document.hidden) video.play().catch(() => {}); });
   video.addEventListener("resize", () => layout());
   document.addEventListener("visibilitychange", () => { if (!document.hidden && started) { lastOk = Date.now(); startStream(true); connectTelemetry(); poll(); } });
@@ -1732,7 +1748,7 @@
     $("statusSub").textContent = cap(sub);
     $("status").title = title + (sub ? " — " + cap(sub) : "");
     $("app").dataset.alarm = lvl === "alarm" ? "1" : "0";
-    $("vpMsg").hidden = online;
+    vpOnline = online; syncVpMsg();
     if (!online) {
       const err = S.camera_configured === false || Boolean(S.camera_error);
       $("vpMsg").dataset.err = err ? "1" : "0";
@@ -1986,6 +2002,7 @@
     on = Boolean(on);
     if (on === bgMode) return;
     bgMode = on;
+    waitingFrame = true; syncVpMsg();
     if (on) {
       clearTimeout(reTimer); clearTimeout(twsTimer);
       teardown(false);
