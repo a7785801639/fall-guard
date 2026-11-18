@@ -71,9 +71,11 @@ class AlarmActivity : Activity() {
         ui.removeCallbacks(tick)
         ui.post(tick)
         startPulse()
+        if (alarmInfo != null) startLive()
     }
 
     override fun onPause() {
+        liveGen++
         ui.removeCallbacks(tick)
         stopPulse()
         super.onPause()
@@ -158,6 +160,10 @@ class AlarmActivity : Activity() {
 
         val image = findViewById<ImageView>(R.id.alarmImage)
         image.clipToOutline = true // скругление кадра (XML-атрибут работает только с API 31)
+        image.setOnClickListener { liveWanted = !liveWanted; renderChip(); if (liveWanted) startLive() else showEventShot() }
+        alarmInfo = info
+        eventShot = null
+        renderChip()
         if (info.imageUrl.isNotEmpty() && info.base.isNotEmpty()) {
             val token = Prefs(this).token
             Thread {
@@ -166,16 +172,66 @@ class AlarmActivity : Activity() {
                     val data = Api.bytes(info.base, info.imageUrl, token)
                     if (data != null) {
                         val bmp = BitmapFactory.decodeByteArray(data, 0, data.size)
-                        runOnUiThread { if (!isFinishing) image.setImageBitmap(bmp) }
+                        eventShot = bmp
+                        runOnUiThread { if (!isFinishing && !liveShowing) image.setImageBitmap(bmp) }
                         return@Thread
                     }
                     try { Thread.sleep(1200) } catch (_: InterruptedException) { return@Thread }
                 }
             }.start()
         }
+        startLive()
+    }
+
+    // ---------------------------------------------------------------- живое видео на экране тревоги
+    private var alarmInfo: AlarmInfo? = null
+    @Volatile private var eventShot: android.graphics.Bitmap? = null
+    @Volatile private var liveWanted = true
+    @Volatile private var liveShowing = false
+    @Volatile private var liveGen = 0
+
+    private fun renderChip() {
+        val chip = findViewById<TextView>(R.id.alarmLive)
+        val t = alarmInfo?.ts ?: 0L
+        chip.text = if (liveWanted && liveShowing) "● Эфир · коснитесь для снимка" else "Снимок " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(t)) + (if (liveWanted) "" else " · коснитесь для эфира")
+        chip.setTextColor(if (liveWanted && liveShowing) 0xFFFF6B70.toInt() else 0xFFFFFFFF.toInt())
+    }
+
+    private fun showEventShot() {
+        liveShowing = false
+        eventShot?.let { findViewById<ImageView>(R.id.alarmImage).setImageBitmap(it) }
+        renderChip()
+    }
+
+    /** Кадры с камеры ~3 раза в секунду с разметкой людей: видно, двигается ли она. */
+    private fun startLive() {
+        val info = alarmInfo ?: return
+        if (info.base.isEmpty() || !liveWanted) return
+        val gen = ++liveGen
+        val token = Prefs(this).token
+        Thread {
+            var fails = 0
+            while (gen == liveGen && liveWanted && !isFinishing) {
+                val data = Api.bytes(info.base, "/api/snapshot.jpg?overlay=1", token)
+                val bmp = data?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                if (bmp != null) {
+                    fails = 0
+                    runOnUiThread {
+                        if (gen == liveGen && liveWanted && !isFinishing) {
+                            findViewById<ImageView>(R.id.alarmImage).setImageBitmap(bmp)
+                            if (!liveShowing) { liveShowing = true; renderChip() }
+                        }
+                    }
+                } else if (++fails >= 3) {
+                    runOnUiThread { if (gen == liveGen) showEventShot() }
+                }
+                try { Thread.sleep(if (fails > 0) 1500 else 330) } catch (_: InterruptedException) { return@Thread }
+            }
+        }.start()
     }
 
     override fun onDestroy() {
+        liveGen++
         ui.removeCallbacks(tick)
         stopPulse()
         AlertService.onAlarmStopped = null
