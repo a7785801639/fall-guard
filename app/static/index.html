@@ -60,6 +60,7 @@
       .rail { flex: none; width: 372px; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--panel); border-radius: var(--r-lg); overflow-y: auto; scrollbar-width: none; }
       .rail::-webkit-scrollbar { display: none; }
       .rail-spacer { display: block; flex: 1; min-height: 4px; }
+      .rail > :not(.closeup):not(.rail-spacer) { flex: none; }
     }
     .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 4px 8px; }
     .caption b { font-weight: 600; color: var(--text); font-size: 14px; }
@@ -171,7 +172,7 @@
 
     /* ================= Крупный план (широкий экран) ================= */
     .closeup { display: none; position: relative; border-radius: var(--r); overflow: hidden; background: #000; aspect-ratio: 4 / 3; flex: none; }
-    @media (min-width: 980px) { .closeup { display: block; flex: 1 1 auto; aspect-ratio: auto; min-height: 200px; } }
+    @media (min-width: 980px) { .closeup { display: block; flex: 1 1 auto; aspect-ratio: auto; min-height: 150px; } }
     .closeup canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     .closeup-label { position: absolute; left: 10px; top: 10px; height: 24px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); }
     .closeup-empty { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(90% 70% at 50% 45%, #14171D, #0B0C0F); }
@@ -274,6 +275,9 @@
     @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
     .draw-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 16px; border-radius: 14px; font-size: 13.5px; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(12px); z-index: 5; }
     .draw-bar span { flex: 1; min-width: 0; }
+    .draw-bar .pts { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+    .draw-bar .pts i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); transition: background 0.2s, transform 0.2s; }
+    .draw-bar .pts i.on { background: var(--calm); transform: scale(1.15); }
     .draw-bar .btn.primary { background: #fff; color: #111; }
     .scrub { position: absolute; inset: 0; z-index: 4; background: #000; display: grid; place-items: center; }
     .scrub img { width: 100%; height: 100%; object-fit: contain; }
@@ -306,6 +310,8 @@
     .axis span.last { transform: translateX(-100%); }
     @media (max-width: 600px) { .timeline { gap: 8px; padding: 10px 10px 4px; } .timeline .seg button { padding: 0 7px; font-size: 12px; } }
     .tip { position: fixed; z-index: 50; width: 196px; padding: 8px 8px 10px; border-radius: 12px; pointer-events: none; background: var(--raise-2); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5); font-size: 13px; }
+    .tip .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--calm); }
+    .tip .tdot.t-warn { background: var(--warn); } .tip .tdot.t-alarm { background: var(--alarm); } .tip .tdot.t-caregiver { background: var(--care); } .tip .tdot.t-paused, .tip .tdot.t-offline { background: var(--faint); }
     .tip img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; background: var(--fill); display: block; margin-bottom: 7px; }
 
     /* ================= Меню действий ================= */
@@ -392,12 +398,48 @@
     .face.add { cursor: pointer; color: var(--muted); transition: border-color 0.2s, color 0.2s, background 0.2s; }
     .face.add:hover { border-color: var(--calm); color: var(--calm); background: var(--calm-soft); }
     .face.add svg { width: 24px; height: 24px; }
-    .pair { display: grid; gap: 14px; justify-items: center; text-align: center; padding: 22px 16px; border-radius: 14px; background: var(--raise-2); margin-top: 12px; }
-    .pair .qr { width: 212px; height: 212px; padding: 10px; background: #fff; color: #000; border-radius: 14px; }
+    /* Привязка телефона: QR слева, шаги справа, кольцо обратного отсчёта */
+    .pair { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px; align-items: center; padding: 20px; border-radius: 18px; background: var(--raise-2); margin-top: 12px; animation: rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    @media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); justify-items: center; } }
+    .pair .qr { position: relative; width: 196px; height: 196px; padding: 10px; background: #fff; color: #000; border-radius: 16px; box-shadow: 0 0 0 6px rgba(91, 224, 161, 0.12); }
     .pair .qr svg { width: 100%; height: 100%; display: block; }
-    .pair code { font: 700 28px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; }
-    .stats-line { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
-    .stats-line b { color: var(--text); }
+    .steps { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: st; }
+    .steps li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 14px; color: var(--muted); counter-increment: st; }
+    .steps li::before { content: counter(st); width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--calm-soft); color: var(--calm); font-weight: 700; font-size: 13px; }
+    .steps li b { color: var(--text); font-weight: 600; }
+    .code-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .code { font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.14em; padding: 10px 14px; border-radius: 12px; background: var(--fill); }
+    .ring-left { position: relative; width: 44px; height: 44px; flex: none; }
+    .ring-left svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+    .ring-left circle { fill: none; stroke-width: 4; }
+    .ring-left .bg { stroke: var(--fill-2); } .ring-left .fg { stroke: var(--calm); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+    .ring-left span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; }
+    /* Сводка за сутки — плитки */
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 600px) { .stats { gap: 6px; } .stat { padding: 10px 8px; } .stat .ri { width: 26px; height: 26px; margin-bottom: 4px; } .stat b { font-size: 19px; } .stat span { font-size: 11.5px; } }
+    .stat { display: grid; gap: 2px; padding: 12px; border-radius: 14px; background: var(--raise-2); }
+    .stat .ri { width: 30px; height: 30px; border-radius: 9px; margin-bottom: 6px; }
+    .stat .ri svg { width: 16px; height: 16px; }
+    .stat b { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+    .stat b small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+    .stat span { font-size: 12.5px; color: var(--muted); }
+    .stat.hot b { color: var(--alarm); }
+    /* Карточка «Настройка охраны» — пока что-то важное не сделано */
+    .setup { padding: 14px; border-radius: var(--r); background: linear-gradient(160deg, rgba(126, 168, 255, 0.10), rgba(126, 168, 255, 0.02) 60%), var(--tile); box-shadow: inset 0 0 0 1px rgba(126, 168, 255, 0.16); }
+    .setup-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .setup-head b { font-size: 15px; font-weight: 650; flex: 1; }
+    .setup-head .muted { font-size: 12.5px; }
+    .setup .bar { height: 5px; border-radius: 3px; background: var(--fill-2); overflow: hidden; margin-bottom: 8px; }
+    .setup .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--care), var(--calm)); transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .setup-step { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 6px; margin: 0 -6px; border-radius: 10px; font-size: 14px; font-weight: 550; }
+    .setup-step:hover:not(:disabled) { background: var(--fill); }
+    .setup-step:disabled { opacity: 1; cursor: default; }
+    .setup-step .ri { width: 28px; height: 28px; border-radius: 50%; }
+    .setup-step .ri svg { width: 15px; height: 15px; stroke-width: 2.2; }
+    .setup-step.done { color: var(--muted); font-weight: 500; }
+    .setup-step.done span:not(.ri) { text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.25); }
+    .setup-step > svg { margin-left: auto; width: 16px; height: 16px; color: var(--faint); }
+    @media (max-width: 979px) { .setup { order: 1; } }
     /* Журнал */
     .list { display: grid; gap: 2px; }
     .item { display: flex; align-items: center; gap: 14px; padding: 8px; margin: 0 -8px; border-radius: 12px; width: calc(100% + 16px); min-width: 0; }
@@ -413,12 +455,18 @@
     .item-title.fall { color: var(--alarm); }
     .item-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .day { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 12px 0 4px; }
-    .logrow { display: flex; align-items: center; gap: 12px; padding: 10px 16px; font-size: 14px; }
-    .logrow + .logrow { border-top: 1px solid var(--line); }
-    .logrow time { color: var(--faint); flex: none; width: 44px; }
-    .logrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--fill-2); flex: none; }
-    .logrow.warning::before { background: var(--warn); }
-    .logrow.critical::before { background: var(--alarm); }
+    /* Все события: лента с иконками и линией времени */
+    .feed { display: grid; }
+    .feed-row { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; font-size: 14px; }
+    .feed-row .ri { width: 32px; height: 32px; border-radius: 50%; position: relative; z-index: 1; }
+    .feed-row .ri svg { width: 16px; height: 16px; }
+    .feed-row:not(:last-child)::before { content: ""; position: absolute; left: 15.5px; top: 40px; bottom: -8px; width: 1px; background: var(--line); }
+    .feed-body { flex: 1; min-width: 0; padding-top: 1px; }
+    .feed-text { display: block; line-height: 1.35; }
+    .feed-text b { font-weight: 600; }
+    .feed-time { display: block; font-size: 12.5px; color: var(--faint); margin-top: 2px; }
+    .feed-row.critical .feed-text b { color: var(--alarm); }
+    .feed-row .btn { flex: none; margin-top: -2px; }
 
     /* ================= Запись события ================= */
     .clip { background: var(--raise); width: 100%; height: 100%; display: flex; flex-direction: column; padding-top: var(--safe-t); }
@@ -427,6 +475,11 @@
     .clip-media { background: #000; flex: 1; min-height: 0; display: grid; place-items: center; }
     .clip-media video, .clip-media img { width: 100%; max-height: 68vh; object-fit: contain; display: block; }
     .clip-foot { padding: 14px 18px calc(18px + var(--safe-b)); display: grid; gap: 12px; }
+    #clipTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .clip-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+    .clip-meta .badge { height: 26px; padding: 0 10px; font-size: 12.5px; gap: 6px; }
+    .clip-meta .badge svg { width: 14px; height: 14px; }
+    .clip-media .empty-art { padding: 40px 12px; }
 
     .lock { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; padding: 28px; text-align: center; }
     .lock-card { max-width: 360px; display: grid; gap: 14px; justify-items: center; animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
@@ -682,6 +735,8 @@
           <span class="closeup-label" id="closeupLabel">Крупно</span>
         </section>
 
+        <section class="setup" id="setupCard" hidden aria-label="Настройка охраны"></section>
+
         <section class="signal">
           <div class="caption"><b>Сигнал</b><span id="modeWho">в этом браузере</span></div>
           <div class="seg wide" id="modeSeg">
@@ -735,7 +790,7 @@
       </div>
       <div class="clip-media" id="clipMedia"></div>
       <div class="clip-foot">
-        <div class="muted small num" id="clipMeta"></div>
+        <div class="clip-meta num" id="clipMeta"></div>
         <div class="row" style="align-items:center">
           <button class="btn" id="clipFalse" style="flex:0 1 auto" onclick="falseAlarmClip()"><svg class="ico"><use href="#i-x-circle"/></svg>Это ложная тревога</button>
           <span style="flex:1"></span>
@@ -1197,7 +1252,8 @@
   function syncDrawBar() {
     if (!drawMode) return;
     const [hint, need] = DRAW[drawMode];
-    $("drawHint").textContent = hint + " · точек: " + draft.length;
+    const n = Math.max(need, draft.length);
+    $("drawHint").innerHTML = esc(hint) + `<span class="pts">${Array.from({ length: n }, (_, i) => `<i class="${i < draft.length ? "on" : ""}"></i>`).join("")}</span>`;
     $("btnSaveZone").disabled = draft.length < need;
   }
   function undoPoint() { draft.pop(); syncDrawBar(); draw(); }
@@ -1643,6 +1699,26 @@
     toast("Запись этой тревоги ещё не готова — нажмите «Я рядом»");
   }
 
+  /* ---------- Настройка охраны: что ещё не сделано ---------- */
+  function renderSetup() {
+    if (!S) return;
+    const card = $("setupCard");
+    const steps = [
+      { done: Boolean(zones.bed_polygon && zones.bed_polygon.length >= 3), icon: "i-bed", label: "Отметить кровать на видео", go: "startDraw('bed')" },
+      { done: ((S.faces || {}).patient || []).length > 0, icon: "i-camera", label: "Добавить фото бабушки", go: "openSheet('people')" },
+      { done: (S.telegram_subscribers || []).length + (S.devices || []).length > 0, icon: "i-bell", label: "Подключить, кому слать тревоги", go: "openSheet('recipients')" },
+    ];
+    const done = steps.filter((x) => x.done).length;
+    let snooze = 0; try { snooze = Number(localStorage.getItem("fg_setup_snooze") || 0); } catch (_) {}
+    const hide = done === steps.length || Date.now() < snooze;
+    card.hidden = hide;
+    if (hide) return;
+    setHtml(card, `<div class="setup-head">${ri("i-shield", "care")}<b>Настройка охраны</b><span class="muted num">${done} из ${steps.length}</span><button class="icon-btn" style="width:30px;height:30px" onclick="snoozeSetup()" aria-label="Скрыть" title="Напомнить завтра">${ico("i-x")}</button></div>
+      <div class="bar"><i style="width:${Math.round((done / steps.length) * 100)}%"></i></div>`
+      + steps.map((x) => `<button class="setup-step${x.done ? " done" : ""}" ${x.done ? "disabled" : `onclick="${x.go}"`}>${x.done ? ri("i-check", "calm") : ri(x.icon, "care")}<span>${x.label}</span>${x.done ? "" : ico("i-chev-r")}</button>`).join(""));
+  }
+  function snoozeSetup() { lsSet("fg_setup_snooze", String(Date.now() + 86400000)); renderSetup(); toast("Напомню завтра", "info"); }
+
   /* ---------- Мой режим: только падение и сползание ---------- */
   function renderMode() {
     const on = me.mode === "falls";
@@ -1748,7 +1824,8 @@
     function hover(h) {
       cursor(h);
       const clip = clipNear(h);
-      $("tipText").innerHTML = `<b class="num">${clock(h.ts)}</b> · ${esc(label(h, clip))}${clip ? "<br><span class='muted'>нажмите, чтобы открыть запись</span>" : ""}`;
+      const sp = (h.tl.spans || []).find((x) => h.ts >= x.start && h.ts <= x.end);
+      $("tipText").innerHTML = `<i class="tdot t-${esc(clip ? (clip.state === "fallen" ? "alarm" : "warn") : sp ? sp.tone : "offline")}"></i><b class="num">${clock(h.ts)}</b> · ${esc(label(h, clip))}${clip ? "<br><span class='muted'>нажмите, чтобы открыть запись</span>" : ""}`;
       tip.hidden = false;
       tip.style.visibility = "hidden";
       tip.style.left = Math.max(8, Math.min(window.innerWidth - 204, h.x - 98)) + "px";
@@ -1798,7 +1875,35 @@
   function statsHtml(care) {
     const s = (care && care.summary_24h) || {};
     const h = (s.in_bed_sec || 0) / 3600;
-    return `<div class="stats-line num"><span>В кровати <b>${h.toFixed(1).replace(".", ",")} ч</b></span><span>Посадок <b>${s.sit_up_count || 0}</b></span><span>Выходов <b>${s.left_bed_count || 0}</b></span><span>Падений <b${s.fall_count ? ' style="color:var(--alarm)"' : ""}>${s.fall_count || 0}</b></span></div>`;
+    const tile = (icon, tone, val, unit, label, hot) => `<div class="stat${hot ? " hot" : ""}">${ri(icon, tone)}<b>${val}${unit ? `<small>${unit}</small>` : ""}</b><span>${label}</span></div>`;
+    return `<div class="stats num">${tile("i-bed", "calm", h.toFixed(1).replace(".", ","), "ч", "в кровати")}${tile("i-sit", "warn", s.sit_up_count || 0, "", "посадок")}${tile("i-walk", "warn", s.left_bed_count || 0, "", "выходов")}${tile("i-fall", "alarm", s.fall_count || 0, "", "падений", s.fall_count > 0)}</div>`;
+  }
+  // Иконка строки журнала: тревоги — по состоянию, системные — по смыслу текста
+  function feedIcon(e) {
+    if (e.category === "alert") return [EV_ICON[e.state] || "i-alert", e.level === "critical" ? "alarm" : "warn"];
+    const t = String(e.text || "").toLowerCase();
+    if (/пауз/.test(t)) return ["i-pause", ""];
+    if (/включ|возобнов/.test(t)) return ["i-power", "calm"];
+    if (/ложн/.test(t)) return ["i-x-circle", ""];
+    if (/камер|поток|кадр/.test(t)) return ["i-camera", e.level === "warning" ? "warn" : ""];
+    if (/телефон|устройств/.test(t)) return ["i-phone", ""];
+    if (/telegram|чат|бот/.test(t)) return ["i-send", "tg"];
+    if (/зон|кроват|разметк/.test(t)) return ["i-bed", ""];
+    if (/лиц|фото|бабушк|свой|родствен/.test(t)) return ["i-user", ""];
+    return [e.level === "warning" ? "i-alert" : "i-info", e.level === "warning" ? "warn" : ""];
+  }
+  function feedHtml(evs) {
+    let last = "";
+    return `<div class="feed">` + evs.slice(0, 150).map((e) => {
+      const dl = e.ts ? dayLabel(e.ts) : (e.date || "");
+      const head = dl !== last ? `<div class="day">${esc(dl)}</div>` : "";
+      last = dl;
+      const [icon, tone] = feedIcon(e);
+      const parts = String(e.text || "").split(" — ");
+      const text = parts.length > 1 ? `<b>${esc(parts[0])}</b> — ${esc(parts.slice(1).join(" — "))}` : esc(e.text);
+      const rec = e.clip_id && clips.some((c) => c.id === e.clip_id) ? `<button class="btn sm" onclick="openClip('${esc(e.clip_id)}')">${ico("i-play")}Запись</button>` : "";
+      return head + `<div class="feed-row ${esc(e.level)}">${ri(icon, tone)}<span class="feed-body"><span class="feed-text">${text}</span><time class="feed-time num" title="${esc(e.date)}">${esc((e.time || "").slice(0, 5))}</time></span>${rec}</div>`;
+    }).join("") + `</div>`;
   }
 
   /* ---------- Журнал ---------- */
@@ -1832,12 +1937,12 @@
         let last = "";
         body = `<div class="list">` + clips.map((c) => { const dl = dayLabel(c.ts); const h = dl !== last ? `<div class="day">${dl}</div>` : ""; last = dl; return h + clipItem(c); }).join("") + `</div>`;
       }
-      body = `<div class="group">${body}</div><div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div>
+      body = `<div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div><div class="group">${body}</div>
         <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ. Старые удаляются автоматически.</p><button class="btn red-text" onclick="clearArchive()">${ico("i-trash")}Очистить архив</button></div>`;
     } else {
       const evs = (S.events || []).filter((e) => logFilter === "all" || e.category === logFilter);
       body = `<div class="group"><div style="margin-bottom:12px" class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div>`
-        + (evs.length ? `<div class="rows">` + evs.slice(0, 150).map((e) => `<div class="logrow ${esc(e.level)}"><time class="num" title="${esc(e.date)}">${esc((e.time || "").slice(0, 5))}</time><span style="flex:1;min-width:0">${esc(e.text)}</span>${e.clip_id && clips.some((c) => c.id === e.clip_id) ? `<button class="btn sm ghost" onclick="openClip('${esc(e.clip_id)}')">Запись</button>` : ""}</div>`).join("") + `</div>` : emptyArt("shield", "Записей нет", "")) + `</div>`;
+        + (evs.length ? feedHtml(evs) : emptyArt("shield", "Записей нет", "")) + `</div>`;
     }
     return `<div>${seg}</div>` + body;
   }
@@ -1846,10 +1951,12 @@
     if (!c) { toast("Запись уже удалена из архива"); return; }
     openClipId = id;
     $("clipTitle").textContent = c.title || c.state;
-    $("clipMeta").textContent = `${c.date || ""} ${c.time || clock(c.ts)}` + (c.false_alarm ? " · отмечено как ложная тревога" : "") + (c.has_mp4 ? "" : " · видео ещё готовится или не записано");
+    $("clipMeta").innerHTML = `<span class="badge">${ico("i-clock")}${esc(dayLabel(c.ts))}, ${esc((c.time || clock(c.ts)).slice(0, 5))}</span><span class="badge">${esc(ago(c.ts))}</span>`
+      + (c.false_alarm ? `<span class="badge">${ico("i-x-circle")}ложная тревога</span>` : "")
+      + (c.has_mp4 ? `<span class="badge calm">${ico("i-play")}видео</span>` : `<span class="badge">только снимок</span>`);
     $("clipMedia").innerHTML = c.has_mp4 && c.mp4_url
       ? `<video controls autoplay loop muted playsinline poster="${esc(withAuth(c.jpg_url || ""))}" src="${esc(withAuth(c.mp4_url))}"></video>`
-      : c.jpg_url ? `<img alt="Кадр события" src="${esc(withAuth(c.jpg_url))}" />` : `<div class="empty">Нет изображения</div>`;
+      : c.jpg_url ? `<img alt="Кадр события" src="${esc(withAuth(c.jpg_url))}" />` : emptyArt("room", "Нет изображения", "Кадр этого события не сохранился");
     $("clipFalse").disabled = Boolean(c.false_alarm);
     $("clipIco").className = "ri " + (c.false_alarm ? "" : c.state === "fallen" ? "alarm" : "warn");
     $("clipIco").innerHTML = ico(EV_ICON[c.state] || "i-alert");
@@ -2038,8 +2145,13 @@
         <div class="rowi-actions">${modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`)}${sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги")}<button class="btn sm ghost red-text icon-only" onclick="removeDevice('${id}')" aria-label="Отвязать" title="Отвязать телефон">${ico("i-trash")}</button></div></div>`;
     }).join("") + `</div>`;
     if (pairInfo) {
-      h += `<div class="pair"><div class="qr">${pairInfo.qr_svg}</div><div><div class="muted small">Код привязки</div><code class="num">${esc(pairInfo.code)}</code></div>
-        <div class="small muted">Наведите камеру телефона на QR-код или введите в приложении адрес <b style="color:var(--text)">${esc(pairInfo.server_url)}</b> и этот код.<br>Код действует ещё <span class="num" id="pairLeft"></span>.</div></div>`;
+      const C = 2 * Math.PI * 19;
+      h += `<div class="pair"><div class="qr">${pairInfo.qr_svg}</div>
+        <div style="display:grid;gap:16px;min-width:0">
+          <ol class="steps"><li><span>Установите приложение <b>FallGuard</b> на Android</span></li><li><span>Наведите <b>камеру телефона</b> на QR-код — приложение откроется и подключится само</span></li><li><span>Или введите вручную адрес <b>${esc(pairInfo.server_url)}</b> и код:</span></li></ol>
+          <div class="code-row"><span class="code num">${esc(pairInfo.code)}</span><button class="btn sm" onclick="copyText('${esc(pairInfo.code)}')">${ico("i-check")}Копировать</button>
+            <span class="ring-left" title="Код действует ограниченное время"><svg viewBox="0 0 44 44"><circle class="bg" cx="22" cy="22" r="19"/><circle class="fg" id="pairRing" cx="22" cy="22" r="19" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="0"/></svg><span class="num" id="pairLeft"></span></span></div>
+        </div></div>`;
     } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">${ico("i-phone-plus")}Подключить телефон</button>`;
     if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">${ico("i-gear")}Настройки приложения на этом телефоне</button>`;
     return h + `</div>`;
@@ -2050,6 +2162,10 @@
   async function testTelegram() { const d = await call("/api/test-telegram", { method: "POST" }); if (d) toast(d.message || "Отправлено"); }
   async function patchDevice(id, patch) { if (await call("/api/devices/" + encodeURIComponent(id), { json: patch })) await refreshMe(); }
   async function removeDevice(id) { if (await ask("Отвязать телефон?", "Тревоги на него приходить перестанут. Подключить снова можно по QR-коду.", "Отвязать", "i-phone") && await call("/api/devices/" + encodeURIComponent(id), { method: "DELETE" }, "Телефон отвязан")) poll(); }
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); toast("Код скопирован"); }
+    catch (_) { toast("Не удалось скопировать — перепишите код вручную", "info"); }
+  }
   async function pairPhone() {
     const d = await call("/api/devices/pair-code", { method: "POST" });
     if (!d) return;
@@ -2060,6 +2176,7 @@
       const left = Math.round((pairInfo.until - Date.now()) / 1000);
       if (left <= 0) { clearInterval(pairTimer); pairInfo = null; renderSheet(); return; }
       const el = $("pairLeft"); if (el) el.textContent = timer(left);
+      const ring = $("pairRing"); if (ring) ring.style.strokeDashoffset = ((1 - left / Math.max(1, pairInfo.expires_in)) * 2 * Math.PI * 19).toFixed(1);
     }, 1000);
   }
 
@@ -2187,7 +2304,7 @@
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
       if (me.kind === "telegram") { const mine = (S.telegram_subscribers || []).find((s) => String(s.chat_id) === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
       if (me.kind === "device") { const mine = (S.devices || []).find((d) => d.id === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
-      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); draw();
+      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); renderSetup(); draw();
       techLine = [S.runtime, (S.infer_fps || 0).toFixed(1) + " кадр/с", cam.resolution && cam.resolution[0] ? cam.resolution.join("×") : "", mjpeg ? "MJPEG" : "H.264"].filter(Boolean).join(" · ");
       if (pendingClip && clips.some((c) => c.id === pendingClip)) { const id = pendingClip; pendingClip = ""; openClip(id); }
     } catch (_) {} finally { pollBusy = false; }
