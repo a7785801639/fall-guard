@@ -79,6 +79,7 @@ class SettingsActivity : Activity() {
             else -> "Телефон готов к тревоге."
         }
         findViewById<View>(R.id.btnDone).visibility = if (onboarding) View.VISIBLE else View.GONE
+        renderReady(st)
 
         val list = findViewById<LinearLayout>(R.id.checklist)
         list.removeAllViews()
@@ -98,6 +99,19 @@ class SettingsActivity : Activity() {
                     startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    /** Полоска из трёх делений: зелёное — готово, янтарное — нужно разрешить. */
+    private fun renderReady(st: Readiness.State) {
+        val oks = listOf(st.notifications, st.battery, st.fullScreen)
+        listOf(R.id.readySeg1, R.id.readySeg2, R.id.readySeg3).forEachIndexed { i, id ->
+            findViewById<View>(id).setBackgroundResource(if (oks[i]) R.drawable.seg_on else R.drawable.seg_warn)
+        }
+        val n = oks.count { it }
+        findViewById<TextView>(R.id.readyText).apply {
+            text = if (n == 3) "Готово 3 из 3" else "Готово $n из 3 — осталось разрешить ниже"
+            setTextColor(getColor(if (n == 3) R.color.calm else R.color.muted))
         }
     }
 
@@ -157,7 +171,8 @@ class SettingsActivity : Activity() {
         list.removeAllViews()
         for (kind in Signals.Kind.entries) {
             val style = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
-            val sub = if (style == Signals.Style.SILENT) style.title else "${style.title.substringBefore(" ")} · ${Sounds.title(this, kind)}"
+            val vol = Signals.clampVolume(style, Sounds.volume(this, kind))
+            val sub = if (style == Signals.Style.SILENT) style.title else "${style.title.substringBefore(" ")} · ${Sounds.title(this, kind)} · $vol%"
             list.addView(SignalRow.build(this, kind.title, sub, style) { openSignal(kind) })
         }
     }
@@ -180,6 +195,25 @@ class SettingsActivity : Activity() {
                     Toast.makeText(this@SettingsActivity, "Нет приложения для выбора файла", Toast.LENGTH_SHORT).show()
                 }
             }
+            override fun onPickSystem() {
+                stopPreview()
+                val cur = Sounds.sound(this@SettingsActivity, kind)
+                val pick = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALL)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, false)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, kind.title)
+                if (cur.startsWith(Sounds.SYS)) pick.putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(cur.removePrefix(Sounds.SYS)))
+                try { startActivityForResult(pick, REQ_SYSTEM + kind.ordinal) } catch (_: Exception) {
+                    Toast.makeText(this@SettingsActivity, "На телефоне нет выбора мелодий", Toast.LENGTH_SHORT).show()
+                }
+            }
+            override fun onVolume(percent: Int) {
+                Sounds.setVolume(this@SettingsActivity, kind, percent)
+                stopPreview()
+                preview = Sounds.play(this@SettingsActivity, Sounds.uriOf(this@SettingsActivity, kind), usage(Signals.effectiveStyle(kind, "", Sounds.style(this@SettingsActivity, kind))), loop = false, gain = Sounds.gain(this@SettingsActivity, kind))
+                renderSignals()
+            }
             override fun onTest() {
                 stopPreview()
                 AlertService.start(this@SettingsActivity, AlertService.ACTION_TEST_SIGNAL, kind.name)
@@ -191,6 +225,18 @@ class SettingsActivity : Activity() {
     @Deprecated("Activity API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        Signals.Kind.entries.getOrNull(requestCode - REQ_SYSTEM)?.let { kind ->
+            if (requestCode < REQ_SYSTEM) return@let
+            @Suppress("DEPRECATION")
+            val uri = data?.getParcelableExtra<Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            if (resultCode == RESULT_OK && uri != null) {
+                val title = try { android.media.RingtoneManager.getRingtone(this, uri)?.getTitle(this) } catch (_: Exception) { null } ?: "Звук телефона"
+                Sounds.setSound(this, kind, Sounds.SYS + uri, title)
+                renderSignals()
+                openSignal(kind)
+            }
+            return
+        }
         val kind = Signals.Kind.entries.getOrNull(requestCode - REQ_SOUND) ?: return
         val uri = data?.data ?: return
         if (resultCode != RESULT_OK) return
@@ -222,6 +268,7 @@ class SettingsActivity : Activity() {
         const val EXTRA_ONBOARDING = "onboarding"
         const val EXTRA_UPDATE = "update"
         private const val REQ_SOUND = 300
+        private const val REQ_SYSTEM = 400
     }
 }
 
@@ -231,6 +278,8 @@ object SignalDialog {
         fun onStyle(style: Signals.Style)
         fun onSound(id: String)
         fun onPickFile()
+        fun onPickSystem()
+        fun onVolume(percent: Int)
         fun onTest()
     }
 
@@ -272,7 +321,39 @@ object SignalDialog {
             text = t; isAllCaps = false; gravity = Gravity.CENTER; setOnClickListener { click() }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)).apply { topMargin = dp(top) }
         }
-        box.addView(btn(R.style.Btn, "Свой файл…", 10) { cb.onPickFile() })
+        // Громкость: у тревоги — не ниже порога, чтобы её нельзя было заглушить случайно
+        box.addView(header("Громкость"))
+        val minV = Signals.minVolume(cur)
+        val volRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val volText = TextView(ctx).apply {
+            textSize = 15f; setTextColor(ctx.getColor(R.color.text)); gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(dp(52), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        val seek = android.widget.SeekBar(ctx).apply {
+            min = minV; max = 100
+            progress = Signals.clampVolume(cur, Sounds.volume(ctx, kind))
+            progressTintList = android.content.res.ColorStateList.valueOf(ctx.getColor(R.color.calm))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(ctx.getColor(R.color.line))
+            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+        }
+        volText.text = "${seek.progress}%"
+        seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar, v: Int, fromUser: Boolean) { volText.text = "$v%" }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar) { cb.onVolume(sb.progress) }
+        })
+        volRow.addView(seek); volRow.addView(volText)
+        box.addView(volRow)
+
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        fun half(t: String, start: Boolean, click: () -> Unit) = Button(ctx, null, 0, R.style.Btn).apply {
+            text = t; isAllCaps = false; gravity = Gravity.CENTER; setOnClickListener { click() }
+            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f).apply { topMargin = dp(10); if (start) marginEnd = dp(5) else marginStart = dp(5) }
+        }
+        row.addView(half("Звук телефона…", true) { cb.onPickSystem() })
+        row.addView(half("Свой файл…", false) { cb.onPickFile() })
+        box.addView(row)
         box.addView(btn(R.style.Btn_Primary, "Проверить", 10) { cb.onTest() })
 
         styleGroup.setOnCheckedChangeListener { _, checked -> styles.getOrNull(checked - 100)?.let { cb.onStyle(it) } }

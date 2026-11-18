@@ -11,6 +11,7 @@
     <string name="setup_title">Подключите телефон</string>
     <string name="setup_sub">Громкая тревога при падении — даже в беззвучном режиме.</string>
     <string name="setup_qr_title">Сканировать QR-код</string>
+    <string name="setup_qr_short">Наведите камеру на код в пульте</string>
     <string name="setup_qr_sub">В пульте: Настройки → Кому сигналить → «Подключить телефон»</string>
     <string name="setup_or">или вручную</string>
     <string name="setup_server">Адрес пульта</string>

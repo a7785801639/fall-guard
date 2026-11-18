@@ -41,6 +41,27 @@
             android:textColor="@color/muted"
             android:textSize="15sp" />
 
+        <!-- Готовность к тревоге одним взглядом: три деления — уведомления, фон, окно поверх блокировки -->
+        <LinearLayout
+            android:id="@+id/readyBar"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <View android:id="@+id/readySeg1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/seg_off" />
+            <View android:id="@+id/readySeg2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="5dp" android:layout_weight="1" android:background="@drawable/seg_off" />
+            <View android:id="@+id/readySeg3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="5dp" android:layout_weight="1" android:background="@drawable/seg_off" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/readyText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
         <!-- Доступное обновление (только у сборок с автообновлением) -->
         <LinearLayout
             android:id="@+id/updateBox"
