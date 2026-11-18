@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0A0B0E" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
@@ -28,6 +28,8 @@
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; min-height: 100%; background: var(--bg); }
+    /* Страница не масштабируется щипком и двойным касанием: увеличивается только видео */
+    html, body { touch-action: pan-x pan-y; }
     body { color: var(--text); font: 15px/1.45 var(--font); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
     [hidden] { display: none !important; }
     button, select, input { font: inherit; color: inherit; }
@@ -259,6 +261,13 @@
     .viewport.drawing canvas { pointer-events: auto; cursor: crosshair; touch-action: none; }
     .viewport.hit { cursor: pointer; }
     .viewport:fullscreen { border-radius: 0; aspect-ratio: auto; }
+    /* Телефон повернули набок: видео занимает весь экран (без Fullscreen API — оно требует касания). Обратно в портрет — всё как было */
+    .viewport.theater { position: fixed; inset: 0; z-index: 25; border-radius: 0; aspect-ratio: auto; width: auto; height: auto; max-height: none; background: #000; }
+    body.theater { overflow: hidden; }
+    .vp-btn.theater-x { display: none; }
+    .viewport.theater .vp-btn.theater-x { display: grid; }
+    .viewport.theater .vp-top { top: max(10px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); }
+    .viewport.theater .chip.fs-status { display: inline-flex; height: 32px; font-size: 14px; padding: 0 12px; }
     .vp-top { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; pointer-events: none; z-index: 5; }
     .vp-top > * { pointer-events: auto; }
     .vp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -351,11 +360,36 @@
     .tip img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; background: var(--fill); display: block; margin-bottom: 7px; }
 
     /* ================= Меню действий ================= */
+    /* Вкладка «Телефон»: строка сигнала раскрывается */
+    .sigrow + .sigrow { border-top: 1px solid var(--line); }
+    .sig-head { width: 100%; text-align: left; background: none; }
+    .sig-head > svg.ico { width: 18px; height: 18px; color: var(--muted); transition: transform 0.2s; flex: none; }
+    .sigrow.open .sig-head > svg.ico { transform: rotate(90deg); }
+    .sig-body { display: grid; gap: 12px; padding: 2px 16px 16px; animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .sig-line { display: flex; align-items: center; gap: 12px; min-height: 40px; }
+    .sig-lbl { width: 84px; flex: none; color: var(--muted); font-size: 13.5px; }
+    .sig-line .pick { max-width: calc(100% - 96px); }
+    .sig-line .pick span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vol-n { width: 44px; text-align: right; flex: none; font-weight: 600; font-size: 14px; }
+    input.vol { -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0; height: 32px; background: none; margin: 0; --p: 100%; touch-action: pan-y; }
+    input.vol::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--calm) var(--p), var(--fill-2) var(--p)); }
+    input.vol::-moz-range-track { height: 6px; border-radius: 3px; background: var(--fill-2); }
+    input.vol::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--calm); }
+    input.vol::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+    input.vol::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+    input.vol:focus-visible { outline: 2px solid var(--calm); outline-offset: 2px; border-radius: 6px; }
+    .url-line { display: grid; gap: 6px; padding: 12px 16px; }
+    .url-line + .url-line { border-top: 1px solid var(--line); }
+    .url-line label { font-weight: 600; }
+    .url-line input { width: 100%; }
     .menu { position: fixed; z-index: 55; min-width: 220px; max-width: 280px; padding: 6px; border-radius: 14px; background: var(--raise-2); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--line); }
+    .menu { max-height: min(62vh, 440px); overflow-y: auto; overscroll-behavior: contain; }
+    .menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .menu-title { padding: 8px 10px 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
     .menu button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px; border-radius: 9px; font-size: 14.5px; font-weight: 550; }
     .menu button svg { width: 19px; height: 19px; color: var(--muted); }
     .menu button.on svg { color: var(--calm); } .menu button.danger svg { color: var(--alarm); }
+    .menu button.head { position: sticky; top: -6px; z-index: 1; background: var(--raise-2); padding: 8px 10px 4px; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; opacity: 1; color: var(--muted); }
     .menu button:disabled { opacity: 0.6; font-size: 13px; font-weight: 500; color: var(--muted); }
     @media (hover: hover) { .menu button:hover { background: var(--fill); } }
     .menu button.on { color: var(--calm); }
@@ -805,6 +839,7 @@
             <div class="vp-top">
               <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span><span class="chip warn-chip" id="chipStall" hidden>Видео подвисло · переподключаю</span><span class="chip warn-chip" id="chipLost" hidden></span></div>
               <div class="vp-btns">
+                <button class="vp-btn theater-x" onclick="theaterExit()" aria-label="Свернуть видео" title="Свернуть видео"><svg class="ico"><use href="#i-x"/></svg></button>
                 <button class="vp-btn" id="btnPip" hidden onclick="enterPip()" aria-label="Маленькое окно" title="Видео в маленьком окне поверх других приложений"><svg class="ico"><use href="#i-pip"/></svg></button>
                 <button class="vp-btn" id="btnShot" onclick="saveFrame()" aria-label="Сохранить кадр" title="Сохранить кадр (C)"><svg class="ico"><use href="#i-camera"/></svg></button>
                 <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
@@ -938,6 +973,7 @@
         <button class="tab" role="tab" data-tab="recipients" onclick="showTab('recipients')"><svg class="ico"><use href="#i-bell"/></svg>Кому сигналить</button>
         <button class="tab" role="tab" data-tab="zones" onclick="showTab('zones')"><svg class="ico"><use href="#i-bed"/></svg>Зоны и камера</button>
         <button class="tab" role="tab" data-tab="people" onclick="showTab('people')"><svg class="ico"><use href="#i-users"/></svg>Бабушка и свои</button>
+        <button class="tab" role="tab" data-tab="phone" id="tabPhone" hidden onclick="showTab('phone')"><svg class="ico"><use href="#i-phone"/></svg>Телефон</button>
         <button class="tab" role="tab" data-tab="care" onclick="showTab('care')"><svg class="ico"><use href="#i-sliders"/></svg>Чувствительность</button>
       </nav>
       <div class="sheet-body" id="sheetBody"></div>
@@ -1473,6 +1509,24 @@
     } catch (_) {}
   }
 
+  /* ---------- Горизонтальный экран: видео на всю ширину ---------- */
+  const landMq = matchMedia("(orientation: landscape) and (max-height: 560px) and (pointer: coarse)");
+  let theaterOff = false; // свернули вручную — до следующего поворота
+  function applyTheater() {
+    const ot = screen.orientation && screen.orientation.type; // с клавиатурой окно низкое и в портрете — это не поворот
+    const on = landMq.matches && (!ot || ot.startsWith("landscape")) && !theaterOff && !drawMode && !document.fullscreenElement;
+    if (viewport.classList.contains("theater") === on) return;
+    viewport.classList.toggle("theater", on);
+    document.body.classList.toggle("theater", on);
+    try { if (native && typeof native.setImmersive === "function") native.setImmersive(on); } catch (_) {}
+    setTimeout(layout, 60);
+  }
+  function theaterExit() { theaterOff = true; applyTheater(); }
+  landMq.addEventListener("change", () => { theaterOff = false; applyTheater(); });
+  document.addEventListener("fullscreenchange", applyTheater);
+  if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", () => { theaterOff = false; applyTheater(); });
+  applyTheater();
+
   /* ---------- Рисование зон ---------- */
   const DRAW = {
     bed: ["Кровать: обведите матрас по углам", 3, "Контур кровати сохранён"],
@@ -1485,7 +1539,7 @@
   function startDraw(mode, edit, ignoreIndex) {
     closeSheet();
     resetZoom(false);
-    drawMode = mode; draft = []; editIgnore = -1; editLoaded = false;
+    drawMode = mode; draft = []; editIgnore = -1; editLoaded = false; applyTheater();
     if (edit) {
       const src = mode === "bed" ? zones.bed_polygon : mode === "door" ? zones.door_polygon : mode === "floor" ? zones.floor_polygon
         : (zones.ignore_polygons || [])[ignoreIndex];
@@ -1510,7 +1564,7 @@
     $("btnSaveZone").disabled = draft.length < need;
   }
   function undoPoint() { draft.pop(); syncDrawBar(); draw(); }
-  function cancelDraw() { drawMode = null; draft = []; editIgnore = -1; dragPt = -1; viewport.classList.remove("drawing"); viewport.parentElement.classList.remove("drawing-mode"); $("drawBar").hidden = true; draw(); }
+  function cancelDraw() { drawMode = null; applyTheater(); draft = []; editIgnore = -1; dragPt = -1; viewport.classList.remove("drawing"); viewport.parentElement.classList.remove("drawing-mode"); $("drawBar").hidden = true; draw(); }
   function redrawZone() { draft = []; editLoaded = false; syncDrawBar(); draw(); }
   // Экранные координаты точек контура и середин сторон
   function draftScreen() { return draft.map((p) => px(p)); }
@@ -2671,15 +2725,16 @@
   const PICKS = {};
   function pick(key, cur, list, onPick, title) {
     PICKS[key] = { cur, list, onPick, title };
-    const item = list.find(([v]) => v === cur) || list[0];
+    // Третий элемент true — заголовок группы (не выбирается)
+    const item = list.find(([v, , h]) => !h && v === cur) || list.find(([, , h]) => !h) || list[0];
     return `<button class="pick" onclick="openPick(this,'${key}')" aria-haspopup="listbox" aria-label="${esc(title || "")}: ${esc(item[1])}"><span>${esc(item[1])}</span>${ico("i-chev-r")}</button>`;
   }
   function openPick(el, key) {
     const p = PICKS[key]; if (!p) return;
     const r = el.getBoundingClientRect();
-    showMenu(r.right - 220, r.bottom + 6, p.title || "", p.list.map(([v, l]) => ({ label: l, icon: v === p.cur ? "i-check" : "i-blank", cls: v === p.cur ? "on" : "", fn: () => { if (v !== p.cur) { p.cur = v; p.onPick(v); } } })));
+    showMenu(r.right - 220, r.bottom + 6, p.title || "", p.list.map(([v, l, h]) => h ? { label: l, disabled: true, cls: "head" } : ({ label: l, icon: v === p.cur ? "i-check" : "i-blank", cls: v === p.cur ? "on" : "", fn: () => { if (v !== p.cur) { p.cur = v; p.onPick(v); } } })));
     const m = $("menu"); if (r.bottom + 6 + m.offsetHeight > window.innerHeight - 8) { m.style.top = Math.max(8, r.top - m.offsetHeight - 6) + "px"; m.style.transformOrigin = "100% 100%"; } else m.style.transformOrigin = "100% 0";
-    const on = m.querySelector("button.on"); if (on) on.focus({ preventScroll: true });
+    const on = m.querySelector("button.on"); if (on) { on.focus({ preventScroll: true }); m.scrollTop = Math.max(0, on.offsetTop - m.clientHeight / 2 + on.offsetHeight / 2); }
   }
 
   /* ---------- Подтверждение ---------- */
@@ -2705,6 +2760,8 @@
     sheetMode = "settings";
     $("sheetTitle").textContent = "Настройки";
     $("tabs").hidden = false;
+    $("tabPhone").hidden = !hasPhone();
+    if (tab === "phone" && !hasPhone()) tab = "recipients";
     showLayer($("sheetScrim")); hideMenu();
     showTab(tab || activeTab); syncBack();
   }
@@ -2772,7 +2829,7 @@
       let pipOn = true; try { pipOn = native.isPipEnabled(); } catch (_) {}
       h += `<div class="rows" style="margin-top:10px"><div class="rowi">${ri("i-pip", pipOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Видео в маленьком окне</div><div class="rowi-sub">при сворачивании приложения</div></div>${sw(pipOn, "togglePipSetting()", "Маленькое окно")}</div></div>`;
     }
-    if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">${ico("i-gear")}Настройки приложения на этом телефоне</button>`;
+    if (native) h += `<button class="btn block" style="margin-top:8px" onclick="openPhone()">${ico("i-gear")}Настройки этого телефона</button>`;
     return h + `</div>`;
   }
   // Строка получателя: кто — сверху, управление — строкой ниже; удаление только через «⋯»
@@ -2903,7 +2960,7 @@
         <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div></div>${pick("absence", Number(p.prolonged_absence_minutes) || 0, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]], (v) => setPrefs({ prolonged_absence_minutes: v }), "Долго нет в кровати")}</div>
         <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div></div>${pick("immob", Number(p.immobility_reminder_minutes) || 0, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]], (v) => setPrefs({ immobility_reminder_minutes: v }), "Напоминать сменить позу")}</div>
       </div></div>`
-      + (native ? `<div class="group"><button class="btn block" onclick="FallGuardAndroid.openAppSettings()">${ico("i-bell")}Звуки и способ сигнала на телефоне</button></div>` : `<div class="group"><h3>Звук в этом браузере</h3><div class="rows">
+      + (native ? `<div class="group"><button class="btn block" onclick="openPhone()">${ico("i-bell")}Звуки и громкость на этом телефоне</button></div>` : `<div class="group"><h3>Звук в этом браузере</h3><div class="rows">
         <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Падение и тревоги</div></div>${pick("sndA", lsGet("fg_snd_alarm", "siren"), ["siren", "pulse", "bell", "high"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_alarm", v), "Звук тревоги")}</div>
         <div class="rowi">${ri("i-walk", "warn")}<div class="rowi-body"><div class="rowi-title">Посадка и вставание</div></div>${pick("sndW", lsGet("fg_snd_warn", "chime"), ["chime", "triple", "soft", "bell"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_warn", v), "Звук событий")}</div>
       </div>${soundOn ? "" : `<p class="muted small" style="margin-top:8px">Сейчас звук выключен — кнопка «Без звука» внизу.</p>`}</div>`)
@@ -2915,10 +2972,99 @@
     if (!isOpen($("sheetScrim")) || !S) return;
     const active = document.activeElement;
     if (active && $("sheetBody").contains(active) && /^(INPUT|SELECT)$/.test(active.tagName)) return;
-    const html = sheetMode === "journal" ? journalHtml() : ({ recipients: tabRecipients, zones: tabZones, people: tabPeople, care: tabCare }[activeTab] || tabRecipients)();
+    const html = sheetMode === "journal" ? journalHtml() : ({ recipients: tabRecipients, zones: tabZones, people: tabPeople, care: tabCare, phone: hasPhone() ? tabPhone : tabRecipients }[activeTab] || tabRecipients)();
     setHtml($("sheetBody"), html);
     syncPills($("sheetBody"), (sheetMode === "journal" ? "j" : activeTab) + ":");
   }
+
+
+  /* ---------- Вкладка «Телефон»: настройки приложения Android прямо в настройках пульта ---------- */
+  const hasPhone = () => Boolean(native && typeof native.phoneInfo === "function");
+  let phoneSoundList = null, phoneOpen = "", phoneBusy = "";
+  const phoneJson = (fn, ...a) => { try { return JSON.parse(native[fn](...a)); } catch (_) { return null; } };
+  const phoneSounds = () => phoneSoundList || (phoneSoundList = phoneJson("phoneSounds") || []);
+  function openPhone() {
+    // Старый пульт без вкладки открывает отдельное окно настроек приложения
+    if (hasPhone()) openSheet("phone"); else try { native.openAppSettings(); } catch (_) {}
+  }
+  const SIG_ICON = { FALL: ["i-fall", "alarm"], STANDUP: ["i-walk", "warn"], SITTING: ["i-sit", "warn"], HELP: ["i-hand", "warn"], OTHER: ["i-clock", "care"], LINK: ["i-wifi-off", ""] };
+  const SIG_STYLE = { ALARM: "Тревога", NOTIFY: "Со звуком", SILENT: "Тихо" };
+  function phoneSoundItems(s) {
+    const list = phoneSounds(), items = [];
+    let group = "";
+    for (const x of list) {
+      if (x.group !== group) { group = x.group; items.push(["#" + group, group, true]); }
+      items.push([x.id, x.title]);
+    }
+    if (s.custom) items.splice(0, 0, ["#own", "Свой файл", true], [ "custom", s.custom ]);
+    if (!items.some(([v, , h]) => !h && v === s.sound)) items.push([s.sound, s.soundTitle]);
+    return items;
+  }
+  function phoneKindBody(s) {
+    let b = `<div class="sig-body">`;
+    if (s.styles.length > 1) b += `<div class="seg wide">${s.styles.map((st) => `<button aria-pressed="${st === s.style}" onclick="phoneStyle('${s.kind}','${st}')">${SIG_STYLE[st]}</button>`).join("")}</div>`;
+    else if (s.kind === "FALL") b += `<div class="muted small">Падение всегда поднимает громкую тревогу</div>`;
+    if (s.style !== "SILENT") {
+      const p = Math.round((s.volume - s.minVolume) / (100 - s.minVolume) * 100);
+      b += `<div class="sig-line"><span class="sig-lbl">Звук</span>${pick("snd" + s.kind, s.sound, phoneSoundItems(s), (v) => phoneSound(s.kind, v), "Звук")}</div>`
+        + `<div class="sig-line"><span class="sig-lbl">Громкость</span><input class="vol" type="range" min="${s.minVolume}" max="100" step="5" value="${s.volume}" style="--p:${p}%" aria-label="Громкость" oninput="phoneVolLive(this)" onchange="phoneVol('${s.kind}',this)"><span class="num vol-n">${s.volume}%</span></div>`;
+      if (s.style === "ALARM") b += `<div class="muted small">Тревога не тише ${s.minVolume}% — чтобы её нельзя было заглушить случайно</div>`;
+    }
+    return b + `<div class="row"><button class="btn sm" onclick="phoneTest('${s.kind}')">${ico("i-play")}Проверить</button><button class="btn sm" onclick="native.pickSignalFile('${s.kind}')">${ico("i-upload")}Свой файл…</button></div></div>`;
+  }
+  function tabPhone() {
+    const P = phoneJson("phoneInfo");
+    if (!P) return `<div class="empty">Не удалось прочитать настройки телефона</div>`;
+    let h = `<div class="group"><h3>Сигналы</h3><div class="rows">` + P.signals.map((s) => {
+      const open = phoneOpen === s.kind, [ic, tone] = SIG_ICON[s.kind] || ["i-bell", ""];
+      const sub = s.style === "SILENT" ? "Без звука" : `${SIG_STYLE[s.style]} · ${esc(s.soundTitle)} · ${s.volume}%`;
+      return `<div class="sigrow${open ? " open" : ""}"><button class="rowi sig-head" aria-expanded="${open}" onclick="phoneToggle('${s.kind}')">${ri(ic, tone)}<div class="rowi-body"><div class="rowi-title">${esc(s.title)}</div><div class="rowi-sub">${sub}</div></div>${ico("i-chev-r")}</button>${open ? phoneKindBody(s) : ""}</div>`;
+    }).join("") + `</div></div>`;
+
+    const R = P.ready;
+    h += `<div class="group"><h3>Готовность к тревоге</h3><div class="rows">` + [["notifications", "Уведомления", "i-bell"], ["battery", "Работа в фоне", "i-power"], ["fullScreen", "Окно поверх блокировки", "i-screen"]].map(([k, l, ic]) =>
+      `<div class="rowi">${ri(ic, R[k] ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${l}</div><div class="rowi-sub">${R[k] ? "Разрешено" : "Нужно разрешить, иначе Android может заглушить тревогу"}</div></div>${R[k] ? "" : `<button class="btn sm primary" onclick="native.fixPermission('${k}')">Разрешить</button>`}</div>`).join("") + `</div></div>`;
+
+    const u = P.update;
+    const ub = !u.enabled ? "" : u.pending
+      ? `<button class="btn sm primary" ${phoneBusy ? "disabled" : ""} onclick="phoneInstall()">${phoneBusy === "install" ? "Скачиваю…" : "Установить"}</button>`
+      : `<button class="btn sm" ${phoneBusy ? "disabled" : ""} onclick="phoneCheck()">${phoneBusy === "check" ? "Проверяю…" : "Проверить"}</button>`;
+    h += `<div class="group"><h3>Приложение</h3><div class="rows"><div class="rowi">${ri("i-phone")}<div class="rowi-body"><div class="rowi-title">FallGuard ${esc(P.version)}</div><div class="rowi-sub">${u.pending ? "Доступна версия " + esc(u.pending) : u.enabled ? "Установлена последняя версия" : "Обновляется вручную"}</div></div>${ub}</div></div>`
+      + (u.pending ? `<p class="muted small" style="margin-top:8px">Установка идёт не из Google Play, поэтому Play Protect может предложить проверить приложение.</p>` : "") + `</div>`;
+
+    h += `<div class="group"><h3>Адрес сервера</h3><div class="rows">
+        <div class="url-line"><label for="phLan">Дома</label><input type="text" id="phLan" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="192.168.1.10:8000" value="${esc(P.lan)}" /></div>
+        <div class="url-line"><label for="phPub">Снаружи</label><input type="text" id="phPub" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="https://…" value="${esc(P.public)}" /></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="phoneSaveUrls()">${ico("i-check")}Сохранить адреса</button></div></div>`;
+    h += `<div class="group" style="margin-top:28px"><button class="btn block red-text" onclick="phoneUnpair()">${ico("i-trash")}Отвязать этот телефон</button></div>`;
+    return h;
+  }
+  function phoneToggle(k) { phoneOpen = phoneOpen === k ? "" : k; try { native.stopPreview(); } catch (_) {} renderSheet(); }
+  function phoneStyle(k, st) { try { native.setSignalStyle(k, st); } catch (_) {} renderSheet(); }
+  function phoneSound(k, id) { const it = phoneSounds().find((x) => x.id === id); try { native.setSignalSound(k, id, it ? it.title : ""); } catch (_) {} renderSheet(); }
+  function phoneVolLive(el) {
+    const n = el.parentNode.querySelector(".vol-n"); if (n) n.textContent = el.value + "%";
+    el.style.setProperty("--p", Math.round((el.value - el.min) / (el.max - el.min) * 100) + "%");
+  }
+  function phoneVol(k, el) { const v = Number(el.value); el.blur(); try { native.setSignalVolume(k, v); } catch (_) {} renderSheet(); }
+  function phoneTest(k) { try { native.testSignal(k); } catch (_) {} }
+  async function phoneUnpair() {
+    if (!(await ask("Отвязать телефон?", "Тревоги перестанут приходить на этот телефон.", "Отвязать"))) return;
+    try { native.unpair(); } catch (_) {}
+  }
+  function phoneSaveUrls() {
+    let ok = false;
+    try { ok = native.saveUrls($("phLan").value, $("phPub").value); } catch (_) {}
+    if (!ok) toast("Нужен хотя бы один адрес", "error");
+  }
+  function phoneCheck() { phoneBusy = "check"; renderSheet(); try { native.checkUpdate(); } catch (_) { phoneBusy = ""; } }
+  function phoneInstall() { phoneBusy = "install"; renderSheet(); try { native.installUpdate(); } catch (_) { phoneBusy = ""; } }
+  // Ответы приложения: файл звука выбран, проверка и установка обновления закончены
+  window.phoneEvent = (kind, d) => {
+    if (kind === "checked") { phoneBusy = ""; toast(d && d.found ? "Есть новая версия" : "Установлена последняя версия"); }
+    else if (kind === "installed") { phoneBusy = ""; if (d && d.error) toast(d.error, "error"); }
+    renderSheet();
+  };
 
   /* ---------- Опрос и запуск ---------- */
   async function refreshMe() {

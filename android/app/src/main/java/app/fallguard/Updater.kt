@@ -74,6 +74,22 @@ object Updater {
     fun notifiedFor(ctx: Context): Int = sp(ctx).getInt("notified", 0)
     fun markNotified(ctx: Context, code: Int) = sp(ctx).edit().putInt("notified", code).apply()
 
+    /** SHA-256 сертификатов подписи: у установленного приложения и у скачанного файла. */
+    private fun certs(info: android.content.pm.PackageInfo?): Set<String> {
+        val signers = if (Build.VERSION.SDK_INT >= 28) info?.signingInfo?.apkContentsSigners else @Suppress("DEPRECATION") info?.signatures
+        return signers.orEmpty().map { java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).joinToString("") { b -> "%02x".format(b) } }.toSet()
+    }
+
+    /** null — подписи совпадают (или проверить нельзя), иначе — понятное пояснение. */
+    fun signatureProblem(ctx: Context, apk: File): String? = try {
+        val pm = ctx.packageManager
+        val flag = if (Build.VERSION.SDK_INT >= 28) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") android.content.pm.PackageManager.GET_SIGNATURES
+        val mine = certs(pm.getPackageInfo(ctx.packageName, flag))
+        val theirs = certs(pm.getPackageArchiveInfo(apk.path, flag))
+        if (mine.isEmpty() || theirs.isEmpty() || mine.intersect(theirs).isNotEmpty()) null
+        else "Подпись обновления другая — Android не поставит его поверх. Удалите приложение и поставьте новое"
+    } catch (_: Exception) { null }
+
     /** Скачать APK (в фоне) и открыть системную установку. Возвращает текст ошибки или null. */
     fun downloadAndInstall(act: Activity, rel: Release, onDone: (String?) -> Unit) {
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
@@ -100,7 +116,7 @@ object Updater {
                     conn.inputStream.use { input -> file.outputStream().use { input.copyTo(it) } }
                     break
                 }
-                if (file.length() < 100_000) "Файл обновления не скачался" else null
+                if (file.length() < 100_000) "Файл обновления не скачался" else signatureProblem(act, file)
             } catch (e: Exception) {
                 "Не удалось скачать обновление"
             } finally {

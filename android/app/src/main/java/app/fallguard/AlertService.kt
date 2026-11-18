@@ -317,8 +317,9 @@ class AlertService : Service() {
         // Выбранный звук на канале будильника (звучит и в беззвучном режиме); не открылся — встроенная сирена,
         // не открылась и она — системный будильник
         val siren = android.net.Uri.parse("android.resource://$packageName/${R.raw.siren}")
-        player = Sounds.play(this, Sounds.uriOf(this, kind), AudioAttributes.USAGE_ALARM, loop = true, fallback = siren)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.let { Sounds.play(this, it, AudioAttributes.USAGE_ALARM, loop = true) }
+        val gain = Sounds.alarmGain(this, kind)
+        player = Sounds.play(this, Sounds.uriOf(this, kind), AudioAttributes.USAGE_ALARM, loop = true, fallback = siren, gain = gain)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.let { Sounds.play(this, it, AudioAttributes.USAGE_ALARM, loop = true, gain = gain) }
         try {
             val vib = getSystemService(Vibrator::class.java)
             val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()

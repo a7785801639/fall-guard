@@ -20,6 +20,7 @@ import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Base64
 import android.widget.Toast
 import java.io.File
@@ -42,6 +43,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Главный экран: привязка телефона, затем пульт FallGuard во встроенном браузере. */
@@ -58,8 +60,6 @@ class MainActivity : Activity() {
 
     // ---- Окно поверх (Picture-in-Picture) ----
     @Volatile private var pipAlarm = false
-    @Volatile private var pipZoomed = false
-    @Volatile private var pipOverlay = true
     @Volatile private var pipW = 16
     @Volatile private var pipH = 9
     private var pipReceiver: BroadcastReceiver? = null
@@ -103,7 +103,11 @@ class MainActivity : Activity() {
         val what = intent?.getStringExtra(EXTRA_SHORTCUT) ?: return
         intent.removeExtra(EXTRA_SHORTCUT)
         if (!prefs.paired) return
-        if (what == "journal") runInPanel("openJournal()")
+        when (what) {
+            "journal" -> runInPanel("openJournal()")
+            // Новая вкладка «Телефон» есть не на всяком сервере: старый пульт открывает окно настроек приложения
+            "phone" -> runInPanel("typeof openPhone==='function' ? openPhone() : FallGuardAndroid.openAppSettings()")
+        }
     }
 
     /** Выполнить в пульте сразу, если он загружен, иначе — как только загрузится. */
@@ -119,6 +123,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        stopPreviewPlayer()
         // В маленьком окне видео должно идти дальше — WebView не останавливаем
         if (!isInPictureInPictureMode) web.onPause()
         super.onPause()
@@ -167,8 +172,7 @@ class MainActivity : Activity() {
         if (h.toFloat() / w > 2.39f) h = (w * 2.39f).toInt()
         val actions = mutableListOf<RemoteAction>()
         if (pipAlarm) actions += pipAction(R.drawable.ic_pip_check, "Принято, иду", "ack", 31)
-        actions += pipAction(R.drawable.ic_pip_zoom, if (pipZoomed) "Весь кадр" else "Кровать крупно", "zoom", 32)
-        if (!pipAlarm) actions += pipAction(R.drawable.ic_pip_eye, if (pipOverlay) "Скрыть разметку" else "Показать разметку", "overlay", 33)
+        actions += pipAction(R.drawable.ic_pip_expand, "Развернуть", "expand", 32)
         val b = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(w, h))
             .setActions(actions.take(maxNumPictureInPictureActions.coerceAtLeast(1)))
@@ -200,8 +204,11 @@ class MainActivity : Activity() {
                     override fun onReceive(c: Context, i: Intent) {
                         val js = when (i.getStringExtra("cmd")) {
                             "ack" -> "ackAlarm()"
-                            "zoom" -> "toggleBedZoom()"
-                            "overlay" -> "toggleOverlay()"
+                            "expand" -> {
+                                // Из маленького окна обратно в полный экран
+                                startActivity(Intent(this@MainActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                                return
+                            }
                             else -> return
                         }
                         web.evaluateJavascript("try{$js}catch(e){}", null)
@@ -461,6 +468,20 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        val soundKind = Signals.Kind.entries.getOrNull(requestCode - REQ_SOUND)
+        if (soundKind != null && requestCode >= REQ_SOUND) {
+            val uri = data?.data
+            if (resultCode == RESULT_OK && uri != null) {
+                Thread {
+                    val name = Sounds.importPicked(this, soundKind, uri)
+                    runOnUiThread {
+                        Toast.makeText(this, if (name != null) "Звук «$name» выбран" else "Этот файл не проигрывается — выберите другой", Toast.LENGTH_LONG).show()
+                        web.evaluateJavascript("window.phoneEvent && phoneEvent('changed')", null)
+                    }
+                }.start()
+            }
+            return
+        }
         if (requestCode == REQ_FILE) {
             fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
             fileCallback = null
@@ -489,6 +510,163 @@ class MainActivity : Activity() {
             runOnUiThread { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         }
 
+
+        // ------------------------------------------------------------ вкладка «Телефон» в настройках пульта
+        private fun kind(name: String): Signals.Kind? = Signals.Kind.entries.firstOrNull { it.name == name }
+
+        /** Всё, что показывает вкладка: сигналы с громкостью, готовность, версия и обновление, адреса. */
+        @JavascriptInterface
+        fun phoneInfo(): String {
+            val ctx = this@MainActivity
+            val o = JSONObject()
+            o.put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" })
+            val st = Readiness.check(ctx)
+            o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen))
+            val pend = if (Updater.enabled) Updater.pending(ctx) else null
+            o.put("update", JSONObject().put("enabled", Updater.enabled).put("pending", pend?.name ?: JSONObject.NULL))
+            o.put("lan", prefs.lanUrl).put("public", prefs.publicUrl)
+            val arr = JSONArray()
+            for (k in Signals.Kind.entries) {
+                val style = Signals.effectiveStyle(k, "", Sounds.style(ctx, k))
+                arr.put(JSONObject()
+                    .put("kind", k.name).put("title", k.title).put("sub", k.sub)
+                    .put("style", style.name)
+                    .put("styles", JSONArray(Signals.allowedStyles(k).map { it.name }))
+                    .put("sound", Sounds.sound(ctx, k)).put("soundTitle", Sounds.title(ctx, k))
+                    .put("custom", if (Sounds.customFile(ctx, k).exists()) Sounds.customName(ctx, k) else JSONObject.NULL)
+                    .put("volume", Signals.clampVolume(style, Sounds.volume(ctx, k)))
+                    .put("minVolume", Signals.minVolume(style)))
+            }
+            o.put("signals", arr)
+            return o.toString()
+        }
+
+        /** Звуки, которые можно назначить: встроенные и системные (читаем базу телефона один раз). */
+        @JavascriptInterface
+        fun phoneSounds(): String {
+            val arr = JSONArray()
+            for (s in Sounds.BUILT_IN) arr.put(JSONObject().put("id", s.id).put("title", s.title).put("group", "FallGuard"))
+            for (s in Sounds.systemSounds(this@MainActivity)) arr.put(JSONObject().put("id", s.id).put("title", s.title).put("group", s.group))
+            return arr.toString()
+        }
+
+        @JavascriptInterface
+        fun setSignalStyle(kind: String, style: String) {
+            val k = kind(kind) ?: return
+            val st = Signals.Style.entries.firstOrNull { it.name == style } ?: return
+            if (st in Signals.allowedStyles(k)) Sounds.setStyle(this@MainActivity, k, st)
+        }
+
+        @JavascriptInterface
+        fun setSignalSound(kind: String, id: String, title: String) {
+            val k = kind(kind) ?: return
+            Sounds.setSound(this@MainActivity, k, id, title)
+            preview(k, id)
+        }
+
+        @JavascriptInterface
+        fun setSignalVolume(kind: String, percent: Int) {
+            val k = kind(kind) ?: return
+            Sounds.setVolume(this@MainActivity, k, percent)
+            preview(k, Sounds.sound(this@MainActivity, k))
+        }
+
+        /** Прослушать звук выбранного типа ровно с той громкостью и по тому же пути, что и настоящий сигнал. */
+        @JavascriptInterface
+        fun previewSignal(kind: String) {
+            val k = kind(kind) ?: return
+            preview(k, Sounds.sound(this@MainActivity, k))
+        }
+
+        @JavascriptInterface
+        fun stopPreview() = stopPreviewPlayer()
+
+        /** Проверка сигнала целиком: тревога на весь экран или уведомление, как придёт настоящее. */
+        @JavascriptInterface
+        fun testSignal(kind: String) {
+            val k = kind(kind) ?: return
+            stopPreviewPlayer()
+            AlertService.start(this@MainActivity, AlertService.ACTION_TEST_SIGNAL, k.name)
+        }
+
+        @JavascriptInterface
+        fun pickSignalFile(kind: String) {
+            val k = kind(kind) ?: return
+            stopPreviewPlayer()
+            runOnUiThread {
+                val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*")
+                try { startActivityForResult(pick, REQ_SOUND + k.ordinal) } catch (_: Exception) {
+                    Toast.makeText(this@MainActivity, "Нет приложения для выбора файла", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        /** «Разрешить» в списке готовности: открывает нужный экран системных настроек. */
+        @JavascriptInterface
+        fun fixPermission(which: String) {
+            runOnUiThread {
+                try {
+                    when (which) {
+                        "notifications" -> startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                        "battery" -> try {
+                            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+                        } catch (_: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                        "fullScreen" -> if (Build.VERSION.SDK_INT >= 34) startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun checkUpdate() {
+            Thread {
+                val rel = Updater.checkIfDue(this@MainActivity, force = true)
+                runOnUiThread { web.evaluateJavascript("window.phoneEvent && phoneEvent('checked', ${JSONObject().put("found", rel != null)})", null) }
+            }.start()
+        }
+
+        @JavascriptInterface
+        fun installUpdate() {
+            val rel = Updater.pending(this@MainActivity) ?: return
+            runOnUiThread {
+                Updater.downloadAndInstall(this@MainActivity, rel) { err ->
+                    web.evaluateJavascript("window.phoneEvent && phoneEvent('installed', ${JSONObject().put("error", err ?: JSONObject.NULL)})", null)
+                }
+            }
+        }
+
+        /** Сохраняет адреса и перезапускает приложение; false — не указан ни один. */
+        @JavascriptInterface
+        fun saveUrls(lan: String, pub: String): Boolean {
+            val l = Api.normalizeUrl(lan); val p = Api.normalizeUrl(pub)
+            if (l.isEmpty() && p.isEmpty()) return false
+            prefs.lanUrl = l; prefs.publicUrl = p
+            runOnUiThread { restartApp() }
+            return true
+        }
+
+        @JavascriptInterface
+        fun unpair() {
+            Device.unpair(this@MainActivity, prefs)
+            runOnUiThread { restartApp() }
+        }
+
+        /** Видео на весь экран в горизонтальном положении: прячем строки состояния и навигации. */
+        @JavascriptInterface
+        fun setImmersive(on: Boolean) {
+            runOnUiThread {
+                if (customView != null) return@runOnUiThread
+                if (Build.VERSION.SDK_INT >= 28) {
+                    // Вырез камеры не должен оставлять чёрную полосу сбоку
+                    window.attributes = window.attributes.also {
+                        it.layoutInDisplayCutoutMode = if (on) android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                        else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                    }
+                }
+                setSystemBarsHidden(on)
+            }
+        }
+
         /** Телефон или планшет у кровати как монитор: экран не гаснет, пока открыт пульт. */
         @JavascriptInterface
         fun setKeepScreenOn(on: Boolean) {
@@ -505,8 +683,9 @@ class MainActivity : Activity() {
         /** Пульт сообщает, что показывать в маленьком окне: тревога, увеличение, разметка, размер кадра. */
         @JavascriptInterface
         fun setPipState(alarm: Boolean, zoomed: Boolean, overlay: Boolean, w: Int, h: Int) {
-            val changed = alarm != pipAlarm || zoomed != pipZoomed || overlay != pipOverlay || (w > 0 && w != pipW) || (h > 0 && h != pipH)
-            pipAlarm = alarm; pipZoomed = zoomed; pipOverlay = overlay
+            // zoomed и overlay остались в сигнатуре ради старых версий пульта: в маленьком окне они больше не нужны
+            val changed = alarm != pipAlarm || (w > 0 && w != pipW) || (h > 0 && h != pipH)
+            pipAlarm = alarm
             if (w > 0 && h > 0) { pipW = w; pipH = h }
             if (changed) runOnUiThread { updatePip() }
         }
@@ -607,6 +786,33 @@ class MainActivity : Activity() {
         }
     }
 
+
+    // ---------------------------------------------------------------- пробное воспроизведение для вкладки «Телефон»
+    private var previewPlayer: android.media.MediaPlayer? = null
+
+    @Synchronized
+    private fun stopPreviewPlayer() {
+        try { previewPlayer?.stop() } catch (_: Exception) {}
+        try { previewPlayer?.release() } catch (_: Exception) {}
+        previewPlayer = null
+    }
+
+    @Synchronized
+    private fun preview(kind: Signals.Kind, id: String) {
+        stopPreviewPlayer()
+        val style = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
+        val usage = if (style == Signals.Style.ALARM) android.media.AudioAttributes.USAGE_ALARM else android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT
+        previewPlayer = Sounds.play(
+            this, Sounds.uriOf(this, kind, id), usage, loop = false,
+            fallback = Sounds.uriOf(this, kind, Sounds.defaultSound(kind)), gain = Sounds.gain(this, kind),
+        )
+    }
+
+    private fun restartApp() {
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK))
+        finish()
+    }
+
     private fun safeName(raw: String, ext: String): String {
         val n = raw.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "fallguard" }
         return if (n.endsWith(".$ext")) n else "$n.$ext"
@@ -614,6 +820,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_FILE = 20
+        private const val REQ_SOUND = 300
         private const val PIP_ACTION = "app.fallguard.PIP"
         const val EXTRA_SHORTCUT = "shortcut"
     }

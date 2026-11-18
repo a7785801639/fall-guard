@@ -16,7 +16,6 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
-import android.provider.OpenableColumns
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.widget.TextView
@@ -171,7 +170,7 @@ class SettingsActivity : Activity() {
             override fun onSound(id: String) {
                 Sounds.setSound(this@SettingsActivity, kind, id)
                 stopPreview()
-                preview = Sounds.play(this@SettingsActivity, Sounds.uriOf(this@SettingsActivity, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this@SettingsActivity, kind))), loop = false)
+                preview = Sounds.play(this@SettingsActivity, Sounds.uriOf(this@SettingsActivity, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this@SettingsActivity, kind))), loop = false, gain = Sounds.gain(this@SettingsActivity, kind))
                 renderSignals()
             }
             override fun onPickFile() {
@@ -195,13 +194,8 @@ class SettingsActivity : Activity() {
         val kind = Signals.Kind.entries.getOrNull(requestCode - REQ_SOUND) ?: return
         val uri = data?.data ?: return
         if (resultCode != RESULT_OK) return
-        var name = "Свой файл"
-        try {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) name = c.getString(0).substringBeforeLast('.')
-            }
-        } catch (_: Exception) {}
-        if (Sounds.importCustom(this, kind, uri, name)) {
+        val name = Sounds.importPicked(this, kind, uri)
+        if (name != null) {
             Toast.makeText(this, "Звук «$name» выбран", Toast.LENGTH_SHORT).show()
             renderSignals()
             openSignal(kind)
@@ -215,16 +209,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun unpair() {
-        val token = prefs.token
-        val id = prefs.deviceId
-        val urls = prefs.urls
-        Thread {
-            if (id.isNotEmpty()) {
-                for (base in urls) if (Api.request(base, "/api/devices/$id", "DELETE", token).ok) break
-            }
-        }.start()
-        stopService(Intent(this, AlertService::class.java))
-        prefs.clear()
+        Device.unpair(this, prefs)
         restartApp()
     }
 
@@ -266,11 +251,7 @@ object SignalDialog {
             )
             setPadding(dp(8), 0, 0, 0)
         }
-        val styles = when (kind) {
-            Signals.Kind.FALL -> listOf(Signals.Style.ALARM)
-            Signals.Kind.LINK -> listOf(Signals.Style.NOTIFY, Signals.Style.SILENT)
-            else -> Signals.Style.entries.toList()
-        }
+        val styles = Signals.allowedStyles(kind)
         box.addView(header("Как сигналить"))
         val cur = Signals.effectiveStyle(kind, "", Sounds.style(ctx, kind))
         val styleGroup = RadioGroup(ctx)
@@ -282,6 +263,7 @@ object SignalDialog {
         val options = Sounds.BUILT_IN.map { it.id to it.title }.toMutableList()
         if (Sounds.customFile(ctx, kind).exists()) options += Sounds.CUSTOM to Sounds.customName(ctx, kind)
         val curSound = Sounds.sound(ctx, kind)
+        if (curSound.startsWith(Sounds.SYS)) options += curSound to Sounds.title(ctx, kind)
         val soundGroup = RadioGroup(ctx)
         options.forEachIndexed { i, (id, title) -> soundGroup.addView(radio(200 + i, title, id == curSound)) }
         box.addView(soundGroup)

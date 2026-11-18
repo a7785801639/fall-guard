@@ -17,6 +17,13 @@ object Signals {
     /** Способ: громкая тревога на весь экран, уведомление со звуком, уведомление без звука. */
     enum class Style(val title: String) { ALARM("Тревога на весь экран"), NOTIFY("Уведомление со звуком"), SILENT("Без звука") }
 
+    /** Какие способы можно выбрать: падение — всегда тревога, обрыв связи — только уведомление. */
+    fun allowedStyles(kind: Kind): List<Style> = when (kind) {
+        Kind.FALL -> listOf(Style.ALARM)
+        Kind.LINK -> listOf(Style.NOTIFY, Style.SILENT)
+        else -> Style.entries.toList()
+    }
+
     fun kindOf(state: String, severity: String, isFall: Boolean): Kind = when {
         isFall || state == "fallen" -> Kind.FALL
         state == "left_bed" || state == "missing" -> Kind.STANDUP
@@ -36,6 +43,23 @@ object Signals {
     fun effectiveStyle(kind: Kind, severity: String, chosen: Style?): Style {
         if (kind == Kind.FALL || severity == "critical") return Style.ALARM
         return chosen ?: defaultStyle(kind, severity)
+    }
+
+    /** Громкость в процентах: тревога не тише 30 % (падение нельзя «приглушить» до тишины), уведомление — от 5 %. */
+    const val ALARM_MIN_VOLUME = 30
+    const val NOTIFY_MIN_VOLUME = 5
+
+    fun minVolume(style: Style): Int = if (style == Style.ALARM) ALARM_MIN_VOLUME else NOTIFY_MIN_VOLUME
+
+    fun clampVolume(style: Style, percent: Int): Int = percent.coerceIn(minVolume(style), 100)
+
+    /**
+     * Множитель для MediaPlayer. Он линейный по амплитуде, а ухо слышит громкость примерно логарифмически,
+     * поэтому проценты идут по квадратичной кривой: 50 % слышно заметно тише, 100 % — полная громкость.
+     */
+    fun gain(style: Style, percent: Int): Float {
+        val f = clampVolume(style, percent) / 100f
+        return f * f
     }
 
     data class Alert(val id: String, val state: String, val severity: String, val isFall: Boolean)

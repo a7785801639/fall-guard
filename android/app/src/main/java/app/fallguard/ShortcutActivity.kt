@@ -16,7 +16,7 @@ class ShortcutActivity : Activity() {
             "pause" -> if (paired) AlertService.start(this, AlertService.ACTION_NEARBY)
                 else open(Intent(this, MainActivity::class.java))
             "journal" -> open(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_SHORTCUT, "journal"))
-            "settings" -> open(Intent(this, SettingsActivity::class.java))
+            "settings" -> open(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_SHORTCUT, "phone"))
         }
         finish()
     }

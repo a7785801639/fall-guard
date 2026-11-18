@@ -75,4 +75,20 @@ class SignalsTest {
         assertEquals(Kind.FALL, Signals.kindOf("whatever", "critical", true))
         assertEquals(Kind.OTHER, Signals.kindOf("sitting_up", "critical", false))
     }
+
+    @Test fun alarmVolumeHasAFloor() {
+        assertEquals(30, Signals.clampVolume(Style.ALARM, 0))
+        assertEquals(30, Signals.clampVolume(Style.ALARM, 10))
+        assertEquals(100, Signals.clampVolume(Style.ALARM, 250))
+        assertEquals(5, Signals.clampVolume(Style.NOTIFY, 0))
+        assertEquals(60, Signals.clampVolume(Style.SILENT, 60))
+    }
+
+    @Test fun gainFollowsAPerceptualCurve() {
+        assertEquals(1f, Signals.gain(Style.ALARM, 100), 0.0001f)
+        assertEquals(0.25f, Signals.gain(Style.NOTIFY, 50), 0.0001f)
+        // Тревога на 0 % всё равно звучит на нижней границе, а не беззвучно
+        assertEquals(0.09f, Signals.gain(Style.ALARM, 0), 0.0001f)
+        assertTrue(Signals.gain(Style.NOTIFY, 80) > Signals.gain(Style.NOTIFY, 40))
+    }
 }

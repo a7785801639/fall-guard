@@ -66,6 +66,22 @@ object Readiness {
     }
 }
 
+object Device {
+    /** Убирает телефон из списка получателей на сервере, останавливает службу и стирает привязку. */
+    fun unpair(ctx: Context, prefs: Prefs) {
+        val token = prefs.token
+        val id = prefs.deviceId
+        val urls = prefs.urls
+        Thread {
+            if (id.isNotEmpty()) {
+                for (base in urls) if (Api.request(base, "/api/devices/$id", "DELETE", token).ok) break
+            }
+        }.start()
+        ctx.stopService(android.content.Intent(ctx, AlertService::class.java))
+        prefs.clear()
+    }
+}
+
 object Api {
     fun normalizeUrl(raw: String): String {
         var s = raw.trim().trimEnd('/')
