@@ -2715,8 +2715,9 @@
     if (serverLost) { serverLost = false; toast("Связь с сервером восстановлена"); haptic("success"); renderFast(); }
   }
   setInterval(() => {
-    if (!started || asleep() || serverLost || !S) return;
-    if (Date.now() - lastOk > 10000) {
+    if (!started || bgMode || serverLost || !S) return;
+    // Порог — с запасом к текущему интервалу опроса, чтобы медленная сеть не давала ложную «потерю связи»
+    if (Date.now() - lastOk > (telemetryLive() ? 20000 : 10000)) {
       serverLost = true; haptic("warning"); renderFast();
       if (soundOn && audioCtx && !native) beep([[0, 0.18, 523, 0.2], [0.22, 0.18, 440, 0.2], [0.44, 0.3, 349, 0.2]]);
     }
@@ -2797,7 +2798,8 @@
     connectTelemetry();
     await refreshMe();
     // Пока идёт телеметрия, статус нужен редко; без неё — как раньше, каждые 2,5 с
-    (function pollLoop() { if (!asleep()) poll(); setTimeout(pollLoop, telemetryLive() ? 8000 : 2500); })();
+    // Скрытая вкладка браузера опрашивает реже, но не замолкает: звук тревоги не должен зависеть только от сокета
+    (function pollLoop() { if (!bgMode) poll(); setTimeout(pollLoop, document.hidden ? 10000 : telemetryLive() ? 8000 : 2500); })();
     if ("serviceWorker" in navigator && !tg()?.initData && !native) navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   async function boot() {
