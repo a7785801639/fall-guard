@@ -369,6 +369,8 @@
     /* Легенда хроники: только те цвета, что есть в выбранном окне */
     .tl-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 1px; font-size: 11.5px; color: #8A92A1; }
     .tl-legend:empty { display: none; }
+    /* На узком экране «спокойно» (фон полосы) и точки событий (видны сами) не подписываем — легенда в одну строку */
+    @media (max-width: 600px) { .tl-legend .k-calm, .tl-legend .k-pin { display: none; } }
     .tl-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
     .tl-legend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
     .tl-legend i.t-calm { background: #1F4A39; box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.35); }
@@ -2362,8 +2364,8 @@
     // Легенда
     const LEG = [["calm", "Спокойно"], ["caregiver", "Свои рядом"], ["warn", "Внимание"], ["alarm", "Тревога"], ["paused", "Пауза"]];
     const seen = new Set((tl.spans || []).filter((sp) => sp.end > start && sp.start < start + win).map((sp) => sp.tone));
-    let lg = LEG.filter(([t]) => seen.has(t)).map(([t, l]) => `<span><i class="t-${t}"></i>${l}</span>`).join("");
-    if (pins.length) lg += `<span><i class="pin"></i>Событие</span>`;
+    let lg = LEG.filter(([t]) => seen.has(t)).map(([t, l]) => `<span class="k-${t}"><i class="t-${t}"></i>${l}</span>`).join("");
+    if (pins.length) lg += `<span class="k-pin"><i class="pin"></i>Событие</span>`;
     setHtml($("tlLegend"), lg);
   }
   window.addEventListener("resize", () => { if (S) { $("ribbon")._h = null; renderTimeline(S.timeline); } });

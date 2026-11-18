@@ -56,6 +56,7 @@ class ElapsedRing @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         val y = rect.centerY() + rect.height() / 2 * sin(a).toFloat()
         c.drawCircle(x, y, w * 1.6f, halo)
         c.drawCircle(x, y, w * 0.85f, dot)
-        if (smooth && isShown) postInvalidateOnAnimation()
+        // ~25 кадров в секунду: глазу плавно, а тревога может висеть минутами — батарею бережём
+        if (smooth && isShown) postInvalidateDelayed(40)
     }
 }
