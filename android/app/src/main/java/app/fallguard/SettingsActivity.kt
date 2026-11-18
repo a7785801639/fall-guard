@@ -39,6 +39,7 @@ class SettingsActivity : Activity() {
         findViewById<TextView>(R.id.setVersion).text = "FallGuard ${packageManager.getPackageInfo(packageName, 0).versionName}"
 
         findViewById<Button>(R.id.btnTest).setOnClickListener { AlertService.start(this, AlertService.ACTION_TEST) }
+        setupUpdates()
         findViewById<Button>(R.id.btnDone).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnSaveUrls).setOnClickListener {
             val lan = Api.normalizeUrl(findViewById<EditText>(R.id.setLan).text.toString())
@@ -100,6 +101,43 @@ class SettingsActivity : Activity() {
                     startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    // ---------------------------------------------------------------- обновления
+    private fun setupUpdates() {
+        if (!Updater.enabled) return
+        val check = findViewById<Button>(R.id.btnCheckUpdate)
+        check.visibility = View.VISIBLE
+        check.setOnClickListener {
+            check.isEnabled = false; check.text = "Проверяю…"
+            Thread {
+                val rel = Updater.checkIfDue(this, force = true)
+                runOnUiThread {
+                    check.isEnabled = true; check.text = "Проверить обновления"
+                    if (rel == null) Toast.makeText(this, "Установлена последняя версия", Toast.LENGTH_SHORT).show()
+                    renderUpdate()
+                }
+            }.start()
+        }
+        findViewById<Button>(R.id.btnUpdate).setOnClickListener { installUpdate() }
+        renderUpdate()
+        if (intent.getBooleanExtra(EXTRA_UPDATE, false)) installUpdate()
+    }
+
+    private fun renderUpdate() {
+        val rel = if (Updater.enabled) Updater.pending(this) else null
+        findViewById<View>(R.id.updateBox).visibility = if (rel != null) View.VISIBLE else View.GONE
+        if (rel != null) findViewById<TextView>(R.id.updateTitle).text = "Доступна версия ${rel.name}"
+    }
+
+    private fun installUpdate() {
+        val rel = Updater.pending(this) ?: return
+        val btn = findViewById<Button>(R.id.btnUpdate)
+        btn.isEnabled = false; btn.text = "Скачиваю…"
+        Updater.downloadAndInstall(this, rel) { err ->
+            btn.isEnabled = true; btn.text = "Установить"
+            if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -235,6 +273,7 @@ class SettingsActivity : Activity() {
 
     companion object {
         const val EXTRA_ONBOARDING = "onboarding"
+        const val EXTRA_UPDATE = "update"
         private const val REQ_SOUND = 300
     }
 }

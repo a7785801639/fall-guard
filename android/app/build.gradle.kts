@@ -9,6 +9,8 @@ fun prop(name: String): String? = (project.findProperty(name) as String?) ?: Sys
 
 val buildNumber = prop("FG_VERSION_CODE")?.toIntOrNull() ?: 2
 val keystorePath = prop("FG_KEYSTORE_FILE")
+// Репозиторий для автообновления — только у сборок CI с постоянным ключом подписи
+val updateRepo = if (keystorePath != null) (prop("FG_UPDATE_REPO") ?: "") else ""
 
 android {
     namespace = "app.fallguard"
@@ -20,6 +22,11 @@ android {
         targetSdk = 35
         versionCode = buildNumber
         versionName = "1.$buildNumber"
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -56,4 +63,5 @@ dependencies {
     // Сканер QR из Google Play services: без разрешения камеры, свой экран сканирования
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // настоящий org.json в юнит-тестах вместо заглушки Android
 }

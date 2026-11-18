@@ -118,6 +118,7 @@ class AlertService : Service() {
                     lastOk = System.currentTimeMillis()
                     if (lostWarned) { lostWarned = false; nm.cancel(NOTIF_LOST) }
                     handlePoll(res.json(), base!!)
+                    maybeCheckUpdate()
                 }
                 res.code == 401 || res.code == 403 -> {
                     notifyEvent(NOTIF_LOST, "Телефон отвязан от FallGuard", "Откройте приложение и подключите телефон заново.")
@@ -140,6 +141,32 @@ class AlertService : Service() {
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------- обновления
+    @Volatile private var updateThread: Thread? = null
+
+    /** Раз в 12 часов спрашиваем GitHub о новой версии; во время тревоги — никогда. */
+    private fun maybeCheckUpdate() {
+        if (!Updater.enabled || ringing || updateThread?.isAlive == true) return
+        updateThread = Thread {
+            val rel = Updater.checkIfDue(this) ?: return@Thread
+            if (ringing || Updater.notifiedFor(this) >= rel.code) return@Thread
+            Updater.markNotified(this, rel.code)
+            val open = PendingIntent.getActivity(
+                this, 9, Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_UPDATE, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val n = NotificationCompat.Builder(this, CH_EVENTS)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("Доступно обновление FallGuard ${rel.name}")
+                .setContentText("Нажмите, чтобы установить")
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .build()
+            try { nm.notify(NOTIF_UPDATE, n) } catch (_: Exception) {}
+        }.also { it.start() }
     }
 
     private fun handlePoll(j: JSONObject, base: String) {
@@ -365,6 +392,7 @@ class AlertService : Service() {
         private const val NOTIF_ALARM = 2
         private const val NOTIF_EVENT = 3
         private const val NOTIF_LOST = 4
+        private const val NOTIF_UPDATE = 5
         private const val LOST_AFTER_MS = 120_000L
 
         @Volatile var current: AlarmInfo? = null
