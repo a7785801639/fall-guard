@@ -199,7 +199,7 @@ class AlertService : Service() {
                     Glance.update(this, null, false, "", false)
                     if (!lostWarned && System.currentTimeMillis() - lastOk > LOST_AFTER_MS) {
                         lostWarned = true
-                        notifyEvent(NOTIF_LOST, "Нет связи с FallGuard", "Тревоги сейчас не дойдут до этого телефона. Проверьте интернет и сервер.")
+                        notifyEvent(NOTIF_LOST, "Нет связи с FallGuard", "Тревоги сейчас не дойдут до этого телефона. Проверьте интернет и сервер.", kind = Signals.Kind.LINK)
                         if (Sounds.style(this, Signals.Kind.LINK) != Signals.Style.SILENT) Sounds.playNotify(this, Signals.Kind.LINK)
                     }
                     // Сеть сменилась — пробуем сразу, без нарастающей паузы
@@ -219,11 +219,11 @@ class AlertService : Service() {
             Signals.Style.NOTIFY -> {
                 val am = getSystemService(AudioManager::class.java)
                 val quiet = am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL
-                notifyEvent(NOTIF_EVENT, title, if (quiet) "Телефон в беззвучном режиме — уведомление придёт без звука." else "Так придёт уведомление со звуком.")
+                notifyEvent(NOTIF_EVENT, title, if (quiet) "Телефон в беззвучном режиме — уведомление придёт без звука." else "Так придёт уведомление со звуком.", kind = kind)
                 Sounds.playNotify(this, kind)
                 if (quiet) ui.post { android.widget.Toast.makeText(this, "Телефон в беззвучном — уведомление придёт без звука", android.widget.Toast.LENGTH_LONG).show() }
             }
-            Signals.Style.SILENT -> notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление без звука.")
+            Signals.Style.SILENT -> notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление без звука.", kind = kind)
         }
     }
 
@@ -275,9 +275,9 @@ class AlertService : Service() {
                 val nid = eventNotifId(act.alert.id)
                 // «Я рядом» — только когда речь о самой бабушке, не о камере или связи
                 val nearbyId = if (act.kind in NEARBY_KINDS) act.alert.id else ""
-                notifyEvent(nid, a.optString("title"), a.optString("description"), alertId = nearbyId)
+                notifyEvent(nid, a.optString("title"), a.optString("description"), alertId = nearbyId, kind = act.kind)
                 if (act.sound) Sounds.playNotify(this, act.kind)
-                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"), nearbyId)
+                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"), nearbyId, act.kind)
             }
             is Signals.Action.Ring -> {
                 val a = byId[act.alert.id] ?: continue
@@ -472,7 +472,7 @@ class AlertService : Service() {
      */
     private fun eventNotifId(alertId: String): Int = 1000 + Math.floorMod(alertId.hashCode(), 5000)
 
-    private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String, alertId: String) {
+    private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String, alertId: String, kind: Signals.Kind) {
         if (base.isEmpty() || path.isEmpty()) return
         val token = prefs.token
         Thread {
@@ -482,7 +482,7 @@ class AlertService : Service() {
                 if (bmp != null) {
                     // Смахнули уведомление — не возвращаем его ради картинки
                     val still = try { nm.activeNotifications.any { it.id == id } } catch (_: Exception) { false }
-                    if (still) notifyEvent(id, title, text, bmp, silentUpdate = true, alertId = alertId)
+                    if (still) notifyEvent(id, title, text, bmp, silentUpdate = true, alertId = alertId, kind = kind)
                     return@Thread
                 }
                 try { Thread.sleep(1500) } catch (_: InterruptedException) { return@Thread }
@@ -492,19 +492,29 @@ class AlertService : Service() {
 
     private fun notifyEvent(
         id: Int, title: String, text: String, picture: android.graphics.Bitmap? = null,
-        silentUpdate: Boolean = false, alertId: String = "",
+        silentUpdate: Boolean = false, alertId: String = "", kind: Signals.Kind? = null,
     ) {
+        // Цвет и значок — по событию: в шторке и строке состояния сразу видно, что случилось
+        val (icon, color) = when (kind) {
+            Signals.Kind.FALL -> R.drawable.ic_k_fall to R.color.alarm
+            Signals.Kind.STANDUP -> R.drawable.ic_k_walk to R.color.warn
+            Signals.Kind.SITTING -> R.drawable.ic_k_sit to R.color.warn
+            Signals.Kind.HELP -> R.drawable.ic_k_hand to R.color.warn
+            Signals.Kind.OTHER -> R.drawable.ic_k_alert to R.color.alarm
+            Signals.Kind.LINK -> R.drawable.ic_k_link to R.color.muted
+            null -> R.drawable.ic_stat to R.color.calm
+        }
         val style: NotificationCompat.Style = if (picture != null)
             NotificationCompat.BigPictureStyle().bigPicture(picture).setSummaryText(text).bigLargeIcon(null as android.graphics.Bitmap?)
         else NotificationCompat.BigTextStyle().bigText(text)
         val n = NotificationCompat.Builder(this, CH_EVENTS)
-            .setSmallIcon(R.drawable.ic_stat)
+            .setSmallIcon(icon)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(style)
             .setLargeIcon(picture)
             .setOnlyAlertOnce(silentUpdate)
-            .setColor(ContextCompat.getColor(this, R.color.calm))
+            .setColor(ContextCompat.getColor(this, color))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(openAppPending())
