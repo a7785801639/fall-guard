@@ -92,7 +92,7 @@ class AlertService : Service() {
             }
             ACTION_TEST_SIGNAL -> testSignal(Signals.Kind.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_ID) } ?: Signals.Kind.FALL)
             ACTION_TEST -> startAlarm(
-                AlarmInfo("", "Проверка тревоги", "Так прозвучит сигнал о падении. Это только проверка.", System.currentTimeMillis(), "", ""),
+                AlarmInfo("", "Проверка тревоги", "Так прозвучит сигнал о падении. Это только проверка.", ServerClock.now(), "", ""),
             )
         }
         if (!running) {
@@ -159,7 +159,7 @@ class AlertService : Service() {
     private fun testSignal(kind: Signals.Kind) {
         val title = "Проверка: ${kind.title.lowercase()}"
         when (Signals.effectiveStyle(kind, "", Sounds.style(this, kind))) {
-            Signals.Style.ALARM -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", System.currentTimeMillis(), "", "", kind, serverTracked = false))
+            Signals.Style.ALARM -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", ServerClock.now(), "", "", kind, serverTracked = false))
             Signals.Style.NOTIFY -> {
                 val am = getSystemService(AudioManager::class.java)
                 val quiet = am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL
@@ -206,6 +206,7 @@ class AlertService : Service() {
             list += Signals.Alert(a.optString("id"), a.optString("state"), a.optString("severity"), a.optBoolean("is_fall"))
             byId[a.optString("id")] = a
         }
+        ServerClock.sync(j.optDouble("server_ts", 0.0))
         val cursor = j.optLong("cursor", prefs.cursor)
         if (cursor > prefs.cursor) prefs.cursor = cursor
 
@@ -243,7 +244,7 @@ class AlertService : Service() {
             }
             Signals.Action.RingUnconfirmed -> {
                 // Тревога на сервере ещё не подтверждена (например, телефон только что включили)
-                val info = AlarmInfo("", "Тревога не подтверждена", j.optString("status_line"), System.currentTimeMillis(), "", base)
+                val info = AlarmInfo("", "Тревога не подтверждена", j.optString("status_line"), ServerClock.now(), "", base)
                 ui.post { startAlarm(info) }
             }
         }

@@ -111,3 +111,25 @@ object Signals {
         return out
     }
 }
+
+/**
+ * Часы сервера. Время событий приходит с сервера, а часы телефона могут уйти —
+ * тогда секундомер тревоги замирал бы на 0:00 или врал. Считаем «сейчас» по серверу.
+ */
+object ServerClock {
+    @Volatile var offsetMs = 0L
+        private set
+
+    /** Мелкие колебания (задержка сети) не трогаем, заметное расхождение принимаем сразу. */
+    fun nextOffset(current: Long, serverMs: Long, localMs: Long): Long {
+        val d = serverMs - localMs
+        return if (kotlin.math.abs(d - current) > 2000) d else current
+    }
+
+    fun sync(serverSec: Double, localMs: Long = System.currentTimeMillis()) {
+        if (serverSec <= 0) return
+        offsetMs = nextOffset(offsetMs, (serverSec * 1000).toLong(), localMs)
+    }
+
+    fun now(): Long = System.currentTimeMillis() + offsetMs
+}

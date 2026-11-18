@@ -2289,6 +2289,8 @@ class FallGuardEngine:
                 },
                 "clips_stats": clips_stats,
                 "clip_pre_sec": float(self.settings.pre_event_seconds),
+                # Часы сервера: клиенты считают «сколько прошло» от них, а не от своих (часы телефона могут уйти)
+                "server_ts": round(time.time(), 3),
                 "feedback_stats": feedback_stats,
                 "recent_clips": recent_clips,
             }

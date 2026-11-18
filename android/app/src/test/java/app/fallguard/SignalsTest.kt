@@ -91,4 +91,13 @@ class SignalsTest {
         assertEquals(0.09f, Signals.gain(Style.ALARM, 0), 0.0001f)
         assertTrue(Signals.gain(Style.NOTIFY, 80) > Signals.gain(Style.NOTIFY, 40))
     }
+
+    @Test fun serverClockIgnoresJitterButFollowsRealSkew() {
+        // Телефон отстаёт на 5 минут: принимаем
+        assertEquals(300_000L, ServerClock.nextOffset(0, 1_000_300_000, 1_000_000_000))
+        // Колебание в полсекунды — задержка сети: оставляем прежнее
+        assertEquals(300_000L, ServerClock.nextOffset(300_000, 1_000_300_500, 1_000_000_000))
+        // Часы поправили — расхождение ушло
+        assertEquals(100L, ServerClock.nextOffset(300_000, 1_000_000_100, 1_000_000_000))
+    }
 }

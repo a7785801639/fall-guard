@@ -1170,8 +1170,17 @@
     return h > 0 ? h + " ч " + pad(m % 60) + " мин" : m + " мин";
   }
   const timer = (sec) => { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ":" + pad(sec % 60); };
+  // Часы сервера: «сколько прошло» считаем от них — часы телефона или компьютера могут уйти
+  let clockSkew = 0;
+  const nowS = () => Date.now() / 1000 + clockSkew;
+  function syncClock(serverTs) {
+    if (!serverTs) return;
+    const d = serverTs - Date.now() / 1000;
+    // Мелкие колебания — это задержка сети, их не трогаем
+    if (Math.abs(d - clockSkew) > 2) clockSkew = d;
+  }
   function ago(ts) {
-    const s = Date.now() / 1000 - ts;
+    const s = nowS() - ts;
     if (s < 90) return "только что";
     if (s < 3600) return Math.round(s / 60) + " мин назад";
     if (s < 86400) return Math.round(s / 3600) + " ч назад";
@@ -1715,7 +1724,7 @@
     const tl = S && S.timeline, spans = (tl && tl.spans) || [];
     const last = spans[spans.length - 1];
     if (!last || (state && last.state !== state)) return "";
-    const sec = Date.now() / 1000 - last.start;
+    const sec = nowS() - last.start;
     if (sec < 60) return "только что";
     const m = Math.floor(sec / 60), h = Math.floor(m / 60);
     return h ? `${h} ч ${pad(m % 60)} мин` : `${m} мин`;
@@ -1784,7 +1793,7 @@
       $("vpMsgSub").textContent = cap(sub);
     }
     $("chipLight").hidden = !online || serverLost;
-    $("chipLight").textContent = clock(Date.now() / 1000) + (src.is_night_ir ? " · ночь" : "");
+    $("chipLight").textContent = clock(nowS()) + (src.is_night_ir ? " · ночь" : "");
     $("chipVisit").hidden = !src.door_visit_active;
 
     // Тревога — баннером поверх видео: раскладка не сдвигается
@@ -2078,7 +2087,7 @@
       const b64 = c.toDataURL("image/jpeg", 0.92).split(",")[1];
       shutter();
       const [x, y] = menuAt($("btnShot"));
-      showMenu(x - 180, y, "Кадр " + clock(Date.now() / 1000), [
+      showMenu(x - 180, y, "Кадр " + clock(nowS()), [
         { label: "Сохранить в галерею", icon: "i-download", fn: () => { native.saveImage(b64, name) ? toast("Кадр в галерее, папка FallGuard") : toast("Не получилось — нужен Android 10 или новее", "error"); } },
         { label: "Отправить…", icon: "i-send", fn: () => { if (!native.shareImage(b64, name)) toast("Не получилось отправить", "error"); } },
       ]);
@@ -2221,7 +2230,7 @@
     return d;
   }
   async function falseAlarmCurrent() {
-    const fresh = clips.find((c) => !c.false_alarm && Date.now() / 1000 - c.ts < 900);
+    const fresh = clips.find((c) => !c.false_alarm && nowS() - c.ts < 900);
     if (fresh) return reportFalse(fresh.id);
     toast("Запись этой тревоги ещё не готова — нажмите «Я рядом»");
   }
@@ -2868,7 +2877,7 @@
     if (S.telegram_configured) h += `<div class="row" style="margin-top:10px"><a class="btn" href="${esc(S.telegram_bot_url || "https://t.me/" + bot)}" target="_blank" rel="noopener">${ico("i-send")}Открыть @${esc(bot)}</a><button class="btn" onclick="testTelegram()">${ico("i-camera")}Проверочный кадр всем</button></div>`;
     h += `</div><div class="group"><h3>Телефоны с приложением</h3>`;
     if (devs.length) h += `<div class="rows">` + devs.map((d) => {
-      const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && Date.now() / 1000 - d.last_seen < 600;
+      const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && nowS() - d.last_seen < 600;
       return recipientRow(ri("i-phone", fresh ? "calm" : ""), esc(d.name) + (mine ? ' <span class="badge calm">этот телефон</span>' : ""),
         d.stale ? `<span class="badge warn">не на связи ${esc(dur(d.offline_sec || 0))}</span>` : d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь",
         modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`), sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги"),
@@ -3169,7 +3178,7 @@
       if (!r.ok) return;
       const d = await r.json();
       if (d.lite && S) { d.events = S.events; d.thumbs = undefined; }
-      S = d;
+      S = d; syncClock(d.server_ts);
       markOk();
       if (S.zones && !drawMode) { const hadBed = zones.bed_polygon && zones.bed_polygon.length >= 3; zones = S.zones; if (bedZoom && !hadBed) zoomToBed(false); }
       if (S.camera) {

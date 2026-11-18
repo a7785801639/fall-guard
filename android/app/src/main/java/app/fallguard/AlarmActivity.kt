@@ -141,7 +141,7 @@ class AlarmActivity : Activity() {
     }
 
     private fun updateElapsed() {
-        val sec = ((System.currentTimeMillis() - alarmTs) / 1000).coerceAtLeast(0)
+        val sec = ((ServerClock.now() - alarmTs) / 1000).coerceAtLeast(0)
         val text = if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60)
         else "%d:%02d".format(sec / 60, sec % 60)
         val elapsed = findViewById<TextView>(R.id.alarmElapsed)

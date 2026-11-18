@@ -45,7 +45,7 @@ class ElapsedRing @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         rect.set(l, t, l + size, t + size)
         c.drawOval(rect, track)
 
-        val ms = (System.currentTimeMillis() - startTs).coerceAtLeast(0)
+        val ms = (ServerClock.now() - startTs).coerceAtLeast(0)
         val frac = if (smooth) (ms % 60_000) / 60_000f else (ms / 1000 % 60) / 60f
         val color = colorFor(ms / 1000)
         arc.color = color; dot.color = color

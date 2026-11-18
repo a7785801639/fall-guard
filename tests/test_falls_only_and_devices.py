@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
 import httpx
 from fastapi.testclient import TestClient
 
@@ -479,6 +480,8 @@ def test_status_is_gzipped_and_lite_drops_heavy_parts_but_streams_are_not(tmp_pa
     lite = client.get("/api/status?lite=1", headers={"accept-encoding": "gzip"}).json()
     assert lite["lite"] is True and "events" not in lite and "thumbs" not in lite
     assert "recent_clips" in lite and "state" in lite and "timeline" in lite
+    # Часы сервера — в каждом ответе: клиенты считают «сколько прошло» от них
+    assert abs(lite["server_ts"] - time.time()) < 5
     plain = client.get("/api/status", headers={"accept-encoding": "identity"})
     assert plain.headers.get("content-encoding") is None and plain.json()["state"] == data["state"]
     snap = client.get("/api/snapshot.jpg", headers={"accept-encoding": "gzip"})
