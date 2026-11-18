@@ -139,10 +139,13 @@ class MainActivity : Activity() {
         // тревоги в фоне ловит AlertService, трафик и батарея не тратятся
         web.evaluateJavascript("window.fallguardBackground && window.fallguardBackground(true)", null)
         if (isInPictureInPictureMode) web.onPause()
+        // Повторные попытки соединиться — только пока экран открыт
+        stopAutoRetry()
         super.onStop()
     }
 
     override fun onDestroy() {
+        stopPulse(); ui.removeCallbacksAndMessages(null)
         pipReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
         super.onDestroy()
     }
@@ -358,7 +361,74 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- пульт
     /** Пока соединяемся — только индикатор; кнопки «Повторить» и «Настройки» — после неудачи. */
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pulses: List<android.animation.Animator> = emptyList()
+    private var retryLeft = 0
+    private val retryTick = object : Runnable {
+        override fun run() {
+            if (retryLeft <= 0) { connect(); return }
+            findViewById<TextView>(R.id.offlineRetry).text = "Повторю через $retryLeft с"
+            retryLeft--
+            ui.postDelayed(this, 1000)
+        }
+    }
+
+    /** Два кольца расходятся от щита: видно, что приложение работает, а не повисло. */
+    private fun startPulse() {
+        if (pulses.isNotEmpty()) return
+        pulses = listOf(R.id.ringA to 0L, R.id.ringB to 1100L).map { (id, delay) ->
+            val v = findViewById<View>(id)
+            android.animation.AnimatorSet().apply {
+                playTogether(
+                    android.animation.ObjectAnimator.ofFloat(v, View.SCALE_X, 0.7f, 1.55f),
+                    android.animation.ObjectAnimator.ofFloat(v, View.SCALE_Y, 0.7f, 1.55f),
+                    android.animation.ObjectAnimator.ofFloat(v, View.ALPHA, 0.55f, 0f),
+                )
+                duration = 2200
+                startDelay = delay
+                interpolator = android.view.animation.DecelerateInterpolator()
+                // Повтор у AnimatorSet не бывает: перезапускаем сами
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    private var cancelled = false
+                    override fun onAnimationCancel(a: android.animation.Animator) { cancelled = true }
+                    override fun onAnimationEnd(a: android.animation.Animator) { if (!cancelled) { startDelay = 0; start() } }
+                })
+                start()
+            }
+        }
+    }
+
+    private fun stopPulse() {
+        pulses.forEach { it.cancel() }
+        pulses = emptyList()
+    }
+
+    private fun stopAutoRetry() {
+        ui.removeCallbacks(retryTick)
+        findViewById<TextView>(R.id.offlineRetry).text = ""
+    }
+
+    /** Нет связи: сами пробуем снова через несколько секунд, пока экран открыт. */
+    private fun startAutoRetry() {
+        stopAutoRetry()
+        retryLeft = 10
+        ui.post(retryTick)
+    }
+
+    /** Пульт загрузился — плавно показываем его вместо экрана соединения. */
+    private fun revealWeb() {
+        ui.removeCallbacks(revealFallback)
+        if (web.visibility == View.VISIBLE) return
+        stopPulse(); stopAutoRetry()
+        show(web)
+        web.alpha = 0f
+        web.animate().alpha(1f).setDuration(220).start()
+    }
+
+    private val revealFallback = Runnable { if (loadedBase.isNotEmpty()) revealWeb() }
+
     private fun setConnecting(on: Boolean) {
+        if (on) startPulse() else stopPulse()
         findViewById<View>(R.id.offlineProgress).visibility = if (on) View.VISIBLE else View.GONE
         findViewById<View>(R.id.offlineIcon).visibility = if (on) View.GONE else View.VISIBLE
         findViewById<View>(R.id.btnRetry).visibility = if (on) View.INVISIBLE else View.VISIBLE
@@ -366,10 +436,11 @@ class MainActivity : Activity() {
     }
 
     private fun connect() {
+        stopAutoRetry()
         show(offline)
         setConnecting(true)
         findViewById<TextView>(R.id.offlineTitle).text = "Соединяюсь с FallGuard…"
-        findViewById<TextView>(R.id.offlineText).text = ""
+        findViewById<TextView>(R.id.offlineText).text = "Обычно это секунда"
         Thread {
             val base = Api.reachableBase(prefs)
             runOnUiThread {
@@ -379,14 +450,17 @@ class MainActivity : Activity() {
                     findViewById<TextView>(R.id.offlineTitle).text = "Нет связи с сервером"
                     findViewById<TextView>(R.id.offlineText).text =
                         "Тревоги придут, когда связь вернётся."
+                    startAutoRetry()
                 } else {
                     loadedBase = base
                     val cm = CookieManager.getInstance()
                     cm.setAcceptCookie(true)
                     cm.setCookie(base, "fg_device=${prefs.token}; Path=/; Max-Age=31536000")
                     cm.flush()
+                    // Экран соединения остаётся, пока пульт не загрузится; затем плавно сменяется им
                     web.loadUrl("$base/")
-                    show(web)
+                    ui.removeCallbacks(revealFallback)
+                    ui.postDelayed(revealFallback, 8000)
                 }
             }
         }.start()
@@ -418,6 +492,7 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 if (loadedBase.isEmpty()) return
                 pageReady = true
+                revealWeb()
                 pendingJs?.let { pendingJs = null; view.evaluateJavascript(it, null) }
             }
 

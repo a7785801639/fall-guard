@@ -208,13 +208,36 @@
                 android:src="@drawable/ic_offline" />
         </FrameLayout>
 
-        <ProgressBar
+        <FrameLayout
             android:id="@+id/offlineProgress"
-            style="?android:attr/progressBarStyle"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginBottom="22dp"
-            android:indeterminateTint="@color/calm" />
+            android:layout_width="132dp"
+            android:layout_height="132dp"
+            android:layout_marginBottom="14dp"
+            android:clipChildren="false">
+
+            <View
+                android:id="@+id/ringA"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:layout_gravity="center"
+                android:alpha="0"
+                android:background="@drawable/ring_pulse" />
+
+            <View
+                android:id="@+id/ringB"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:layout_gravity="center"
+                android:alpha="0"
+                android:background="@drawable/ring_pulse" />
+
+            <ImageView
+                android:layout_width="68dp"
+                android:layout_height="68dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_shield" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/offlineTitle"
@@ -235,6 +258,15 @@
             android:lineSpacingMultiplier="1.15"
             android:textColor="@color/muted"
             android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/offlineRetry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:textColor="@color/calm"
+            android:textSize="14sp" />
 
         <Button
             android:id="@+id/btnRetry"
