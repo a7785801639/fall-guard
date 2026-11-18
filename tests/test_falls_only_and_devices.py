@@ -464,3 +464,22 @@ def test_phone_alarm_screen_media_reachable_with_device_token(tmp_path: Path) ->
     assert client.get("/api/snapshot.jpg?overlay=1", headers=auth).status_code in (200, 503)
     assert client.get("/api/clips/nope.jpg", headers=EXTERNAL).status_code == 401
     assert client.get("/api/clips/nope.jpg", headers=auth).status_code in (200, 404)
+
+
+def test_status_is_gzipped_and_lite_drops_heavy_parts_but_streams_are_not(tmp_path: Path) -> None:
+    """Пульт опрашивает статус постоянно: ответ сжат, «лёгкий» опрос без превью и журнала."""
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    for i in range(80):
+        engine._log_event("warning", f"Пытается встать с кровати — событие {i}", state="sitting_up")
+    client = TestClient(create_web_app(engine))
+    full = client.get("/api/status", headers={"accept-encoding": "gzip"})
+    assert full.status_code == 200 and full.headers.get("content-encoding") == "gzip"
+    data = full.json()
+    assert "events" in data and "thumbs" in data and "recent_clips" in data
+    lite = client.get("/api/status?lite=1", headers={"accept-encoding": "gzip"}).json()
+    assert lite["lite"] is True and "events" not in lite and "thumbs" not in lite
+    assert "recent_clips" in lite and "state" in lite and "timeline" in lite
+    plain = client.get("/api/status", headers={"accept-encoding": "identity"})
+    assert plain.headers.get("content-encoding") is None and plain.json()["state"] == data["state"]
+    snap = client.get("/api/snapshot.jpg", headers={"accept-encoding": "gzip"})
+    assert snap.headers.get("content-encoding") is None

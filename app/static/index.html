@@ -1019,6 +1019,10 @@
   let logFilter = "all";
   let pairInfo = null, pairTimer = 0;
 
+  // Приложение свёрнуто (Android, без маленького окна): видео, сокеты и опрос стоят
+  let bgMode = false;
+  const asleep = () => document.hidden || bgMode;
+
   /* ---------- Утилиты ---------- */
   const tg = () => (window.Telegram && window.Telegram.WebApp) || null;
   function haptic(kind) {
@@ -1215,8 +1219,9 @@
     }
     return "";
   }
-  function reconnect(ms_) { clearTimeout(reTimer); reTimer = setTimeout(() => { if (!document.hidden) startStream(true); }, ms_); }
+  function reconnect(ms_) { clearTimeout(reTimer); reTimer = setTimeout(() => { if (!asleep()) startStream(true); }, ms_); }
   function startStream(force) {
+    if (bgMode) return;
     if (!started) return;
     clearTimeout(reTimer);
     if (!MSE) { useMjpeg(); return; }
@@ -1255,7 +1260,7 @@
     };
   }
   setInterval(() => {
-    if (!started || document.hidden) return;
+    if (!started || asleep()) return;
     const stale = Date.now() - lastChunk;
     $("chipStall").hidden = !(camOnline() && !serverLost && stale > 4500);
     if (mjpeg) { if (stale > 15000) startStream(true); return; }
@@ -1455,7 +1460,7 @@
   /* ---------- Быстрый статус (телеметрия ~12 Гц) ---------- */
   let tws = null, twsTimer = 0;
   function connectTelemetry() {
-    if (!started || (tws && tws.readyState <= 1)) return;
+    if (!started || bgMode || (tws && tws.readyState <= 1)) return;
     try { tws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + withAuth("/ws/telemetry")); } catch (_) { return; }
     tws.onmessage = (ev) => {
       let m = null; try { m = JSON.parse(ev.data); } catch (_) {}
@@ -1465,7 +1470,7 @@
       renderFast();
       draw();
     };
-    tws.onclose = () => { tws = null; clearTimeout(twsTimer); twsTimer = setTimeout(connectTelemetry, 1500); };
+    tws.onclose = () => { tws = null; clearTimeout(twsTimer); if (!bgMode) twsTimer = setTimeout(connectTelemetry, 1500); };
   }
   function camOnline() { return Boolean(S && (S.camera_connected || (S.camera && S.camera.connected))); }
   const CALM_SUB = { idle: "Сигнал придёт, как только что-то случится", in_bed: "Лежит спокойно", caregiver: "Пока свои рядом, подъём не тревожит" };
@@ -1773,6 +1778,20 @@
     let ok = false; try { ok = native.enterPip(); } catch (_) {}
     if (!ok) toast("Маленькое окно выключено в настройках или не поддерживается телефоном", "info");
   }
+  window.fallguardBackground = (on) => {
+    on = Boolean(on);
+    if (on === bgMode) return;
+    bgMode = on;
+    if (on) {
+      clearTimeout(reTimer); clearTimeout(twsTimer);
+      teardown(false);
+      if (tws) { const t = tws; tws = null; t.onclose = null; try { t.close(); } catch (_) {} }
+      try { img.removeAttribute("src"); video.pause(); } catch (_) {}
+    } else {
+      lastOk = Date.now();
+      startStream(true); connectTelemetry(); poll(true);
+    }
+  };
   window.fallguardPip = (on) => {
     document.body.classList.toggle("pip", Boolean(on));
     if (on) { hideMenu(); $("tip").hidden = true; }
@@ -2490,6 +2509,7 @@
     $("tabs").hidden = true;
     showLayer($("sheetScrim")); hideMenu();
     $("sheetBody")._h = null; fadeBody(); renderSheet(); $("sheetBody").scrollTop = 0; syncBack();
+    poll(true);
   }
   function closeSheet(now) {
     clearInterval(pairTimer); pairInfo = null;
@@ -2695,20 +2715,27 @@
     if (serverLost) { serverLost = false; toast("Связь с сервером восстановлена"); haptic("success"); renderFast(); }
   }
   setInterval(() => {
-    if (!started || document.hidden || serverLost || !S) return;
+    if (!started || asleep() || serverLost || !S) return;
     if (Date.now() - lastOk > 10000) {
       serverLost = true; haptic("warning"); renderFast();
       if (soundOn && audioCtx && !native) beep([[0, 0.18, 523, 0.2], [0.22, 0.18, 440, 0.2], [0.44, 0.3, 349, 0.2]]);
     }
   }, 2000);
-  async function poll() {
+  // Полный ответ (с превью хроники и журналом) — раз в ~30 с или когда открыт журнал; в остальное время «лёгкий»
+  let pollN = 0;
+  const telemetryLive = () => Boolean(tws && tws.readyState === 1);
+  async function poll(forceFull) {
     if (!started || pollBusy) return;
     pollBusy = true;
+    const full = forceFull === true || !S || !S.events || (isOpen($("sheetScrim")) && sheetMode === "journal") || pollN % (telemetryLive() ? 4 : 12) === 0;
+    pollN++;
     try {
-      const r = await api("/api/status?window_sec=" + windowSec);
+      const r = await api("/api/status?window_sec=" + windowSec + (full ? "" : "&lite=1"));
       if (r.status === 401) { showLock(); return; }
       if (!r.ok) return;
-      S = await r.json();
+      const d = await r.json();
+      if (d.lite && S) { d.events = S.events; d.thumbs = undefined; }
+      S = d;
       markOk();
       if (S.zones && !drawMode) { const hadBed = zones.bed_polygon && zones.bed_polygon.length >= 3; zones = S.zones; if (bedZoom && !hadBed) zoomToBed(false); }
       if (S.camera) {
@@ -2718,6 +2745,7 @@
       }
       clips = S.recent_clips || [];
       if (Array.isArray(S.thumbs)) thumbs = S.thumbs.slice().sort((x, y) => x.ts - y.ts);
+      if (!S.thumbs) S.thumbs = thumbs;
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
       if (me.kind === "telegram") { const mine = (S.telegram_subscribers || []).find((s) => String(s.chat_id) === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
       if (me.kind === "device") { const mine = (S.devices || []).find((d) => d.id === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
@@ -2768,7 +2796,8 @@
     startStream(true);
     connectTelemetry();
     await refreshMe();
-    setInterval(poll, 2500);
+    // Пока идёт телеметрия, статус нужен редко; без неё — как раньше, каждые 2,5 с
+    (function pollLoop() { if (!asleep()) poll(); setTimeout(pollLoop, telemetryLive() ? 8000 : 2500); })();
     if ("serviceWorker" in navigator && !tg()?.initData && !native) navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   async function boot() {

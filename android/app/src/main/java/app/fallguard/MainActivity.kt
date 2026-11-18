@@ -106,7 +106,15 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    override fun onStart() {
+        super.onStart()
+        web.evaluateJavascript("window.fallguardBackground && window.fallguardBackground(false)", null)
+    }
+
     override fun onStop() {
+        // Свернули (или закрыли маленькое окно): видео, сокеты и опрос пульта останавливаются —
+        // тревоги в фоне ловит AlertService, трафик и батарея не тратятся
+        web.evaluateJavascript("window.fallguardBackground && window.fallguardBackground(true)", null)
         if (isInPictureInPictureMode) web.onPause()
         super.onStop()
     }

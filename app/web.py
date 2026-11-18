@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
+import json
 import time
 import urllib.parse
 from collections.abc import Mapping
@@ -18,6 +20,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -641,8 +644,18 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/status")
-    async def status(window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0)) -> dict:
-        return engine.get_status(timeline_window_sec=window_sec)
+    async def status(
+        request: Request,
+        window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0),
+        lite: int = Query(default=0),
+    ) -> Response:
+        data = engine.get_status(timeline_window_sec=window_sec)
+        if lite:
+            # Частый опрос пульта: без превью хроники и журнала — их клиент берёт из полного ответа
+            data.pop("thumbs", None)
+            data.pop("events", None)
+            data["lite"] = True
+        return _json_maybe_gzip(request, data)
 
     @app.get("/api/prefs")
     async def get_prefs() -> dict:
@@ -1089,6 +1102,15 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
+
+    def _json_maybe_gzip(request: Request, data: Any) -> Response:
+        """JSON со сжатием gzip, если клиент его понимает: пульт опрашивает статус постоянно."""
+        body = json.dumps(jsonable_encoder(data), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        headers = {"Cache-Control": "no-store", "Vary": "Accept-Encoding"}
+        if len(body) > 1400 and "gzip" in request.headers.get("accept-encoding", "").lower():
+            body = gzip.compress(body, compresslevel=5)
+            headers["Content-Encoding"] = "gzip"
+        return Response(content=body, media_type="application/json", headers=headers)
 
     def _build_mjpeg_response(use_overlay: bool, max_frames: int = 0) -> StreamingResponse:
         async def _gen() -> AsyncGenerator[bytes, None]:
