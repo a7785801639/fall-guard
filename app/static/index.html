@@ -1264,12 +1264,44 @@
     if (unack) return "alarm";
     return WARN_STATES.includes(st) ? "warn" : "";
   }
+  /* ---------- Уведомления на рабочем столе: пульт открыт во вкладке, а смотрят в другое окно ---------- */
+  // Браузеры дают уведомления только защищённым страницам (https или сам компьютер с сервером)
+  const deskOk = () => !native && "Notification" in window && window.isSecureContext;
+  let deskOn = lsGet("fg_desk_notify", "0") === "1", deskLast = "";
+  async function toggleDeskNotify() {
+    if (!deskOk()) return;
+    if (deskOn) { deskOn = false; lsSet("fg_desk_notify", "0"); toast("Уведомления на рабочем столе выключены"); renderSheet(); return; }
+    let perm = Notification.permission;
+    if (perm === "default") { try { perm = await Notification.requestPermission(); } catch (_) {} }
+    if (perm !== "granted") { toast("Браузер не разрешил уведомления — включите их в настройках сайта", "error"); renderSheet(); return; }
+    deskOn = true; lsSet("fg_desk_notify", "1");
+    try { new Notification("FallGuard", { body: "Так придёт тревога, когда вкладка не на виду", icon: "/icon.svg", tag: "fallguard-test" }); } catch (_) {}
+    renderSheet();
+  }
+  function deskNotifyTick(lvl, src) {
+    if (!deskOn || !deskOk() || Notification.permission !== "granted") return;
+    const key = lvl ? lvl + ":" + src.state : "";
+    // Только когда вкладку не видно и только при смене события — без повторов каждую секунду
+    if (key && key !== deskLast && (document.hidden || !document.hasFocus())) {
+      try {
+        const n = new Notification((lvl === "alarm" ? "🚨 " : "") + ((STATE[src.state] || [src.state])[0]), {
+          body: src.status_reason || "Откройте пульт FallGuard", icon: "/icon.svg", tag: "fallguard", renotify: true, requireInteraction: lvl === "alarm",
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch (_) {}
+    }
+    deskLast = key;
+  }
   setInterval(() => {
-    if (!soundOn || native || !live) return;
-    const lvl = alarmLevel(live.state, live.fall_unacknowledged);
+    // Телеметрия может быть недоступна (только опрос) — тогда берём последний статус
+    const src = live || S;
+    if (!src || native) return;
+    const lvl = alarmLevel(src.state, src.fall_unacknowledged);
+    deskNotifyTick(lvl, src);
+    if (!soundOn) return;
     if (lvl === "alarm") beep(BEEPS[lsGet("fg_snd_alarm", "siren")] || BEEPS.siren);
-    else if (lvl === "warn" && lastWarnState !== live.state) beep(BEEPS[lsGet("fg_snd_warn", "chime")] || BEEPS.chime);
-    lastWarnState = lvl === "warn" ? live.state : "";
+    else if (lvl === "warn" && lastWarnState !== src.state) beep(BEEPS[lsGet("fg_snd_warn", "chime")] || BEEPS.chime);
+    lastWarnState = lvl === "warn" ? src.state : "";
   }, 1300);
 
   /* ---------- Живое видео: fMP4 по WebSocket (MSE) с резервом MJPEG ---------- */
@@ -3030,7 +3062,8 @@
       </div></div>`
       + (native ? `<div class="group"><button class="btn block" onclick="openPhone()">${ico("i-bell")}Звуки и громкость на этом телефоне</button></div>` : `<div class="group"><h3>Звук в этом браузере</h3><div class="rows">
         <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Падение и тревоги</div></div>${pick("sndA", lsGet("fg_snd_alarm", "siren"), ["siren", "pulse", "bell", "high"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_alarm", v), "Звук тревоги")}</div>
-        <div class="rowi">${ri("i-walk", "warn")}<div class="rowi-body"><div class="rowi-title">Посадка и вставание</div></div>${pick("sndW", lsGet("fg_snd_warn", "chime"), ["chime", "triple", "soft", "bell"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_warn", v), "Звук событий")}</div>
+        <div class="rowi">${ri("i-walk", "warn")}<div class="rowi-body"><div class="rowi-title">Посадка и вставание</div></div>${pick("sndW", lsGet("fg_snd_warn", "chime"), ["chime", "triple", "soft", "bell"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_warn", v), "Звук событий")}</div>`
+        + (deskOk() ? `<div class="rowi">${ri("i-bell", deskOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Уведомления на рабочем столе</div><div class="rowi-sub">когда вкладка с пультом не на виду</div></div>${sw(deskOn, "toggleDeskNotify()", "Уведомления на рабочем столе")}</div>` : "") + `
       </div>${soundOn ? "" : `<p class="muted small" style="margin-top:8px">Сейчас звук выключен — кнопка «Без звука» внизу.</p>`}</div>`)
       + (matchMedia("(pointer: fine)").matches ? `<div class="group"><button class="btn" onclick="showLayer($('keysScrim'))">${ico("i-key")}Горячие клавиши<span class="muted small" style="margin-left:4px">(?)</span></button></div>` : "");
   }
