@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Экран тревоги на невысоких телефонах: заголовок мельче — больше места кадру -->
+    <dimen name="alarm_title">24sp</dimen>
+    <dimen name="alarm_desc">15sp</dimen>
+</resources>

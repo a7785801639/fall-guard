@@ -166,6 +166,15 @@ object Sounds {
     /** Звук уведомления — только если телефон не в беззвучном режиме. */
     fun playNotify(ctx: Context, kind: Signals.Kind) {
         val am = ctx.getSystemService(AudioManager::class.java)
+        // Канал событий беззвучный (звук играем сами), поэтому и вибрацию даём сами: ночью телефон
+        // часто на вибрации — без неё «встала с кровати» прошло бы незамеченным.
+        // Как «уведомление»: в беззвучном режиме и в «Не беспокоить» система её сама приглушит.
+        try {
+            val vib = ctx.getSystemService(android.os.Vibrator::class.java)
+            val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT).build()
+            @Suppress("DEPRECATION")
+            vib?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 260, 140, 260), -1), attrs)
+        } catch (_: Exception) {}
         if (am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
         // Выбранный звук пропал (удалён из телефона) — играет встроенный, а не тишина
         play(ctx, uriOf(ctx, kind), AudioAttributes.USAGE_NOTIFICATION_EVENT, loop = false,
