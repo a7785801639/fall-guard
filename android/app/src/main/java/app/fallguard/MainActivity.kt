@@ -310,9 +310,17 @@ class MainActivity : Activity() {
     }
 
     // ---------------------------------------------------------------- пульт
+    /** Пока соединяемся — только индикатор; кнопки «Повторить» и «Настройки» — после неудачи. */
+    private fun setConnecting(on: Boolean) {
+        findViewById<View>(R.id.offlineProgress).visibility = if (on) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.offlineIcon).visibility = if (on) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnRetry).visibility = if (on) View.INVISIBLE else View.VISIBLE
+        findViewById<View>(R.id.btnOfflineSettings).visibility = if (on) View.INVISIBLE else View.VISIBLE
+    }
+
     private fun connect() {
         show(offline)
-        findViewById<View>(R.id.offlineIcon).visibility = View.INVISIBLE
+        setConnecting(true)
         findViewById<TextView>(R.id.offlineTitle).text = "Соединяюсь с FallGuard…"
         findViewById<TextView>(R.id.offlineText).text = ""
         Thread {
@@ -320,7 +328,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (isFinishing) return@runOnUiThread
                 if (base == null) {
-                    findViewById<View>(R.id.offlineIcon).visibility = View.VISIBLE
+                    setConnecting(false)
                     findViewById<TextView>(R.id.offlineTitle).text = "Нет связи с сервером"
                     findViewById<TextView>(R.id.offlineText).text =
                         "Тревоги придут, когда связь вернётся."

@@ -55,17 +55,27 @@
             style="@style/Section"
             android:text="Адреса сервера" />
 
+        <TextView
+            style="@style/Label"
+            android:layout_marginTop="6dp"
+            android:text="Дома" />
+
         <EditText
             android:id="@+id/setLan"
             style="@style/Field"
-            android:hint="Дома: 192.168.1.50:8090"
+            android:hint="например 192.168.1.50:8090"
             android:importantForAutofill="no"
             android:inputType="textUri" />
+
+        <TextView
+            style="@style/Label"
+            android:layout_marginTop="12dp"
+            android:text="Вне дома" />
 
         <EditText
             android:id="@+id/setPublic"
             style="@style/Field"
-            android:hint="Вне дома: https://…"
+            android:hint="https://…"
             android:importantForAutofill="no"
             android:inputType="textUri" />
 
@@ -74,10 +84,18 @@
             style="@style/Btn"
             android:text="Сохранить адреса" />
 
+        <!-- Опасное действие — отдельно, внизу, без плашки; подтверждается диалогом -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="40dp"
+            android:background="@color/line" />
+
         <Button
             android:id="@+id/btnUnpair"
             style="@style/Btn"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="12dp"
+            android:background="@android:color/transparent"
             android:text="Отвязать этот телефон"
             android:textColor="@color/alarm" />
 

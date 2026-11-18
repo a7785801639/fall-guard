@@ -160,7 +160,7 @@
     .app[data-alarm="1"] .player::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); box-shadow: inset 0 0 0 3px var(--alarm); pointer-events: none; animation: ring 1.2s ease-in-out infinite; z-index: 6; }
     @keyframes ring { 50% { box-shadow: inset 0 0 0 3px rgba(255, 90, 95, 0.25); } }
     @media (max-width: 979px) {
-      .hero { height: 150px; padding: 12px 12px 10px 14px; grid-template-columns: minmax(0, 1fr) 86px; grid-template-rows: 18px minmax(0, 1fr) 38px; row-gap: 4px; }
+      .hero { height: 134px; padding: 12px 12px 8px 14px; grid-template-columns: minmax(0, 1fr) 86px; grid-template-rows: 18px minmax(0, 1fr) 34px; row-gap: 2px; }
       .hero-title { font-size: 21px; line-height: 25px; }
       .scene { width: 86px; height: 57px; }
     }
@@ -326,6 +326,7 @@
     .ribbon i.t-offline { background: transparent; color: var(--faint); }
     .ribbon b { position: absolute; top: -6px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--warn); border: 2.5px solid #101216; z-index: 2; cursor: pointer; }
     .ribbon b.fall { background: var(--alarm); width: 18px; height: 18px; margin-left: -9px; top: -8px; }
+    .ribbon b[data-n]::before { content: attr(data-n); position: absolute; inset: 0; display: grid; place-items: center; font: 800 9px/1 var(--font); color: #101216; }
     .ribbon b::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 30px; margin-left: -1px; background: inherit; opacity: 0.6; }
     .ribbon u { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: #fff; display: none; z-index: 3; text-decoration: none; }
     .ribbon u[data-t]::before { content: attr(data-t); position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -3px); padding: 2px 6px; border-radius: 6px; background: #fff; color: #0B0D11; font-size: 11px; font-weight: 700; white-space: nowrap; }
@@ -924,6 +925,7 @@
           <button class="icon-btn" id="clipOlder" onclick="stepClip(1)" aria-label="Предыдущая запись" title="Раньше (Shift+←)"><svg class="ico"><use href="#i-chev-l"/></svg></button>
           <button class="icon-btn" id="clipNewer" onclick="stepClip(-1)" aria-label="Следующая запись" title="Позже (Shift+→)"><svg class="ico"><use href="#i-chev-r"/></svg></button>
         </div>
+        <button class="icon-btn more" onclick="clipMenu(this)" aria-label="Ещё" title="Ещё"><svg class="ico"><use href="#i-dots"/></svg></button>
         <button class="icon-btn" onclick="closeClip()" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
       </div>
       <div class="clip-media" id="clipMedia"></div>
@@ -931,8 +933,6 @@
         <div class="clip-meta num" id="clipMeta"></div>
         <div class="row" style="align-items:center">
           <button class="btn" id="clipFalse" style="flex:0 1 auto" onclick="falseAlarmClip()"><svg class="ico"><use href="#i-x-circle"/></svg>Это ложная тревога</button>
-          <span style="flex:1"></span>
-          <button class="btn sm ghost red-text" style="flex:0 0 auto" onclick="deleteClip()"><svg class="ico"><use href="#i-trash"/></svg>Удалить запись</button>
         </div>
       </div>
     </div>
@@ -1473,7 +1473,14 @@
     tws.onclose = () => { tws = null; clearTimeout(twsTimer); if (!bgMode) twsTimer = setTimeout(connectTelemetry, 1500); };
   }
   function camOnline() { return Boolean(S && (S.camera_connected || (S.camera && S.camera.connected))); }
-  const CALM_SUB = { idle: "Сигнал придёт, как только что-то случится", in_bed: "Лежит спокойно", caregiver: "Пока свои рядом, подъём не тревожит" };
+  const CALM_SUB = { idle: "", in_bed: "", caregiver: "Пока свои рядом, подъём не тревожит" };
+  // В спокойном состоянии под заголовком — последнее событие (его нет больше нигде на экране)
+  function lastEventLine() {
+    const c = clips.find((x) => !x.false_alarm);
+    if (!c) return "Событий пока не было";
+    const what = { fallen: "падение", sitting_up: "садилась", left_bed: "вставала", help_call: "звала", missing: "уходила", prolonged_absence: "долго не было", immobile: "без движения", immobility: "без движения" }[c.state] || "событие";
+    return "Последнее: " + what + ", " + (c.time || clock(c.ts)).slice(0, 5);
+  }
   function sinceText(state) {
     const tl = S && S.timeline, spans = (tl && tl.spans) || [];
     const last = spans[spans.length - 1];
@@ -1505,7 +1512,7 @@
     if (!src || !S) return;
     const st = src.state || "idle", online = camOnline();
     let [title, tone] = STATE[st] || [st, "calm"];
-    let sub = CALM_SUB[st] || src.status_reason || "";
+    let sub = st in CALM_SUB ? (CALM_SUB[st] || lastEventLine()) : src.status_reason || "";
     let eyebrow = "";
     const lvl = online ? alarmLevel(st, src.fall_unacknowledged) : "";
     if (!online && st !== "paused") { title = "Нет связи с камерой"; tone = "offline"; sub = S.camera_configured === false ? "Укажите RTSP_URL в файле .env" : (S.camera_error || "Подключаемся к потоку…"); }
@@ -1715,7 +1722,17 @@
     const src = live || S; if (!src) return null;
     const pat = realTracks(src).find((t) => t.role === "patient");
     let b = null, label = "Бабушка крупно";
-    if (pat) { b = pat.bbox; cuLastSeen = Date.now(); }
+    if (pat) {
+      b = pat.bbox; cuLastSeen = Date.now();
+      const kp = Array.isArray(pat.keypoints) ? pat.keypoints : [];
+      const pts = [0, 1, 2, 3, 4, 5, 6, 11, 12].map((i) => kp[i]).filter((p) => p && p[2] > 0.3);
+      if ((src.state || "") !== "fallen" && pts.length >= 3) {
+        const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+        let x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+        const pad = Math.max(x2 - x1, y2 - y1) * 0.35 + 0.02;
+        b = [Math.max(0, x1 - pad), Math.max(0, y1 - pad), Math.min(1, x2 + pad), Math.min(1, y2 + pad)];
+      }
+    }
     else if (src.patient_in_bed_latched && zones.bed_polygon && zones.bed_polygon.length >= 3) {
       const xs = zones.bed_polygon.map((p) => p[0]), ys = zones.bed_polygon.map((p) => p[1]);
       b = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; label = "Кровать крупно";
@@ -1724,7 +1741,7 @@
     // Кадр 4:3 вокруг человека с запасом
     const [W, H] = srcSize(), ar = Math.max(0.6, Math.min(2, (cuCanvas.clientWidth || 4) / (cuCanvas.clientHeight || 3)));
     let cx = (b[0] + b[2]) / 2 * W, cy = (b[1] + b[3]) / 2 * H;
-    let w = Math.max((b[2] - b[0]) * W * 1.45, 0.2 * W), h = Math.max((b[3] - b[1]) * H * 1.45, w / ar);
+    let w = Math.max((b[2] - b[0]) * W * 1.2, 0.16 * W), h = Math.max((b[3] - b[1]) * H * 1.2, w / ar);
     w = Math.max(w, h * ar); h = w / ar;
     if (w > W) { w = W; h = w / ar; } if (h > H) { h = H; w = h * ar; }
     cx = Math.min(W - w / 2, Math.max(w / 2, cx)); cy = Math.min(H - h / 2, Math.max(h / 2, cy));
@@ -2062,10 +2079,15 @@
       html += `<i class="t-${esc(sp.tone)}" style="left:${l.toFixed(3)}%;width:${Math.max(0.15, w).toFixed(3)}%">${fits ? esc(txt) : ""}</i>`;
     }
     html += `</div><u id="ribbonCursor"></u>`;
-    for (const c of clips) {
+    const pins = [];
+    for (const c of clips.filter((x) => !x.false_alarm).sort((x, y) => x.ts - y.ts)) {
       const p = (c.ts - start) / win * 100;
-      if (p >= 0 && p <= 100 && !c.false_alarm) html += `<b class="${c.state === "fallen" ? "fall" : ""}" style="left:${p.toFixed(3)}%" title="${esc(c.title)}"></b>`;
+      if (p < 0 || p > 100) continue;
+      const last = pins[pins.length - 1];
+      if (last && (p - last.p) / 100 * W < 16) { last.n++; last.fall = last.fall || c.state === "fallen"; last.p = p; last.titles.push(c.title); }
+      else pins.push({ p, n: 1, fall: c.state === "fallen", titles: [c.title] });
     }
+    for (const pin of pins) html += `<b class="${pin.fall ? "fall" : ""}" style="left:${Math.min(98.8, pin.p).toFixed(3)}%" title="${esc(pin.titles.join("\n"))}"${pin.n > 1 ? ` data-n="${pin.n}"` : ""}></b>`;
     if (rb._h !== html && !rb._busy) { rb._h = html; rb.innerHTML = html; }
     rb._tl = tl;
     // Часовые отметки: шаг 1 ч для 6 ч, 3 ч для суток; не теснее 70 px
@@ -2368,6 +2390,7 @@
       },
     };
   }
+  function clipMenu(el) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Удалить запись", icon: "i-trash", cls: "danger", fn: () => deleteClip() }]); }
   function stepClip(dir) {
     const idx = clips.findIndex((x) => x.id === openClipId), next = clips[idx + dir];
     if (idx >= 0 && next) openClip(next.id);
