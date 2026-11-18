@@ -32,6 +32,7 @@ data class AlarmInfo(
     val ts: Long,
     val imageUrl: String,
     val base: String,
+    val kind: Signals.Kind = Signals.Kind.FALL,
 )
 
 /**
@@ -132,6 +133,7 @@ class AlertService : Service() {
                     if (!lostWarned && System.currentTimeMillis() - lastOk > LOST_AFTER_MS) {
                         lostWarned = true
                         notifyEvent(NOTIF_LOST, "Нет связи с FallGuard", "Тревоги сейчас не дойдут до этого телефона. Проверьте интернет и сервер.")
+                        if (Sounds.style(this, Signals.Kind.LINK) != Signals.Style.SILENT) Sounds.playNotify(this, Signals.Kind.LINK)
                     }
                     try { Thread.sleep(backoff) } catch (_: InterruptedException) { return }
                     backoff = (backoff * 2).coerceAtMost(15000L)
@@ -141,48 +143,50 @@ class AlertService : Service() {
     }
 
     private fun handlePoll(j: JSONObject, base: String) {
-        val alerts = j.optJSONArray("alerts")
-        var newest: JSONObject? = null
-        if (alerts != null) {
-            for (i in 0 until alerts.length()) {
-                val a = alerts.getJSONObject(i)
-                if (a.optBoolean("is_fall") || a.optString("severity") == "critical") {
-                    newest = a
-                } else {
-                    notifyEvent(NOTIF_EVENT, a.optString("title"), a.optString("description"))
-                }
-            }
+        val raw = j.optJSONArray("alerts")
+        val list = mutableListOf<Signals.Alert>()
+        val byId = HashMap<String, JSONObject>()
+        if (raw != null) for (i in 0 until raw.length()) {
+            val a = raw.getJSONObject(i)
+            list += Signals.Alert(a.optString("id"), a.optString("state"), a.optString("severity"), a.optBoolean("is_fall"))
+            byId[a.optString("id")] = a
         }
         val cursor = j.optLong("cursor", prefs.cursor)
         if (cursor > prefs.cursor) prefs.cursor = cursor
 
         val alarmActive = j.optBoolean("alarm_active")
-        if (newest != null) {
-            silencedUntilQuiet = false
-            val info = AlarmInfo(
-                newest.optString("id"),
-                newest.optString("title"),
-                newest.optString("description"),
-                (newest.optDouble("ts", 0.0) * 1000).toLong(),
-                newest.optString("image_url"),
-                base,
-            )
-            ui.post { startAlarm(info) }
-        } else if (!alarmActive) {
-            silencedUntilQuiet = false
-            if (ringing && current?.base?.isNotEmpty() == true) {
-                // Тревогу сняли на сервере: подошёл свой или кто-то нажал «Принято»
-                val note = if (j.optString("state") == "caregiver") "Рядом свой — тревога снята" else "Тревога снята"
-                ui.post { stopAlarm() }
-                notifyEvent(NOTIF_EVENT, note, j.optString("status_line"))
+        val actions = Signals.decide(list, alarmActive, ringing, silencedUntilQuiet) { Sounds.style(this, it) }
+        for (act in actions) when (act) {
+            is Signals.Action.Notify -> {
+                val a = byId[act.alert.id] ?: continue
+                notifyEvent(NOTIF_EVENT, a.optString("title"), a.optString("description"))
+                if (act.sound) Sounds.playNotify(this, act.kind)
             }
-        } else if (!ringing && !silencedUntilQuiet) {
-            // Тревога на сервере ещё не подтверждена (например, телефон только что включили)
-            val info = AlarmInfo(
-                "", "Тревога не подтверждена", j.optString("status_line"), System.currentTimeMillis(), "", base,
-            )
-            ui.post { startAlarm(info) }
+            is Signals.Action.Ring -> {
+                val a = byId[act.alert.id] ?: continue
+                silencedUntilQuiet = false
+                val info = AlarmInfo(
+                    a.optString("id"), a.optString("title"), a.optString("description"),
+                    (a.optDouble("ts", 0.0) * 1000).toLong(), a.optString("image_url"), base, act.kind,
+                )
+                ui.post { startAlarm(info) }
+            }
+            Signals.Action.Stop -> {
+                silencedUntilQuiet = false
+                if (current?.base?.isNotEmpty() == true) {
+                    // Тревогу сняли на сервере: подошёл свой или кто-то нажал «Принято»
+                    val note = if (j.optString("state") == "caregiver") "Рядом свой — тревога снята" else "Тревога снята"
+                    ui.post { stopAlarm() }
+                    notifyEvent(NOTIF_EVENT, note, j.optString("status_line"))
+                }
+            }
+            Signals.Action.RingUnconfirmed -> {
+                // Тревога на сервере ещё не подтверждена (например, телефон только что включили)
+                val info = AlarmInfo("", "Тревога не подтверждена", j.optString("status_line"), System.currentTimeMillis(), "", base)
+                ui.post { startAlarm(info) }
+            }
         }
+        if (!alarmActive && actions.none { it is Signals.Action.Ring }) silencedUntilQuiet = false
         val mode = when (j.optString("mode")) {
             "falls" -> "только падения"
             "standup" -> "только вставание"
@@ -227,12 +231,12 @@ class AlertService : Service() {
             .addAction(0, "Ложная", servicePending(ACTION_FALSE, info.id, 3))
             .build()
         nm.notify(NOTIF_ALARM, n)
-        if (!silencedUntilQuiet) startSiren()
+        if (!silencedUntilQuiet) startSiren(info.kind)
         // Если экран уже включён и приложение на виду — открываем окно сразу
         try { startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
     }
 
-    private fun startSiren() {
+    private fun startSiren(kind: Signals.Kind = Signals.Kind.FALL) {
         if (player != null) return
         try {
             val pm = getSystemService(PowerManager::class.java)
@@ -240,37 +244,12 @@ class AlertService : Service() {
             val am = getSystemService(AudioManager::class.java)
             savedAlarmVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
             am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-            // Своя двухтональная сирена — её не спутать с будильником или звонком
-            val uri = android.net.Uri.parse("android.resource://$packageName/${R.raw.siren}")
-            player = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
-                setDataSource(this@AlertService, uri)
-                isLooping = true
-                prepare()
-                start()
-            }
-        } catch (_: Exception) {
-            player = null
-            try {
-                // Запасной вариант — системный звук будильника
-                val fallback = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                player = MediaPlayer().apply {
-                    setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
-                    setDataSource(this@AlertService, fallback)
-                    isLooping = true
-                    prepare()
-                    start()
-                }
-            } catch (_: Exception) {
-                player = null
-            }
-        }
+        } catch (_: Exception) {}
+        // Выбранный звук на канале будильника (звучит и в беззвучном режиме); не открылся — встроенная сирена,
+        // не открылась и она — системный будильник
+        val siren = android.net.Uri.parse("android.resource://$packageName/${R.raw.siren}")
+        player = Sounds.play(this, Sounds.uriOf(this, kind), AudioAttributes.USAGE_ALARM, loop = true, fallback = siren)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.let { Sounds.play(this, it, AudioAttributes.USAGE_ALARM, loop = true) }
         try {
             val vib = getSystemService(Vibrator::class.java)
             val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
@@ -325,7 +304,9 @@ class AlertService : Service() {
         }
         val events = NotificationChannel(CH_EVENTS, getString(R.string.ch_events), NotificationManager.IMPORTANCE_HIGH).apply {
             description = getString(R.string.ch_events_desc)
+            setSound(null, null) // звук выбирается в настройках приложения и играется им самим
         }
+        try { nm.deleteNotificationChannel("events_v1") } catch (_: Exception) {}
         val link = NotificationChannel(CH_LINK, getString(R.string.ch_link), NotificationManager.IMPORTANCE_LOW).apply {
             description = getString(R.string.ch_link_desc)
             setShowBadge(false)
@@ -378,7 +359,7 @@ class AlertService : Service() {
         const val ACTION_TEST = "app.fallguard.TEST"
         const val EXTRA_ID = "alert_id"
         private const val CH_ALARM = "alarm_v1"
-        private const val CH_EVENTS = "events_v1"
+        private const val CH_EVENTS = "events_v2"
         private const val CH_LINK = "link_v1"
         private const val NOTIF_LINK = 1
         private const val NOTIF_ALARM = 2

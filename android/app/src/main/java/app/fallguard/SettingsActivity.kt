@@ -14,6 +14,12 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
+import android.provider.OpenableColumns
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.widget.TextView
 import android.widget.Toast
 
@@ -59,6 +65,7 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        renderSignals()
     }
 
     private fun refresh() {
@@ -96,6 +103,113 @@ class SettingsActivity : Activity() {
         }
     }
 
+    // ---------------------------------------------------------------- сигналы и звуки
+    private var preview: MediaPlayer? = null
+
+    private fun stopPreview() {
+        try { preview?.stop() } catch (_: Exception) {}
+        try { preview?.release() } catch (_: Exception) {}
+        preview = null
+    }
+
+    override fun onPause() {
+        stopPreview()
+        super.onPause()
+    }
+
+    private fun renderSignals() {
+        val list = findViewById<LinearLayout>(R.id.signalList)
+        list.removeAllViews()
+        for (kind in Signals.Kind.entries) {
+            val style = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
+            val sub = if (style == Signals.Style.SILENT) style.title else "${style.title.substringBefore(" ")} · ${Sounds.title(this, kind)}"
+            list.addView(SignalRow.build(this, kind.title, sub, style) { openSignal(kind) })
+        }
+    }
+
+    /** Окно настройки одного типа: способ сигнала, звук (с прослушиванием) и свой файл. */
+    private fun openSignal(kind: Signals.Kind) {
+        fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), dp(8)) }
+        fun header(t: String) = TextView(this).apply {
+            text = t; textSize = 13f; setTextColor(getColor(R.color.muted)); isAllCaps = true; letterSpacing = 0.06f
+            setPadding(0, dp(14), 0, dp(4))
+        }
+        val styles = when (kind) {
+            Signals.Kind.FALL -> listOf(Signals.Style.ALARM)
+            Signals.Kind.LINK -> listOf(Signals.Style.NOTIFY, Signals.Style.SILENT)
+            else -> Signals.Style.entries.toList()
+        }
+        box.addView(header("Как сигналить"))
+        val styleGroup = RadioGroup(this)
+        val cur = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
+        styles.forEachIndexed { i, st ->
+            styleGroup.addView(RadioButton(this).apply { id = 100 + i; text = st.title; textSize = 16f; isChecked = st == cur; minHeight = dp(44) })
+        }
+        if (kind == Signals.Kind.FALL) box.addView(TextView(this).apply { text = "Падение всегда поднимает громкую тревогу"; setTextColor(getColor(R.color.muted)); textSize = 13f })
+        box.addView(styleGroup)
+
+        box.addView(header("Звук"))
+        val soundGroup = RadioGroup(this)
+        val options = Sounds.BUILT_IN.map { it.id to it.title }.toMutableList()
+        if (Sounds.customFile(this, kind).exists()) options += Sounds.CUSTOM to Sounds.customName(this, kind)
+        val curSound = Sounds.sound(this, kind)
+        options.forEachIndexed { i, (id, title) ->
+            soundGroup.addView(RadioButton(this).apply { this.id = 200 + i; text = title; textSize = 16f; isChecked = id == curSound; minHeight = dp(44) })
+        }
+        box.addView(soundGroup)
+        box.addView(Button(this, null, 0, R.style.Btn).apply {
+            text = "Свой файл…"
+            setOnClickListener {
+                stopPreview()
+                val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*")
+                try { startActivityForResult(pick, REQ_SOUND + kind.ordinal) } catch (_: Exception) {
+                    Toast.makeText(this@SettingsActivity, "Нет приложения для выбора файла", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+
+        fun usage(st: Signals.Style) = if (st == Signals.Style.ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
+        soundGroup.setOnCheckedChangeListener { _, checked ->
+            val id = options.getOrNull(checked - 200)?.first ?: return@setOnCheckedChangeListener
+            Sounds.setSound(this, kind, id)
+            stopPreview()
+            preview = Sounds.play(this, Sounds.uriOf(this, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this, kind))), loop = false)
+            renderSignals()
+        }
+        styleGroup.setOnCheckedChangeListener { _, checked ->
+            styles.getOrNull(checked - 100)?.let { Sounds.setStyle(this, kind, it) }
+            renderSignals()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(kind.title)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Готово", null)
+            .setOnDismissListener { stopPreview() }
+            .show()
+    }
+
+    @Deprecated("Activity API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val kind = Signals.Kind.entries.getOrNull(requestCode - REQ_SOUND) ?: return
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        var name = "Свой файл"
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) name = c.getString(0).substringBeforeLast('.')
+            }
+        } catch (_: Exception) {}
+        if (Sounds.importCustom(this, kind, uri, name)) {
+            Toast.makeText(this, "Звук «$name» выбран", Toast.LENGTH_SHORT).show()
+            renderSignals()
+            openSignal(kind)
+        } else {
+            Toast.makeText(this, "Этот файл не проигрывается — выберите другой", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun addRow(parent: LinearLayout, ok: Boolean, title: String, sub: String, onFix: () -> Unit) {
         parent.addView(ChecklistRow.build(this, ok, title, sub, onFix))
     }
@@ -121,6 +235,37 @@ class SettingsActivity : Activity() {
 
     companion object {
         const val EXTRA_ONBOARDING = "onboarding"
+        private const val REQ_SOUND = 300
+    }
+}
+
+/** Строка сигнала: название · способ и звук · стрелка. */
+object SignalRow {
+    fun build(ctx: Context, title: String, sub: String, style: Signals.Style, onClick: () -> Unit): View {
+        fun dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).toInt()
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.btn_surface)
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            minimumHeight = dp(60)
+            isClickable = true
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
+        }
+        val dot = View(ctx).apply {
+            setBackgroundResource(when (style) { Signals.Style.ALARM -> R.drawable.dot_alarm; Signals.Style.NOTIFY -> R.drawable.dot_warn_solid; else -> R.drawable.dot_muted })
+            layoutParams = LinearLayout.LayoutParams(dp(10), dp(10))
+        }
+        row.addView(dot)
+        row.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(14) }
+            addView(TextView(ctx).apply { text = title; textSize = 16f; setTextColor(ctx.getColor(R.color.text)) })
+            addView(TextView(ctx).apply { text = sub; textSize = 13f; setTextColor(ctx.getColor(R.color.muted)) })
+        })
+        row.addView(android.widget.ImageView(ctx).apply { setImageResource(R.drawable.ic_chev); layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)) })
+        return row
     }
 }
 

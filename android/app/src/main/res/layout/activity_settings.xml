@@ -53,6 +53,16 @@
 
         <TextView
             style="@style/Section"
+            android:text="Как сигналить" />
+
+        <LinearLayout
+            android:id="@+id/signalList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            style="@style/Section"
             android:text="Адреса сервера" />
 
         <TextView

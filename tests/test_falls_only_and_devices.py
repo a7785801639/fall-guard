@@ -766,3 +766,35 @@ def test_standup_mode_http_api_poll_alarm_active_and_ignore_track_conflict(tmp_p
     assert "поверх кровати" in conflict.json()["detail"]
 
 
+
+
+def test_phone_receives_events_by_mode_matrix(tmp_path: Path) -> None:
+    """Что получает телефон в каждом режиме: все / только вставание / только падения."""
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    client = TestClient(create_web_app(engine))
+    code = client.post("/api/devices/pair-code").json()["code"]
+    client.cookies.clear()
+    token = client.post("/api/devices/claim", json={"code": code, "name": "Pixel"}, headers=EXTERNAL).json()["token"]
+    client.cookies.clear()
+    auth = {**EXTERNAL, "authorization": f"Bearer {token}"}
+    events = [("sitting_up", "warning"), ("left_bed", "warning"), ("help_call", "warning"), ("fallen", "critical")]
+    expected = {
+        "all": {"sitting_up", "left_bed", "help_call", "fallen"},
+        "standup": {"left_bed", "fallen"},
+        "falls": {"fallen"},
+    }
+    for mode, want in expected.items():
+        assert client.post("/api/me/mode", json={"mode": mode}, headers=auth).json()["me"]["mode"] == mode
+        start = engine.alert_feed.cursor
+        for i, (state, sev) in enumerate(events):
+            engine.alert_feed.push(f"{mode}{i}", state, sev, state, "")
+        got = client.get(f"/api/alerts/poll?after={start}&wait=0", headers=auth).json()
+        assert {a["state"] for a in got["alerts"]} == want, mode
+        assert all(a["is_fall"] == (a["state"] == "fallen") for a in got["alerts"])
+
+    # Непринятая тревога: в режиме «все» сирена держится для любого критического события,
+    # в режимах «вставание»/«падения» — только пока это само падение
+    engine.fsm._fall_unacknowledged = True
+    for mode, active in (("all", True), ("standup", False), ("falls", False)):
+        client.post("/api/me/mode", json={"mode": mode}, headers=auth)
+        assert client.get("/api/alerts/poll?after=0&wait=0", headers=auth).json()["alarm_active"] is active, mode
