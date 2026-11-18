@@ -42,6 +42,8 @@ class AlarmActivity : Activity() {
         // Таймер виден, только если для него есть место: кнопки важнее
         val box = findViewById<View>(R.id.alarmTimerBox)
         box.addOnLayoutChangeListener { v, _, top, _, bottom, _, _, _, _ ->
+            // В горизонтальной раскладке блок не растягивается и всегда виден
+            if (v.layoutParams.height != 0) return@addOnLayoutChangeListener
             val need = findViewById<View>(R.id.alarmElapsed).measuredHeight +
                 findViewById<View>(R.id.alarmElapsedLabel).measuredHeight
             val show = (bottom - top) >= need + v.resources.displayMetrics.density * 24
@@ -78,6 +80,7 @@ class AlarmActivity : Activity() {
         liveGen++
         ui.removeCallbacks(tick)
         stopPulse()
+        stopUrgency()
         super.onPause()
     }
 
@@ -119,7 +122,22 @@ class AlarmActivity : Activity() {
         val sec = ((System.currentTimeMillis() - alarmTs) / 1000).coerceAtLeast(0)
         val text = if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60)
         else "%d:%02d".format(sec / 60, sec % 60)
-        findViewById<TextView>(R.id.alarmElapsed).text = text
+        val elapsed = findViewById<TextView>(R.id.alarmElapsed)
+        elapsed.text = text
+        // Чем дольше без ответа, тем тревожнее: белый → янтарный через минуту → мигает через три
+        elapsed.setTextColor(if (sec >= 60) 0xFFFFD166.toInt() else 0xFFFFFFFF.toInt())
+        if (sec >= 180) {
+            if (urgency == null) urgency = ObjectAnimator.ofFloat(elapsed, View.ALPHA, 1f, 0.45f).apply {
+                duration = 700; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
+            }
+        } else stopUrgency()
+    }
+
+    private var urgency: ObjectAnimator? = null
+
+    private fun stopUrgency() {
+        urgency?.cancel(); urgency = null
+        findViewById<View>(R.id.alarmElapsed)?.alpha = 1f
     }
 
     override fun onNewIntent(intent: Intent) {
