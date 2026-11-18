@@ -41,19 +41,30 @@ class AlarmActivity : Activity() {
         edgeToEdge()
         // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
         AlertService.onAlarmStopped = { runOnUiThread { if (!closing) finish() } }
-        // Секундомер виден, только если для него есть место: кнопки важнее
-        val box = findViewById<View>(R.id.alarmTimerBox)
-        box.addOnLayoutChangeListener { v, _, top, _, bottom, _, _, _, _ ->
-            // В горизонтальной раскладке блок не растягивается и всегда виден
-            if (v.layoutParams.height != 0) return@addOnLayoutChangeListener
-            val g = v as android.view.ViewGroup
-            val need = (0 until g.childCount).sumOf { g.getChildAt(it).measuredHeight }
-            val show = (bottom - top) >= need + v.resources.displayMetrics.density * 16
-            // Места нет — убираем блок совсем, чтобы верх не прокручивался ради пустоты
-            if (!show) v.post { v.visibility = View.GONE }
-        }
+        // Секундомер подстраивается под свободное место: кнопки и кадр важнее
+        findViewById<View>(R.id.alarmTimerBox).addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> fitTimer(v) }
         bind()
         enter()
+    }
+
+    /**
+     * Сколько места осталось под секундомер. Если верх и так не помещается — убираем его совсем
+     * (кадр важнее); если места чуть меньше — уменьшаем кольцо; совсем мало — прячем.
+     * Пересчитывается при каждой разметке: кадр с камеры приходит позже и меняет высоту.
+     */
+    private fun fitTimer(box: View) {
+        if (box.layoutParams.height != 0 || box.visibility == View.GONE) return // горизонтальная раскладка
+        val ring = findViewById<View>(R.id.alarmRingBox)
+        val scroll = box.parent?.parent as? android.widget.ScrollView
+        val content = scroll?.getChildAt(0)
+        if (scroll != null && content != null && content.height > scroll.height + 1) {
+            box.post { box.visibility = View.GONE }
+            return
+        }
+        val need = ring.measuredHeight + resources.displayMetrics.density * 12
+        val scale = (box.height / need).coerceAtMost(1f)
+        ring.visibility = if (scale < 0.55f) View.INVISIBLE else View.VISIBLE
+        ring.scaleX = scale; ring.scaleY = scale
     }
 
     /**
