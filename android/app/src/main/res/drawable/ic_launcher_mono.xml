@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Одноцветная версия для «тематических» значков Android 13+: щит внутри безопасной зоны -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_shield_mono"
+    android:insetLeft="27%" android:insetTop="27%" android:insetRight="27%" android:insetBottom="27%" />

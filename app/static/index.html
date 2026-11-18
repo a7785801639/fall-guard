@@ -366,6 +366,17 @@
     .ribbon b::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 30px; margin-left: -1px; background: inherit; opacity: 0.6; }
     .ribbon u { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: #fff; display: none; z-index: 3; text-decoration: none; }
     .ribbon u[data-t]::before { content: attr(data-t); position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -3px); padding: 2px 6px; border-radius: 6px; background: #fff; color: #0B0D11; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    /* Легенда хроники: только те цвета, что есть в выбранном окне */
+    .tl-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 1px; font-size: 11.5px; color: #8A92A1; }
+    .tl-legend:empty { display: none; }
+    .tl-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .tl-legend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+    .tl-legend i.t-calm { background: #1F4A39; box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.35); }
+    .tl-legend i.t-caregiver { background: #2A4C8C; }
+    .tl-legend i.t-warn { background: #F5B23A; }
+    .tl-legend i.t-alarm { background: var(--alarm-strong); }
+    .tl-legend i.t-paused { background: repeating-linear-gradient(135deg, #3A3F4A 0 2px, #1A1D23 2px 4px); }
+    .tl-legend i.pin { border-radius: 50%; background: var(--warn); }
     .axis { position: relative; height: 18px; margin-top: 3px; font-size: 11.5px; color: #6B7383; }
     .axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
     .axis span::before { content: ""; position: absolute; left: 50%; top: -4px; width: 1px; height: 3px; background: #3A404C; }
@@ -888,6 +899,7 @@
             <div class="tl-track">
               <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div><span class="now-dot" id="nowDot"></span></div>
               <div class="axis num" id="axis"></div>
+              <div class="tl-legend" id="tlLegend"></div>
             </div>
           </section>
         </div>
@@ -2347,6 +2359,12 @@
     }
     ax += `<span class="last" style="left:100%">сейчас</span>`;
     setHtml($("axis"), ax);
+    // Легенда
+    const LEG = [["calm", "Спокойно"], ["caregiver", "Свои рядом"], ["warn", "Внимание"], ["alarm", "Тревога"], ["paused", "Пауза"]];
+    const seen = new Set((tl.spans || []).filter((sp) => sp.end > start && sp.start < start + win).map((sp) => sp.tone));
+    let lg = LEG.filter(([t]) => seen.has(t)).map(([t, l]) => `<span><i class="t-${t}"></i>${l}</span>`).join("");
+    if (pins.length) lg += `<span><i class="pin"></i>Событие</span>`;
+    setHtml($("tlLegend"), lg);
   }
   window.addEventListener("resize", () => { if (S) { $("ribbon")._h = null; renderTimeline(S.timeline); } });
 
