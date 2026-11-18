@@ -81,6 +81,15 @@ class AlertService : Service() {
                 else post("/api/pause", JSONObject().put("seconds", 900))
             }
             ACTION_SILENCE -> { silencedUntilQuiet = true; stopAlarm() }
+            ACTION_NEARBY -> {
+                // «Я рядом» из уведомления о событии или с иконки приложения: пауза на 15 минут
+                val id = intent.getStringExtra(EXTRA_ID) ?: ""
+                if (id.isNotEmpty()) nm.cancel(eventNotifId(id))
+                post("/api/pause", JSONObject().put("seconds", 900)) { ok ->
+                    val msg = if (ok) "Пауза 15 минут — вы рядом" else "Нет связи с сервером — пауза не включена"
+                    ui.post { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show() }
+                }
+            }
             ACTION_TEST_SIGNAL -> testSignal(Signals.Kind.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_ID) } ?: Signals.Kind.FALL)
             ACTION_TEST -> startAlarm(
                 AlarmInfo("", "Проверка тревоги", "Так прозвучит сигнал о падении. Это только проверка.", System.currentTimeMillis(), "", ""),
@@ -207,9 +216,9 @@ class AlertService : Service() {
                 val a = byId[act.alert.id] ?: continue
                 // У каждого события своё уведомление: поздний кадр не перезапишет чужое
                 val nid = eventNotifId(act.alert.id)
-                notifyEvent(nid, a.optString("title"), a.optString("description"))
+                notifyEvent(nid, a.optString("title"), a.optString("description"), alertId = act.alert.id)
                 if (act.sound) Sounds.playNotify(this, act.kind)
-                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"))
+                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"), act.alert.id)
             }
             is Signals.Action.Ring -> {
                 val a = byId[act.alert.id] ?: continue
@@ -250,10 +259,11 @@ class AlertService : Service() {
         Glance.update(this, state, alarmActive, if (enabled) "" else "тревоги выключены", true)
     }
 
-    private fun post(path: String, body: JSONObject) {
+    private fun post(path: String, body: JSONObject, done: ((Boolean) -> Unit)? = null) {
         Thread {
-            val base = Api.reachableBase(prefs) ?: return@Thread
-            Api.request(base, path, "POST", prefs.token, body)
+            val base = Api.reachableBase(prefs)
+            val ok = base != null && Api.request(base, path, "POST", prefs.token, body).ok
+            done?.invoke(ok)
         }.start()
     }
 
@@ -402,7 +412,7 @@ class AlertService : Service() {
      */
     private fun eventNotifId(alertId: String): Int = 1000 + Math.floorMod(alertId.hashCode(), 5000)
 
-    private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String) {
+    private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String, alertId: String) {
         if (base.isEmpty() || path.isEmpty()) return
         val token = prefs.token
         Thread {
@@ -412,7 +422,7 @@ class AlertService : Service() {
                 if (bmp != null) {
                     // Смахнули уведомление — не возвращаем его ради картинки
                     val still = try { nm.activeNotifications.any { it.id == id } } catch (_: Exception) { false }
-                    if (still) notifyEvent(id, title, text, bmp, silentUpdate = true)
+                    if (still) notifyEvent(id, title, text, bmp, silentUpdate = true, alertId = alertId)
                     return@Thread
                 }
                 try { Thread.sleep(1500) } catch (_: InterruptedException) { return@Thread }
@@ -420,7 +430,10 @@ class AlertService : Service() {
         }.start()
     }
 
-    private fun notifyEvent(id: Int, title: String, text: String, picture: android.graphics.Bitmap? = null, silentUpdate: Boolean = false) {
+    private fun notifyEvent(
+        id: Int, title: String, text: String, picture: android.graphics.Bitmap? = null,
+        silentUpdate: Boolean = false, alertId: String = "",
+    ) {
         val style: NotificationCompat.Style = if (picture != null)
             NotificationCompat.BigPictureStyle().bigPicture(picture).setSummaryText(text).bigLargeIcon(null as android.graphics.Bitmap?)
         else NotificationCompat.BigTextStyle().bigText(text)
@@ -435,6 +448,7 @@ class AlertService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(openAppPending())
+            .apply { if (alertId.isNotEmpty()) addAction(0, "Я рядом · 15 мин", servicePending(ACTION_NEARBY, alertId, id)) }
             .build()
         try { nm.notify(id, n) } catch (_: Exception) {}
     }
@@ -443,6 +457,7 @@ class AlertService : Service() {
         const val ACTION_ACK = "app.fallguard.ACK"
         const val ACTION_FALSE = "app.fallguard.FALSE"
         const val ACTION_SILENCE = "app.fallguard.SILENCE"
+        const val ACTION_NEARBY = "app.fallguard.NEARBY"
         const val ACTION_TEST = "app.fallguard.TEST"
         const val ACTION_TEST_SIGNAL = "app.fallguard.TEST_SIGNAL"
         const val EXTRA_ID = "alert_id"

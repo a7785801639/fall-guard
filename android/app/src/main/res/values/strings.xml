@@ -18,4 +18,9 @@
     <string name="alarm_elapsed_label">тревога без ответа</string>
     <string name="widget_desc">Состояние бабушки одной строкой</string>
     <string name="tile_label">FallGuard</string>
+    <string name="sc_pause">Я рядом</string>
+    <string name="sc_pause_long">Я рядом · пауза 15 мин</string>
+    <string name="sc_journal">Журнал</string>
+    <string name="sc_settings">Сигналы</string>
+    <string name="sc_settings_long">Звуки и сигналы</string>
 </resources>

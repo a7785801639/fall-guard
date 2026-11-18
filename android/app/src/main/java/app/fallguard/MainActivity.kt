@@ -63,6 +63,8 @@ class MainActivity : Activity() {
     @Volatile private var pipW = 16
     @Volatile private var pipH = 9
     private var pipReceiver: BroadcastReceiver? = null
+    private var pageReady = false
+    private var pendingJs: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,12 +88,30 @@ class MainActivity : Activity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         if (!handlePairLink(intent)) route()
+        handleShortcut(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handlePairLink(intent)
+        if (!handlePairLink(intent)) handleShortcut(intent)
+    }
+
+    /** Быстрые действия с иконки приложения (долгое нажатие). */
+    private fun handleShortcut(intent: Intent?) {
+        val what = intent?.getStringExtra(EXTRA_SHORTCUT) ?: return
+        intent.removeExtra(EXTRA_SHORTCUT)
+        if (!prefs.paired) return
+        when (what) {
+            "pause" -> AlertService.start(this, AlertService.ACTION_NEARBY)
+            "journal" -> runInPanel("openJournal()")
+            "settings" -> startActivity(Intent(this, SettingsActivity::class.java))
+        }
+    }
+
+    /** Выполнить в пульте сразу, если он загружен, иначе — как только загрузится. */
+    private fun runInPanel(js: String) {
+        if (pageReady) web.evaluateJavascript(js, null) else pendingJs = js
     }
 
     override fun onResume() {
@@ -387,8 +407,19 @@ class MainActivity : Activity() {
                 return true
             }
 
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                pageReady = false
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                if (loadedBase.isEmpty()) return
+                pageReady = true
+                pendingJs?.let { pendingJs = null; view.evaluateJavascript(it, null) }
+            }
+
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) {
+                    pageReady = false
                     loadedBase = ""
                     connect()
                 }
@@ -587,5 +618,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_FILE = 20
         private const val PIP_ACTION = "app.fallguard.PIP"
+        const val EXTRA_SHORTCUT = "shortcut"
     }
 }
