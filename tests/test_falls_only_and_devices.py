@@ -949,3 +949,27 @@ def test_device_list_flags_phones_that_went_silent(tmp_path: Path) -> None:
     assert items["Galaxy"]["stale"] is False, "выключенный получатель не считается пропавшим"
     clock[0] -= 19 * 60
     assert {d["name"]: d for d in store.list()}["Pixel"]["stale"] is False
+
+
+def test_recipient_can_switch_own_alerts_from_the_main_screen(tmp_path: Path) -> None:
+    """Переключатель «Тревоги на этот телефон» на главном: выключает и включает тревоги для себя."""
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    client = TestClient(create_web_app(engine))
+    pair = client.post("/api/devices/pair-code").json()
+    client.cookies.clear()
+    token = client.post("/api/devices/claim", json={"code": pair["code"], "name": "Pixel"}, headers=EXTERNAL).json()["token"]
+    client.cookies.clear()
+    auth = {**EXTERNAL, "authorization": f"Bearer {token}"}
+
+    off = client.post("/api/me/enabled", json={"enabled": False}, headers=auth).json()
+    assert off["me"]["enabled"] is False
+    dev = engine.devices.list()[0]
+    assert dev["enabled"] is False
+    # Выключенный телефон не получает тревог: опрос это показывает
+    assert client.get("/api/alerts/poll?after=0&wait=0", headers=auth).json()["enabled"] is False
+
+    on = client.post("/api/me/enabled", json={"enabled": True}, headers=auth).json()
+    assert on["me"]["enabled"] is True and engine.devices.list()[0]["enabled"] is True
+
+    # Браузер в локальной сети — не получатель: у него это звук в самом браузере
+    assert client.post("/api/me/enabled", json={"enabled": False}).status_code == 400

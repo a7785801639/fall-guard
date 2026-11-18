@@ -536,6 +536,24 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             )
         return {"ok": True, "me": _resolve_identity(request)}
 
+    @app.post("/api/me/enabled")
+    async def set_my_enabled(request: Request, payload: SubscriberTogglePayload) -> dict:
+        """Включить или выключить тревоги для себя — прямо с главного экрана пульта."""
+        me = _resolve_identity(request)
+        enabled = bool(payload.enabled) if payload.enabled is not None else not bool(me.get("enabled", True))
+        if me["kind"] == "device":
+            engine.devices.update(me["id"], enabled=enabled)
+        elif me["kind"] == "telegram":
+            engine.toggle_subscriber_enabled(me["id"], enabled=enabled)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Браузер в локальной сети не является получателем — звук включается в самом браузере",
+            )
+        name = me.get("name") or "получатель"
+        engine._log_event("info", f"{name}: тревоги {'включены' if enabled else 'выключены'}", category="system")
+        return {"ok": True, "me": _resolve_identity(request)}
+
     @app.post("/api/subscribers/{chat_id}/mode")
     def set_subscriber_mode(chat_id: str, payload: AlertModePayload) -> dict:
         updated = engine.notifier.set_subscriber_mode(chat_id, payload.mode)

@@ -233,6 +233,28 @@
 
     /* ================= Сигнал мне ================= */
     .signal { padding: 12px; border-radius: var(--r); background: var(--tile); }
+    /* Карточка «Сигнал»: верхняя строка — тревоги для себя вкл/выкл */
+    .sig-top { display: flex; align-items: center; gap: 12px; margin: 2px 2px 12px; }
+    .sig-ico { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; flex: none; background: var(--calm-soft); color: var(--calm); transition: background 0.25s, color 0.25s; }
+    .sig-ico svg { width: 22px; height: 22px; }
+    .sig-text { flex: 1; min-width: 0; display: grid; gap: 1px; line-height: 1.25; }
+    .sig-text b { font-size: 15.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sig-text span { font-size: 13px; font-weight: 600; color: var(--calm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.25s; }
+    .switch.sig-sw { width: 54px; height: 32px; }
+    .switch.sig-sw::after { width: 26px; height: 26px; }
+    .switch.sig-sw[aria-checked="true"]::after { transform: translateX(22px); }
+    .signal { transition: box-shadow 0.25s, background 0.25s; }
+    .signal[data-off="1"] { background: linear-gradient(180deg, var(--warn-soft), transparent 75%), var(--tile); box-shadow: inset 0 0 0 1px rgba(255, 181, 71, 0.45); }
+    .signal[data-off="1"] .sig-ico { background: var(--warn-soft); color: var(--warn); }
+    .signal[data-off="1"] .sig-text span { color: var(--warn); }
+    .signal[data-off="1"][data-lan="0"] #modeSeg { opacity: 0.38; pointer-events: none; filter: saturate(0.3); }
+    .signal[data-off="1"] .hint { color: var(--warn); }
+    .signal.flip .sig-ico { animation: sig-pop 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.4); }
+    @keyframes sig-pop { 40% { transform: scale(1.14); } }
+    .hint-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .hint-row .hint { flex: 1; min-width: 0; }
+    .hint-row #modeWho { margin-top: 8px; flex: none; }
+
     .seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--fill); }
     .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; transition: background 0.15s, color 0.15s; }
     @media (hover: hover) { .seg button:hover { color: var(--text); } }
@@ -788,6 +810,7 @@
       <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
       <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M17 14c2.2 0 3.7 1.3 4.2 3.5"/></symbol>
       <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.1"/></symbol>
+      <symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M8.6 5.9A6 6 0 0 1 18 11v4M6 11v5.5l-1.5 2H16M10 21h4M3.5 3.5l17 17"/></symbol>
       <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15l1.5-2Z"/><path d="M10 21h4"/></symbol>
       <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
       <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15 9a4 4 0 0 1 0 6M17.8 6.5a8 8 0 0 1 0 11"/></symbol>
@@ -972,14 +995,19 @@
         <section class="setup" id="setupCard" hidden aria-label="Настройка охраны"></section>
         <button class="notice" id="noticeCard" hidden onclick="openSheet('recipients')"></button>
 
-        <section class="signal">
-          <div class="caption"><b>Сигнал</b><span id="modeWho">в этом браузере</span></div>
+        <section class="signal" id="signalCard">
+          <!-- Тревоги для себя: включены или нет — видно сразу, переключается одним касанием -->
+          <div class="sig-top">
+            <span class="sig-ico"><svg class="ico"><use id="sigIcoUse" href="#i-bell"/></svg></span>
+            <div class="sig-text"><b id="sigTitle">Тревоги в этом браузере</b><span id="sigSub">Включены</span></div>
+            <button class="switch sig-sw" id="sigSwitch" role="switch" aria-checked="true" aria-label="Тревоги" onclick="toggleMyAlerts()"></button>
+          </div>
           <div class="seg wide" id="modeSeg">
             <button data-v="all" aria-pressed="true" onclick="setMyMode('all')" title="Все события"><svg class="ico"><use href="#i-bell"/></svg>Все</button>
             <button data-v="standup" aria-pressed="false" onclick="setMyMode('standup')" title="Только вставание и падение"><svg class="ico"><use href="#i-walk"/></svg>Вставание</button>
             <button data-v="falls" aria-pressed="false" onclick="setMyMode('falls')" title="Только падения"><svg class="ico"><use href="#i-alert"/></svg>Падения</button>
           </div>
-          <div class="hint" id="modeHint"></div>
+          <div class="hint-row"><div class="hint" id="modeHint"></div><span id="modeWho"></span></div>
         </section>
 
         <nav class="tools" aria-label="Действия">
@@ -1230,11 +1258,12 @@
       $("btnSound").title = "Не гасить экран, пока открыт пульт — телефон у кровати как монитор";
       return;
     }
-    $("btnSound").hidden = Boolean(native);
+    $("btnSound").hidden = true; // звук браузера включается в карточке «Сигнал»
+    if (typeof renderSignalTop === "function" && me) renderSignalTop();
     $("btnSound").setAttribute("aria-pressed", String(soundOn));
     $("soundIco").setAttribute("href", soundOn ? "#i-sound" : "#i-mute");
     $("soundLabel").textContent = soundOn ? "Звук вкл." : "Без звука";
-    document.querySelector(".tools").style.gridTemplateColumns = native ? "repeat(3, 1fr)" : "";
+    document.querySelector(".tools").style.gridTemplateColumns = "repeat(3, 1fr)";
   }
   function toggleSound() {
     if (nativeScreen) {
@@ -1264,12 +1293,44 @@
     if (unack) return "alarm";
     return WARN_STATES.includes(st) ? "warn" : "";
   }
+  /* ---------- Уведомления на рабочем столе: пульт открыт во вкладке, а смотрят в другое окно ---------- */
+  // Браузеры дают уведомления только защищённым страницам (https или сам компьютер с сервером)
+  const deskOk = () => !native && "Notification" in window && window.isSecureContext;
+  let deskOn = lsGet("fg_desk_notify", "0") === "1", deskLast = "";
+  async function toggleDeskNotify() {
+    if (!deskOk()) return;
+    if (deskOn) { deskOn = false; lsSet("fg_desk_notify", "0"); toast("Уведомления на рабочем столе выключены"); renderSheet(); return; }
+    let perm = Notification.permission;
+    if (perm === "default") { try { perm = await Notification.requestPermission(); } catch (_) {} }
+    if (perm !== "granted") { toast("Браузер не разрешил уведомления — включите их в настройках сайта", "error"); renderSheet(); return; }
+    deskOn = true; lsSet("fg_desk_notify", "1");
+    try { new Notification("FallGuard", { body: "Так придёт тревога, когда вкладка не на виду", icon: "/icon.svg", tag: "fallguard-test" }); } catch (_) {}
+    renderSheet();
+  }
+  function deskNotifyTick(lvl, src) {
+    if (!deskOn || !deskOk() || Notification.permission !== "granted") return;
+    const key = lvl ? lvl + ":" + src.state : "";
+    // Только когда вкладку не видно и только при смене события — без повторов каждую секунду
+    if (key && key !== deskLast && (document.hidden || !document.hasFocus())) {
+      try {
+        const n = new Notification((lvl === "alarm" ? "🚨 " : "") + ((STATE[src.state] || [src.state])[0]), {
+          body: src.status_reason || "Откройте пульт FallGuard", icon: "/icon.svg", tag: "fallguard", renotify: true, requireInteraction: lvl === "alarm",
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch (_) {}
+    }
+    deskLast = key;
+  }
   setInterval(() => {
-    if (!soundOn || native || !live) return;
-    const lvl = alarmLevel(live.state, live.fall_unacknowledged);
+    // Телеметрия может быть недоступна (только опрос) — тогда берём последний статус
+    const src = live || S;
+    if (!src || native) return;
+    const lvl = alarmLevel(src.state, src.fall_unacknowledged);
+    deskNotifyTick(lvl, src);
+    if (!soundOn) return;
     if (lvl === "alarm") beep(BEEPS[lsGet("fg_snd_alarm", "siren")] || BEEPS.siren);
-    else if (lvl === "warn" && lastWarnState !== live.state) beep(BEEPS[lsGet("fg_snd_warn", "chime")] || BEEPS.chime);
-    lastWarnState = lvl === "warn" ? live.state : "";
+    else if (lvl === "warn" && lastWarnState !== src.state) beep(BEEPS[lsGet("fg_snd_warn", "chime")] || BEEPS.chime);
+    lastWarnState = lvl === "warn" ? src.state : "";
   }, 1300);
 
   /* ---------- Живое видео: fMP4 по WebSocket (MSE) с резервом MJPEG ---------- */
@@ -1881,8 +1942,20 @@
   }
 
   /* ---------- Меню действий (поверх, ничего не сдвигает) ---------- */
+  // Кнопка, которая открыла меню: повторное нажатие на неё меню закрывает, а не открывает снова
+  let menuOwner = null, lastPressed = null, swallowClick = null;
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("button, [role=button], label.btn");
+    if (swallowClick && b === swallowClick) { swallowClick = null; e.stopImmediatePropagation(); e.preventDefault(); return; }
+    swallowClick = null;
+    // Клавиатура (Enter/пробел) — без pointerdown: закрываем здесь
+    if (b && b === menuOwner && !$("menu").hidden) { hideMenu(); e.stopImmediatePropagation(); e.preventDefault(); return; }
+    lastPressed = b;
+    setTimeout(() => { lastPressed = null; }, 0); // меню, открытое не этим нажатием, кнопке не принадлежит
+  }, true);
   function showMenu(x, y, title, items) {
     const m = $("menu");
+    menuOwner = lastPressed;
     m.innerHTML = (title ? `<div class="menu-title">${esc(title)}</div>` : "") + items.map((it, i) => `<button data-i="${i}" class="${it.cls || ""}" ${it.disabled ? "disabled" : ""}>${it.icon ? ico(it.icon) : ""}<span>${esc(it.label)}</span></button>`).join("");
     m._items = items;
     m.style.transformOrigin = "0 0";
@@ -1891,13 +1964,16 @@
     m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x)) + "px";
     m.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, y)) + "px";
   }
-  function hideMenu() { $("menu").hidden = true; }
+  function hideMenu() { $("menu").hidden = true; menuOwner = null; }
   $("menu").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-i]"); if (!b) return;
     const it = $("menu")._items[Number(b.dataset.i)];
     hideMenu();
     if (it && it.fn) it.fn();
   });
+  document.addEventListener("pointerdown", (e) => {
+    if (!$("menu").hidden && menuOwner && e.target.closest && e.target.closest("button, [role=button], label.btn") === menuOwner) { const o = menuOwner; hideMenu(); swallowClick = o; return; }
+  }, true);
   document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest(".pick") && !e.target.closest("#btnShot") && !e.target.closest("button.face")) hideMenu(); }, true);
   function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
@@ -2278,7 +2354,39 @@
     standup: "Сигнал только при вставании и падении",
     falls: "Сигнал только при падении и сползании",
   };
+  const MODE_SHORT = { all: "все события", standup: "вставание и падения", falls: "только падения" };
+  /** Включены ли тревоги «для меня»: у телефона и Telegram — на сервере, у браузера — его звук. */
+  const myAlertsOn = () => me.kind === "lan" ? soundOn : me.enabled !== false;
+  function renderSignalTop() {
+    const on = myAlertsOn(), card = $("signalCard");
+    const who = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
+    $("sigTitle").textContent = me.kind === "lan" ? "Звук в этом браузере" : "Тревоги " + who;
+    card.dataset.lan = me.kind === "lan" ? "1" : "0"; // в браузере выбор событий нужен и без звука — что считать тревогой на экране
+    $("sigSub").textContent = on ? "Включены · " + (MODE_SHORT[normMode(me.mode)] || MODE_SHORT.all)
+      : me.kind === "lan" ? "Выключен" : "Выключены";
+    $("modeHint").textContent = on ? (MODE_HINT[normMode(me.mode)] || MODE_HINT.all)
+      : me.kind === "lan" ? "Тревога будет видна только на экране" : "Падения и другие тревоги сюда не придут";
+    $("sigIcoUse").setAttribute("href", on ? "#i-bell" : "#i-bell-off");
+    $("sigSwitch").setAttribute("aria-checked", String(on));
+    if (card.dataset.off !== (on ? "0" : "1")) {
+      if (card.dataset.off !== undefined) { card.classList.remove("flip"); void card.offsetWidth; card.classList.add("flip"); }
+      card.dataset.off = on ? "0" : "1";
+    }
+  }
+  async function toggleMyAlerts() {
+    if (me.kind === "lan") { toggleSound(); renderSignalTop(); return; }
+    const next = !myAlertsOn();
+    if (!next && !(await ask(me.kind === "device" ? "Выключить тревоги на этом телефоне?" : "Выключить тревоги в Telegram?",
+      "Падения и другие тревоги сюда приходить не будут, пока не включите снова.", "Выключить", "i-bell-off"))) return;
+    haptic(next ? "success" : "warning");
+    me.enabled = next; renderSignalTop(); // сразу, не дожидаясь сервера
+    const d = await call("/api/me/enabled", { json: { enabled: next } });
+    if (d && d.me) me = d.me; else me.enabled = !next;
+    renderSignalTop();
+    if (d) { toast(next ? "Тревоги включены" : "Тревоги выключены — включите здесь же, когда нужно"); poll(); }
+  }
   function renderMode() {
+    renderSignalTop();
     const cur = normMode(me.mode);
     for (const b of $("modeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === cur));
     const who = $("modeWho");
@@ -2287,9 +2395,8 @@
       if (!who.dataset.link) { who.dataset.link = "1"; who.className = "link"; who.setAttribute("role", "button"); who.tabIndex = 0; who.onclick = openPhone; who.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPhone(); } }; }
       setHtml(who, `Звуки на телефоне${ico("i-chev-r")}`);
     } else {
-      who.textContent = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
+      who.textContent = ""; // кому — уже сказано в заголовке карточки
     }
-    $("modeHint").textContent = MODE_HINT[cur] || MODE_HINT.all;
     syncPills($("modeSeg").parentNode);
   }
   async function setMyMode(next) {
@@ -2724,16 +2831,20 @@
   function swipeToClose(scrim, close, scroller) {
     const panel = scrim.firstElementChild;
     let x0 = 0, y0 = 0, dy = 0, t0 = 0, state = 0; // 0 — ждём, 1 — следим, 2 — тянем, -1 — не наш жест
+    // Тянуть можно за любое место, кроме полей ввода и ползунков: вкладки, переключатели и строки
+    // различаются направлением — вбок прокручивают/нажимают, вниз сворачивают
     panel.addEventListener("touchstart", (e) => {
       state = -1;
       if (window.innerWidth >= 760 || e.touches.length !== 1) return;
-      if (e.target.closest(".tabs, input, select, textarea, .pl-bar, .pl-row, .seg, .faces, .menu")) return;
-      if (scroller && scroller.scrollTop > 0) return;
+      if (e.target.closest("input, select, textarea, .pl-bar, .menu, canvas")) return;
       x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); dy = 0; state = 1;
     }, { passive: true });
     panel.addEventListener("touchmove", (e) => {
       if (state < 1) return;
-      const t = e.touches[0], ddx = t.clientX - x0, ddy = t.clientY - y0;
+      const t = e.touches[0];
+      // Список прокручен — сначала он доезжает до начала, и тем же движением панель начинает сворачиваться
+      if (state === 1 && scroller && scroller.scrollTop > 0) { x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); return; }
+      const ddx = t.clientX - x0, ddy = t.clientY - y0;
       if (state === 1) {
         if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return;
         if (ddy > 0 && ddy > Math.abs(ddx) * 1.3 && (!scroller || scroller.scrollTop <= 0)) { state = 2; panel.style.transition = "none"; hideMenu(); }
@@ -3030,7 +3141,8 @@
       </div></div>`
       + (native ? `<div class="group"><button class="btn block" onclick="openPhone()">${ico("i-bell")}Звуки и громкость на этом телефоне</button></div>` : `<div class="group"><h3>Звук в этом браузере</h3><div class="rows">
         <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Падение и тревоги</div></div>${pick("sndA", lsGet("fg_snd_alarm", "siren"), ["siren", "pulse", "bell", "high"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_alarm", v), "Звук тревоги")}</div>
-        <div class="rowi">${ri("i-walk", "warn")}<div class="rowi-body"><div class="rowi-title">Посадка и вставание</div></div>${pick("sndW", lsGet("fg_snd_warn", "chime"), ["chime", "triple", "soft", "bell"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_warn", v), "Звук событий")}</div>
+        <div class="rowi">${ri("i-walk", "warn")}<div class="rowi-body"><div class="rowi-title">Посадка и вставание</div></div>${pick("sndW", lsGet("fg_snd_warn", "chime"), ["chime", "triple", "soft", "bell"].map((k) => [k, BEEP_NAMES[k]]), (v) => setBeep("fg_snd_warn", v), "Звук событий")}</div>`
+        + (deskOk() ? `<div class="rowi">${ri("i-bell", deskOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Уведомления на рабочем столе</div><div class="rowi-sub">когда вкладка с пультом не на виду</div></div>${sw(deskOn, "toggleDeskNotify()", "Уведомления на рабочем столе")}</div>` : "") + `
       </div>${soundOn ? "" : `<p class="muted small" style="margin-top:8px">Сейчас звук выключен — кнопка «Без звука» внизу.</p>`}</div>`)
       + (matchMedia("(pointer: fine)").matches ? `<div class="group"><button class="btn" onclick="showLayer($('keysScrim'))">${ico("i-key")}Горячие клавиши<span class="muted small" style="margin-left:4px">(?)</span></button></div>` : "");
   }
