@@ -128,6 +128,24 @@ _PUBLIC_AUTH_POST_PATHS: frozenset[str] = frozenset(
 )
 
 
+MAX_FACE_UPLOAD_BYTES: int = 15 * 1024 * 1024
+
+
+async def _read_upload_limited(file: UploadFile, limit: int) -> bytes:
+    """Читает загрузку чанками и прерывает её, не набирая в память больше limit байт."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f"Файл больше {limit // (1024 * 1024)} МБ")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _resolve_safe_face_photo(faces_root: Path, role: str, filename: str) -> Path | None:
     if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
         return None
@@ -143,8 +161,11 @@ def _resolve_safe_face_photo(faces_root: Path, role: str, filename: str) -> Path
     return candidate
 
 
-def create_web_app(engine: FallGuardEngine) -> FastAPI:
-    app = FastAPI(title="FallGuard Control Panel", version="1.7.0")
+APP_VERSION: str = "1.7.0"
+
+
+def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
+    app = FastAPI(title="FallGuard Control Panel", version=APP_VERSION, lifespan=lifespan)
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -345,7 +366,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, "state": engine.fsm.state.value}
 
     @app.api_route("/api/tg/session", methods=["GET", "HEAD"])
-    async def tg_session(request: Request) -> dict[str, Any]:
+    def tg_session(request: Request) -> dict[str, Any]:
         client_host = request.client.host if request.client is not None else None
         is_external = is_external_proxy_request(request.headers, client_host)
         bot_uname = engine.notifier.bot_username
@@ -410,7 +431,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/tg/auth")
-    async def tg_auth(
+    def tg_auth(
         request: Request,
         payload: TelegramAuthPayload | None = Body(default=None),
     ) -> JSONResponse:
@@ -480,7 +501,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return resp
 
     @app.post("/api/tg/logout")
-    async def tg_logout(request: Request) -> JSONResponse:
+    def tg_logout(request: Request) -> JSONResponse:
         resp = JSONResponse(
             status_code=200,
             content={"ok": True, "authenticated": False},
@@ -497,11 +518,11 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
 
     # --- Кто я и мой режим тревог --------------------------------------------------
     @app.get("/api/me")
-    async def get_me(request: Request) -> dict:
+    def get_me(request: Request) -> dict:
         return {"ok": True, "me": _resolve_identity(request)}
 
     @app.post("/api/me/mode")
-    async def set_my_mode(request: Request, payload: AlertModePayload) -> dict:
+    def set_my_mode(request: Request, payload: AlertModePayload) -> dict:
         me = _resolve_identity(request)
         mode = normalize_alert_mode(payload.mode)
         if me["kind"] == "device":
@@ -516,7 +537,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, "me": _resolve_identity(request)}
 
     @app.post("/api/subscribers/{chat_id}/mode")
-    async def set_subscriber_mode(chat_id: str, payload: AlertModePayload) -> dict:
+    def set_subscriber_mode(chat_id: str, payload: AlertModePayload) -> dict:
         updated = engine.notifier.set_subscriber_mode(chat_id, payload.mode)
         if updated is None:
             raise HTTPException(status_code=404, detail="Подписчик не найден")
@@ -524,7 +545,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
 
     # --- Телефоны (Android-приложение) ---------------------------------------------
     @app.post("/api/devices/pair-code")
-    async def create_device_pair_code(request: Request) -> dict:
+    def create_device_pair_code(request: Request) -> dict:
         code, ttl = engine.devices.create_pair_code()
         public_url = engine.settings.public_webapp_url
         lan_url = str(request.base_url).rstrip("/")
@@ -551,7 +572,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/devices/claim")
-    async def claim_device(request: Request, payload: DeviceClaimPayload) -> JSONResponse:
+    def claim_device(request: Request, payload: DeviceClaimPayload) -> JSONResponse:
         client_host = request.client.host if request.client is not None else None
         is_external = is_external_proxy_request(request.headers, client_host)
         if engine.devices.claims_locked_out():
@@ -571,7 +592,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
                 content={"ok": False, "detail": "Код привязки неверный или истёк. Получите новый в пульте."},
             )
         device, token = claimed
-        engine._log_event("info", f"Привязан телефон: {device['name']}", category="system")
+        engine.log_event("info", f"Привязан телефон: {device['name']}", category="system")
         resp = JSONResponse(status_code=200, content={"ok": True, "token": token, "device": device})
         is_https = _is_https_request(request.headers, request.url.scheme)
         resp.set_cookie(
@@ -586,11 +607,11 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return resp
 
     @app.get("/api/devices")
-    async def list_devices() -> dict:
+    def list_devices() -> dict:
         return {"ok": True, "devices": engine.devices.list()}
 
     @app.post("/api/devices/{device_id}")
-    async def patch_device(device_id: str, payload: DevicePatchPayload) -> dict:
+    def patch_device(device_id: str, payload: DevicePatchPayload) -> dict:
         updated = engine.devices.update(
             device_id,
             name=payload.name,
@@ -602,10 +623,10 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, "device": updated, "devices": engine.devices.list()}
 
     @app.delete("/api/devices/{device_id}")
-    async def delete_device(device_id: str) -> dict:
+    def delete_device(device_id: str) -> dict:
         if not engine.devices.remove(device_id):
             raise HTTPException(status_code=404, detail="Устройство не найдено")
-        engine._log_event("info", "Телефон отвязан", category="system")
+        engine.log_event("info", "Телефон отвязан", category="system")
         return {"ok": True, "devices": engine.devices.list()}
 
     # --- Лента тревог для приложения (long-poll) ------------------------------------
@@ -647,7 +668,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/status")
-    async def status(
+    def status(
         request: Request,
         window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0),
         lite: int = Query(default=0),
@@ -661,7 +682,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return _json_maybe_gzip(request, data)
 
     @app.get("/api/prefs")
-    async def get_prefs() -> dict:
+    def get_prefs() -> dict:
         return {
             "ok": True,
             "prefs": engine.get_prefs(),
@@ -672,7 +693,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/prefs")
-    async def update_prefs(payload: dict[str, Any] = Body(...)) -> dict:
+    def update_prefs(payload: dict[str, Any] = Body(...)) -> dict:
         updated = engine.update_prefs(payload)
         return {
             "ok": True,
@@ -684,17 +705,17 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/recalibrate-baseline")
-    async def recalibrate_baseline() -> dict:
+    def recalibrate_baseline() -> dict:
         diag = engine.recalibrate_baseline()
         return {"ok": True, "diagnostics": diag}
 
     @app.post("/api/reset-anchor")
-    async def reset_anchor() -> dict:
+    def reset_anchor() -> dict:
         res = engine.reset_appearance_anchor()
         return {"ok": True, **res}
 
     @app.get("/api/timeline")
-    async def get_timeline(window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0)) -> dict:
+    def get_timeline(window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0)) -> dict:
         tl = engine.timeline.to_dict(view_window_sec=window_sec)
         clips = [
             c
@@ -715,7 +736,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/timeline/sanitize")
-    async def sanitize_timeline(
+    def sanitize_timeline(
         payload: TimelineSanitizePayload | None = Body(default=None),
     ) -> dict:
         eff_min_sec = payload.min_caregiver_sec if payload is not None else 3.5
@@ -738,7 +759,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/timeline/thumb")
-    async def get_timeline_thumb_nearest(ts: float = Query(...)) -> FileResponse:
+    def get_timeline_thumb_nearest(ts: float = Query(...)) -> FileResponse:
         if getattr(engine, "thumbs", None) is None:
             raise HTTPException(status_code=404, detail="Хранилище мини-снимков недоступно")
         found = engine.thumbs.get_nearest(ts)
@@ -763,7 +784,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         )
 
     @app.get("/api/timeline/thumb/{thumb_id}.jpg")
-    async def get_timeline_thumb_by_id(thumb_id: str) -> FileResponse:
+    def get_timeline_thumb_by_id(thumb_id: str) -> FileResponse:
         if (
             not thumb_id
             or "/" in thumb_id
@@ -785,7 +806,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         )
 
     @app.get("/api/report")
-    async def get_report() -> dict:
+    def get_report() -> dict:
         return {
             "ok": True,
             "text": engine.get_care_report_text(),
@@ -794,7 +815,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/telegram-qr.svg")
-    async def get_telegram_qr() -> Response:
+    def get_telegram_qr() -> Response:
         svg = engine.get_telegram_qr_svg()
         return Response(
             content=svg,
@@ -803,7 +824,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         )
 
     @app.get("/api/clips")
-    async def list_clips(
+    def list_clips(
         limit: int = Query(default=50, ge=1, le=200),
         state: str | None = Query(default=None),
     ) -> dict:
@@ -814,14 +835,14 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/clips/{clip_id}.jpg")
-    async def get_clip_jpg(clip_id: str) -> FileResponse:
+    def get_clip_jpg(clip_id: str) -> FileResponse:
         media_path = engine.archive.resolve_media_path(clip_id, "jpg")
         if media_path is None:
             raise HTTPException(status_code=404, detail="Снимок события не найден")
         return FileResponse(media_path, media_type="image/jpeg")
 
     @app.get("/api/clips/{clip_id}.mp4")
-    async def get_clip_mp4(clip_id: str, download: int = Query(default=0)) -> FileResponse:
+    def get_clip_mp4(clip_id: str, download: int = Query(default=0)) -> FileResponse:
         media_path = engine.archive.resolve_media_path(clip_id, "mp4")
         if media_path is None:
             raise HTTPException(status_code=404, detail="Видеоклип события не найден")
@@ -834,18 +855,18 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         )
 
     @app.get("/api/clips/{clip_id}")
-    async def get_clip_meta(clip_id: str) -> dict:
+    def get_clip_meta(clip_id: str) -> dict:
         meta = engine.archive.get_clip(clip_id)
         if meta is None:
             raise HTTPException(status_code=404, detail="Событие в архиве не найдено")
         return {"ok": True, "clip": meta}
 
     @app.delete("/api/clips/{clip_id}")
-    async def delete_clip(clip_id: str) -> dict:
+    def delete_clip(clip_id: str) -> dict:
         ok = engine.archive.delete_clip(clip_id)
         if not ok:
             raise HTTPException(status_code=404, detail="Клип не найден")
-        engine._log_event("info", f"Удалена запись архива {clip_id}", category="system")
+        engine.log_event("info", f"Удалена запись архива {clip_id}", category="system")
         return {
             "ok": True,
             "clips": engine.archive.list_clips(limit=50),
@@ -853,9 +874,9 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.delete("/api/clips")
-    async def clear_clips() -> dict:
+    def clear_clips() -> dict:
         removed = engine.archive.clear_all()
-        engine._log_event("info", f"Очищен видеоархив ({removed} записей)", category="system")
+        engine.log_event("info", f"Очищен видеоархив ({removed} записей)", category="system")
         return {
             "ok": True,
             "removed": removed,
@@ -864,7 +885,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/feedback")
-    async def list_feedback(
+    def list_feedback(
         limit: int = Query(default=50, ge=1, le=200),
     ) -> dict:
         return {
@@ -874,7 +895,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.post("/api/feedback/{alert_id}/false_alarm")
-    async def report_false_alarm(
+    def report_false_alarm(
         alert_id: str,
         payload: FalseAlarmReportPayload | None = Body(default=None),
     ) -> dict:
@@ -885,12 +906,12 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/camera")
-    async def get_camera() -> dict:
+    def get_camera() -> dict:
         cam = engine.get_camera_transform()
         return {"ok": True, **cam, "camera": cam}
 
     @app.post("/api/camera")
-    async def update_camera(payload: CameraTransformPayload) -> dict:
+    def update_camera(payload: CameraTransformPayload) -> dict:
         if payload.rotate is not None and payload.rotate not in (0, 90, 180, 270):
             raise HTTPException(
                 status_code=422,
@@ -904,11 +925,11 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, **cam, "camera": cam}
 
     @app.get("/api/zones")
-    async def get_zones() -> dict:
+    def get_zones() -> dict:
         return engine.zones.get().to_dict()
 
     @app.post("/api/zones")
-    async def save_zones(payload: ZonesUpdatePayload) -> dict:
+    def save_zones(payload: ZonesUpdatePayload) -> dict:
         if payload.floor_polygon is not None and len(payload.floor_polygon) not in (0, 4):
             raise HTTPException(
                 status_code=422,
@@ -932,12 +953,12 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.delete("/api/zones/ignore")
-    async def clear_ignore_zones() -> dict:
+    def clear_ignore_zones() -> dict:
         updated = engine.clear_ignore_zones()
         return {"ok": True, "zones": updated.to_dict()}
 
     @app.post("/api/ignore-track")
-    async def ignore_track(payload: AssignTrackPayload) -> dict:
+    def ignore_track(payload: AssignTrackPayload) -> dict:
         try:
             ok, updated = engine.ignore_track(payload.track_id)
         except ValueError as exc:
@@ -947,7 +968,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, "zones": updated.to_dict()}
 
     @app.post("/api/pause")
-    async def pause_guard(payload: PausePayload) -> dict:
+    def pause_guard(payload: PausePayload) -> dict:
         if payload.seconds <= 0:
             engine.resume()
         else:
@@ -955,20 +976,20 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return {"ok": True, "state": engine.fsm.state.value}
 
     @app.post("/api/resume")
-    async def resume_guard() -> dict:
+    def resume_guard() -> dict:
         engine.resume()
         return {"ok": True, "state": engine.fsm.state.value}
 
     @app.post("/api/door_visit/clear")
-    async def clear_door_visit() -> dict:
+    def clear_door_visit() -> dict:
         return engine.clear_door_visit()
 
     @app.post("/api/bed_presence/clear")
-    async def clear_bed_presence() -> dict:
+    def clear_bed_presence() -> dict:
         return engine.clear_bed_presence()
 
     @app.post("/api/assign-patient")
-    async def assign_patient(payload: AssignTrackPayload) -> dict:
+    def assign_patient(payload: AssignTrackPayload) -> dict:
         res = engine.assign_track_role(payload.track_id, Role.PATIENT)
         if not res.get("ok"):
             raise HTTPException(
@@ -978,7 +999,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return res
 
     @app.post("/api/assign-visitor")
-    async def assign_visitor(payload: AssignTrackPayload) -> dict:
+    def assign_visitor(payload: AssignTrackPayload) -> dict:
         res = engine.assign_track_role(payload.track_id, Role.VISITOR)
         if not res.get("ok"):
             raise HTTPException(
@@ -988,7 +1009,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return res
 
     @app.post("/api/tracks/{track_id}/role")
-    async def assign_track_role_by_path(track_id: int, payload: TrackRolePayload) -> dict:
+    def assign_track_role_by_path(track_id: int, payload: TrackRolePayload) -> dict:
         role_raw = (payload.role or "").strip().lower()
         if role_raw not in (Role.PATIENT.value, Role.VISITOR.value):
             raise HTTPException(status_code=400, detail="Роль должна быть patient или visitor")
@@ -1001,13 +1022,13 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return res
 
     @app.post("/api/test-telegram")
-    async def test_telegram() -> dict:
+    def test_telegram() -> dict:
         snap = engine.get_latest_jpeg()
         ok, msg = engine.notifier.send_test_snapshot(snap)
         return {"ok": ok, "message": msg}
 
     @app.get("/api/subscribers")
-    async def get_subscribers() -> dict:
+    def get_subscribers() -> dict:
         uname = engine.notifier.bot_username
         subs = engine.list_subscribers_normalized()
         return {
@@ -1020,7 +1041,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
 
     @app.post("/api/telegram/subscribers/{chat_id}/toggle")
     @app.post("/api/subscribers/{chat_id}/toggle")
-    async def toggle_subscriber(
+    def toggle_subscriber(
         chat_id: str,
         payload: SubscriberTogglePayload | None = Body(default=None),
     ) -> dict:
@@ -1039,7 +1060,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.delete("/api/subscribers/{chat_id}")
-    async def delete_subscriber(chat_id: str) -> dict:
+    def delete_subscriber(chat_id: str) -> dict:
         ok, msg = engine.notifier.remove_subscriber(chat_id)
         if not ok and "в .env" in msg:
             raise HTTPException(status_code=400, detail=msg)
@@ -1054,7 +1075,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         }
 
     @app.get("/api/faces/{role}/photo/{filename}")
-    async def get_face_photo(role: str, filename: str) -> FileResponse:
+    def get_face_photo(role: str, filename: str) -> FileResponse:
         if role not in (Role.PATIENT.value, Role.VISITOR.value):
             raise HTTPException(status_code=400, detail="Роль должна быть patient или visitor")
         faces_root = engine.settings.data_dir / "faces"
@@ -1064,7 +1085,7 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         return FileResponse(photo_path)
 
     @app.post("/api/faces/{role}/from-camera")
-    async def enroll_face_from_camera(
+    def enroll_face_from_camera(
         role: str,
         payload: EnrollFromCameraPayload | None = Body(default=None),
     ) -> dict:
@@ -1080,26 +1101,27 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
     async def upload_face(role: str, file: UploadFile = File(...)) -> dict:
         if role not in (Role.PATIENT.value, Role.VISITOR.value):
             raise HTTPException(status_code=400, detail="Роль должна быть patient или visitor")
-        raw = await file.read()
-        if len(raw) > 15 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Файл больше 15 МБ")
-        ok, info = engine.faces.add_photo(Role(role), file.filename or "photo.jpg", raw)
+        raw = await _read_upload_limited(file, MAX_FACE_UPLOAD_BYTES)
+        ok, info = await asyncio.to_thread(
+            engine.faces.add_photo, Role(role), file.filename or "photo.jpg", raw
+        )
         if not ok:
             raise HTTPException(status_code=422, detail=info)
         role_ru = "бабушка" if role == Role.PATIENT.value else "свой"
-        engine._log_event("info", f"Загружено эталонное фото ({role_ru})", category="system")
+        engine.log_event("info", f"Загружено эталонное фото ({role_ru})", category="system")
         return {"ok": True, "filename": info, "faces": engine.faces.list_photos()}
 
     @app.delete("/api/faces/{role}/{filename}")
-    async def delete_face(role: str, filename: str) -> dict:
+    def delete_face(role: str, filename: str) -> dict:
         if role not in (Role.PATIENT.value, Role.VISITOR.value):
             raise HTTPException(status_code=400, detail="Роль должна быть patient или visitor")
-        engine.faces.delete_photo(Role(role), filename)
-        engine._log_event("info", f"Удалён эталон лица ({filename})", category="system")
+        if not engine.faces.delete_photo(Role(role), filename):
+            raise HTTPException(status_code=404, detail="Эталон не найден")
+        engine.log_event("info", f"Удалён эталон лица ({filename})", category="system")
         return {"ok": True, "faces": engine.faces.list_photos()}
 
     @app.get("/api/snapshot.jpg")
-    async def snapshot_jpg(overlay: int = Query(default=1)) -> Response:
+    def snapshot_jpg(overlay: int = Query(default=1)) -> Response:
         jpeg = engine.get_latest_clean_jpeg() if overlay == 0 else engine.get_latest_jpeg()
         if not jpeg:
             raise HTTPException(status_code=503, detail="Кадр ещё не готов")
@@ -1140,14 +1162,14 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
         )
 
     @app.get("/api/mjpeg")
-    async def stream_mjpeg_clean(
+    def stream_mjpeg_clean(
         overlay: int = Query(default=0),
         frames: int = Query(default=0, ge=0, le=1000),
     ) -> StreamingResponse:
         return _build_mjpeg_response(use_overlay=(overlay != 0), max_frames=frames)
 
     @app.get("/api/stream.mjpg")
-    async def stream_mjpg(
+    def stream_mjpg(
         overlay: int = Query(default=1),
         frames: int = Query(default=0, ge=0, le=1000),
     ) -> StreamingResponse:

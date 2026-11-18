@@ -2746,3 +2746,13 @@ def test_wave12_fsm_metric_floor_doll_hip_baseline_shield_and_bent_standing_1300
 
 
 
+
+
+def test_face_upload_size_limit_and_delete_missing(isolated_api) -> None:
+    client, _engine, _ = isolated_api
+    big = b"\xff" * (15 * 1024 * 1024 + 1)
+    r = client.post("/api/faces/patient", files={"file": ("big.jpg", big, "image/jpeg")})
+    assert r.status_code == 413
+
+    r_del = client.delete("/api/faces/patient/nonexistent.jpg")
+    assert r_del.status_code == 404

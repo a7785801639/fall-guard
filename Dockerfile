@@ -33,7 +33,12 @@ RUN if [ "$COMPUTE_PROFILE" = "gpu" ]; then \
     fi
 
 COPY app /app/app
-COPY tests /app/tests
+
+# Непривилегированный пользователь; /app/data — том с моделями, архивом и настройками
+RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin fallguard \
+    && mkdir -p /app/data /tmp/Ultralytics \
+    && chown -R fallguard:fallguard /app/data /tmp/Ultralytics
+USER fallguard
 
 EXPOSE 8090
 

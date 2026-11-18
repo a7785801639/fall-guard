@@ -2384,6 +2384,17 @@ class FallGuardEngine:
         self._log_event("info", "Охрана включена", category="system")
         self.publish_telemetry()
 
+    def log_event(
+        self,
+        level: str,
+        text: str,
+        category: str | None = None,
+        clip_id: str | None = None,
+        state: str | None = None,
+    ) -> None:
+        """Публичная запись в журнал событий (для веб-слоя)."""
+        self._log_event(level, text, category=category, clip_id=clip_id, state=state)
+
     def _log_event(
         self,
         level: str,
