@@ -425,7 +425,10 @@
     @media (max-width: 420px) { .rcp-ctrl { padding-left: 0; } }
     .faces { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 12px; }
     .face { position: relative; width: 72px; height: 72px; animation: pop-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-    .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); }
+    .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); display: block; }
+    button.face { padding: 0; border-radius: 16px; transition: transform 0.15s, box-shadow 0.15s; }
+    button.face:hover { box-shadow: 0 0 0 2px var(--fill-2); }
+    button.face:active { transform: scale(0.96); }
     .face button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--text); color: var(--bg); box-shadow: 0 0 0 3px var(--raise); }
     .face button svg { width: 13px; height: 13px; stroke-width: 2.6; }
     .face.ph, .face.add { display: grid; place-items: center; border-radius: 16px; border: 1.5px dashed rgba(255, 255, 255, 0.14); color: var(--faint); }
@@ -624,7 +627,7 @@
     body.pip .main { width: 100% !important; height: 100%; }
     body.pip .player { height: 100%; border-radius: 0; box-shadow: none; animation: none !important; }
     body.pip .viewport { aspect-ratio: auto; height: 100vh; }
-    body.pip .rail, body.pip .timeline, body.pip .vp-btns, body.pip .draw-bar, body.pip .scrim, body.pip .menu, body.pip .toast, body.pip .tip, body.pip #chipVisit, body.pip .vp-alarm, body.pip .scrub-badge { display: none !important; }
+    body.pip .rail, body.pip .timeline, body.pip .vp-btns, body.pip .draw-bar, body.pip .scrim, body.pip .menu, body.pip .toast, body.pip .tip, body.pip #chipVisit, body.pip .vp-alarm, body.pip .scrub-badge, body.pip .recent { display: none !important; }
     body.pip .pip-status { display: flex; }
     body.pip .vp-top { top: 6px; left: 6px; right: 6px; }
     body.pip .chip { height: 20px; font-size: 10.5px; padding: 0 7px; }
@@ -1643,7 +1646,7 @@
     hideMenu();
     if (it && it.fn) it.fn();
   });
-  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest("#btnShot")) hideMenu(); }, true);
+  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest("#btnShot") && !e.target.closest(".face")) hideMenu(); }, true);
   function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
     const id = Number(t.track_id);
@@ -2618,7 +2621,7 @@
       const arr = faces[role] || [];
       const ph = Math.max(0, 3 - arr.length);
       return `<div class="group"><h3>${title}</h3><p>${sub}</p>
-        <div class="faces">${arr.map((fn) => `<span class="face"><img loading="lazy" alt="" src="${esc(withAuth("/api/faces/" + role + "/photo/" + encodeURIComponent(fn)))}" /><button onclick="removeFace('${role}','${esc(fn)}')" aria-label="Удалить фото">${ico("i-x")}</button></span>`).join("")}${`<span class="face ph">${ico("i-user")}</span>`.repeat(Math.max(0, ph - 1))}<label class="face add" title="Загрузить фото">${ico("i-plus")}<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div>
+        <div class="faces">${arr.map((fn) => `<button class="face" onclick="faceMenu(this,'${role}','${esc(fn)}')" aria-label="Фото"><img loading="lazy" alt="" src="${esc(withAuth("/api/faces/" + role + "/photo/" + encodeURIComponent(fn)))}" /></button>`).join("")}${`<span class="face ph">${ico("i-user")}</span>`.repeat(Math.max(0, ph - 1))}<label class="face add" title="Загрузить фото">${ico("i-plus")}<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div>
         <div class="row"><button class="btn" onclick="captureFace('${role}')">${ico("i-camera")}Снять с камеры сейчас</button><label class="btn">${ico("i-upload")}Загрузить фото<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div></div>`;
     };
     let h = `<div class="group"><h3>Кто сейчас в кадре</h3><p>Перепутала — поправьте здесь или нажав на человека на видео.</p>`;
@@ -2645,7 +2648,8 @@
     input.value = "";
     if (await call("/api/faces/" + role, { method: "POST", body: fd }, "Фото добавлено")) poll();
   }
-  async function removeFace(role, fn) { if (await call("/api/faces/" + role + "/" + encodeURIComponent(fn), { method: "DELETE" })) poll(); }
+  function faceMenu(el, role, fn) { const [x, y] = menuAt(el); showMenu(x, y, "", [{ label: "Удалить фото", icon: "i-trash", cls: "danger", fn: () => removeFace(role, fn) }]); }
+  async function removeFace(role, fn) { if (await call("/api/faces/" + role + "/" + encodeURIComponent(fn), { method: "DELETE" }, "Фото удалено")) poll(); }
 
   function tabCare() {
     const p = S.prefs || {}, diag = (S.care && S.care.diagnostics) || {};

@@ -448,3 +448,19 @@ def test_fonts_are_public_but_everything_else_stays_behind_login(tmp_path: Path)
     assert font.status_code == 200 and font.headers["content-type"].startswith("font/")
     assert client.get("/static/index.html", headers=EXTERNAL).status_code == 401
     assert client.get("/api/status", headers=EXTERNAL).status_code == 401
+
+
+def test_phone_alarm_screen_media_reachable_with_device_token(tmp_path: Path) -> None:
+    """Экран тревоги в приложении грузит живые кадры и снимок тревоги по токену телефона снаружи."""
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    client = TestClient(create_web_app(engine))
+    code = client.post("/api/devices/pair-code").json()["code"]
+    client.cookies.clear()
+    token = client.post("/api/devices/claim", json={"code": code, "name": "Pixel"}, headers=EXTERNAL).json()["token"]
+    client.cookies.clear()
+    auth = {**EXTERNAL, "authorization": f"Bearer {token}"}
+
+    assert client.get("/api/snapshot.jpg?overlay=1", headers=EXTERNAL).status_code == 401
+    assert client.get("/api/snapshot.jpg?overlay=1", headers=auth).status_code in (200, 503)
+    assert client.get("/api/clips/nope.jpg", headers=EXTERNAL).status_code == 401
+    assert client.get("/api/clips/nope.jpg", headers=auth).status_code in (200, 404)

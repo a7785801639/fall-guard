@@ -69,25 +69,25 @@ class SettingsActivity : Activity() {
             else -> "Настройки приложения"
         }
         findViewById<TextView>(R.id.setInfo).text = when {
-            !st.allOk -> "Разрешите приложению всё отмеченное ниже — иначе Android может заглушить тревогу ночью или на заблокированном телефоне."
-            onboarding -> "Телефон подключён. При падении он громко зазвонит, даже в беззвучном режиме. Нажмите «Проверить тревогу», чтобы услышать, как это звучит."
-            else -> "Телефон подключён к FallGuard и готов к тревоге. Режим «только падения» переключается в пульте."
+            !st.allOk -> "Без этого Android может заглушить тревогу."
+            onboarding -> "При падении телефон зазвонит даже в беззвучном режиме."
+            else -> "Телефон готов к тревоге."
         }
         findViewById<View>(R.id.btnDone).visibility = if (onboarding) View.VISIBLE else View.GONE
 
         val list = findViewById<LinearLayout>(R.id.checklist)
         list.removeAllViews()
-        addRow(list, st.notifications, "Уведомления", "Без них тревога не появится") {
+        addRow(list, st.notifications, "Уведомления", "обязательно") {
             startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
         }
-        addRow(list, st.battery, "Работа в фоне", "Чтобы Android не усыплял связь с сервером") {
+        addRow(list, st.battery, "Работа в фоне", "чтобы связь не засыпала") {
             try {
                 startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
             } catch (_: Exception) {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
         }
-        addRow(list, st.fullScreen, "Окно поверх блокировки", "Тревога откроется на весь экран") {
+        addRow(list, st.fullScreen, "Окно поверх блокировки", "тревога на весь экран") {
             if (Build.VERSION.SDK_INT >= 34) {
                 try {
                     startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))

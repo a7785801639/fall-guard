@@ -193,7 +193,7 @@ class AlarmActivity : Activity() {
     private fun renderChip() {
         val chip = findViewById<TextView>(R.id.alarmLive)
         val t = alarmInfo?.ts ?: 0L
-        chip.text = if (liveWanted && liveShowing) "● Эфир · коснитесь для снимка" else "Снимок " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(t)) + (if (liveWanted) "" else " · коснитесь для эфира")
+        chip.text = if (liveWanted && liveShowing) "● Эфир" else "Снимок " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(t))
         chip.setTextColor(if (liveWanted && liveShowing) 0xFFFF6B70.toInt() else 0xFFFFFFFF.toInt())
     }
 

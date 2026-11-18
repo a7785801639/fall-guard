@@ -309,7 +309,7 @@ class MainActivity : Activity() {
                     findViewById<View>(R.id.offlineIcon).visibility = View.VISIBLE
                     findViewById<TextView>(R.id.offlineTitle).text = "Нет связи с сервером"
                     findViewById<TextView>(R.id.offlineText).text =
-                        "Тревоги продолжат приходить, как только связь появится.\n" + prefs.urls.joinToString("\n")
+                        "Тревоги придут, когда связь вернётся."
                 } else {
                     loadedBase = base
                     val cm = CookieManager.getInstance()
@@ -472,7 +472,11 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setBarColor(hex: String) {
             val c = try { Color.parseColor(hex) } catch (_: Exception) { return }
-            runOnUiThread { window.statusBarColor = c }
+            runOnUiThread {
+                window.statusBarColor = c
+                // Android 15+ рисует приложение под прозрачной строкой состояния — красим фон под ней
+                findViewById<View>(R.id.root)?.setBackgroundColor(c)
+            }
         }
 
         /** Кадр с камеры (JPEG в base64) — в галерею, папка Pictures/FallGuard. */

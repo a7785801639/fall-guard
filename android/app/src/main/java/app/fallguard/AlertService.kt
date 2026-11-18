@@ -127,7 +127,7 @@ class AlertService : Service() {
                 else -> {
                     base = null
                     linkTitle = "Нет связи с сервером"
-                    setLink("Пробую снова… Тревоги придут, как только связь появится")
+                    setLink("Переподключаюсь…")
                     Glance.update(this, null, false, "", false)
                     if (!lostWarned && System.currentTimeMillis() - lastOk > LOST_AFTER_MS) {
                         lostWarned = true
