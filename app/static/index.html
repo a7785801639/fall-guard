@@ -1476,15 +1476,15 @@
     ignore: ["Игнор-зона: обведите предмет, похожий на человека", 3, "Зона игнорирования добавлена"],
   };
   // Правка контура: точки можно тянуть, «+» на сторонах добавляет точку, двойное нажатие удаляет
-  let editIgnore = -1, dragPt = -1;
+  let editIgnore = -1, dragPt = -1, editLoaded = false;
   function startDraw(mode, edit, ignoreIndex) {
     closeSheet();
     resetZoom(false);
-    drawMode = mode; draft = []; editIgnore = -1;
+    drawMode = mode; draft = []; editIgnore = -1; editLoaded = false;
     if (edit) {
       const src = mode === "bed" ? zones.bed_polygon : mode === "door" ? zones.door_polygon : mode === "floor" ? zones.floor_polygon
         : (zones.ignore_polygons || [])[ignoreIndex];
-      if (Array.isArray(src) && src.length) { draft = src.map((p) => [p[0], p[1]]); if (mode === "ignore") editIgnore = ignoreIndex; }
+      if (Array.isArray(src) && src.length) { draft = src.map((p) => [p[0], p[1]]); editLoaded = true; if (mode === "ignore") editIgnore = ignoreIndex; }
     }
     viewport.classList.add("drawing");
     viewport.parentElement.classList.add("drawing-mode");
@@ -1506,7 +1506,7 @@
   }
   function undoPoint() { draft.pop(); syncDrawBar(); draw(); }
   function cancelDraw() { drawMode = null; draft = []; editIgnore = -1; dragPt = -1; viewport.classList.remove("drawing"); viewport.parentElement.classList.remove("drawing-mode"); $("drawBar").hidden = true; draw(); }
-  function redrawZone() { draft = []; syncDrawBar(); draw(); }
+  function redrawZone() { draft = []; editLoaded = false; syncDrawBar(); draw(); }
   // Экранные координаты точек контура и середин сторон
   function draftScreen() { return draft.map((p) => px(p)); }
   function midpoints() {
@@ -1553,6 +1553,18 @@
       draft.splice(hit.at, 0, hit.p); dragPt = hit.at; canvas.setPointerCapture(e.pointerId); haptic(); syncDrawBar(); draw(); return;
     }
     if (drawMode === "floor" && draft.length >= 4) return;
+    // Правим готовый контур: промах мимо точки не добавляет угол в конец, а вставляет точку в ближайшую сторону
+    if (editLoaded && draft.length >= 3 && drawMode !== "floor") {
+      const q = normAt(e); let bestI = 0, bestD = Infinity;
+      draft.forEach((a, i) => {
+        const b = draft[(i + 1) % draft.length], [ax, ay] = px(a), [bx, by] = px(b), [qx, qy] = px(q);
+        const L = Math.max(1e-6, (bx - ax) ** 2 + (by - ay) ** 2), t = Math.max(0, Math.min(1, ((qx - ax) * (bx - ax) + (qy - ay) * (by - ay)) / L));
+        const d = Math.hypot(qx - (ax + t * (bx - ax)), qy - (ay + t * (by - ay)));
+        if (d < bestD) { bestD = d; bestI = i + 1; }
+      });
+      if (bestD > 60) return; // совсем далеко от контура — ничего не делаем
+      draft.splice(bestI, 0, q); dragPt = bestI; canvas.setPointerCapture(e.pointerId); haptic(); syncDrawBar(); draw(); return;
+    }
     draft.push(normAt(e));
     haptic();
     syncDrawBar(); draw();

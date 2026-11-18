@@ -33,6 +33,8 @@ data class AlarmInfo(
     val imageUrl: String,
     val base: String,
     val kind: Signals.Kind = Signals.Kind.FALL,
+    /** Тревогу держит сервер (падение, критическое) — он же её и снимет. */
+    val serverTracked: Boolean = true,
 )
 
 /**
@@ -182,7 +184,7 @@ class AlertService : Service() {
         if (cursor > prefs.cursor) prefs.cursor = cursor
 
         val alarmActive = j.optBoolean("alarm_active")
-        val actions = Signals.decide(list, alarmActive, ringing, silencedUntilQuiet) { Sounds.style(this, it) }
+        val actions = Signals.decide(list, alarmActive, ringing, silencedUntilQuiet, current?.serverTracked ?: true) { Sounds.style(this, it) }
         for (act in actions) when (act) {
             is Signals.Action.Notify -> {
                 val a = byId[act.alert.id] ?: continue
@@ -195,6 +197,7 @@ class AlertService : Service() {
                 val info = AlarmInfo(
                     a.optString("id"), a.optString("title"), a.optString("description"),
                     (a.optDouble("ts", 0.0) * 1000).toLong(), a.optString("image_url"), base, act.kind,
+                    Signals.serverTracked(act.alert),
                 )
                 ui.post { startAlarm(info) }
             }
@@ -258,13 +261,20 @@ class AlertService : Service() {
             .addAction(0, "Ложная", servicePending(ACTION_FALSE, info.id, 3))
             .build()
         nm.notify(NOTIF_ALARM, n)
-        if (!silencedUntilQuiet) startSiren(info.kind)
+        if (!silencedUntilQuiet) {
+            // Пока звучит «встала», пришло падение — переключаемся на звук падения
+            if (player != null && sirenKind != info.kind) stopSiren()
+            startSiren(info.kind)
+        }
         // Если экран уже включён и приложение на виду — открываем окно сразу
         try { startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
     }
 
+    private var sirenKind: Signals.Kind? = null
+
     private fun startSiren(kind: Signals.Kind = Signals.Kind.FALL) {
         if (player != null) return
+        sirenKind = kind
         try {
             val pm = getSystemService(PowerManager::class.java)
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "fallguard:alarm").apply { acquire(15 * 60 * 1000L) }

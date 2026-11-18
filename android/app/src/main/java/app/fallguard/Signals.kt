@@ -52,11 +52,15 @@ object Signals {
      * alarmActive — сервер считает тревогу непринятой; ringing — телефон уже звонит;
      * silenced — звук на этом телефоне выключен до конца текущей тревоги.
      */
+    /** Сервер сам держит и снимает только падения и критические тревоги. */
+    fun serverTracked(a: Alert): Boolean = a.isFall || a.state == "fallen" || a.severity == "critical"
+
     fun decide(
         alerts: List<Alert>,
         alarmActive: Boolean,
         ringing: Boolean,
         silenced: Boolean,
+        currentServerTracked: Boolean = true,
         styleOf: (Kind) -> Style?,
     ): List<Action> {
         val out = mutableListOf<Action>()
@@ -71,7 +75,9 @@ object Signals {
         }
         when {
             ring != null -> out += ring
-            !alarmActive -> if (ringing) out += Action.Stop
+            // Тревогу, поднятую телефоном по настройке (например, «встала» → тревога), сервер не знает:
+            // её снимает только человек на телефоне (или предохранитель через 15 минут)
+            !alarmActive -> if (ringing && currentServerTracked) out += Action.Stop
             !ringing && !silenced -> out += Action.RingUnconfirmed
         }
         return out

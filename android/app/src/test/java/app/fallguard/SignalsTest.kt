@@ -21,7 +21,7 @@ class SignalsTest {
     }
 
     @Test fun standupIsNotificationByDefaultButCanRing() {
-        assertEquals(listOf<Action>(Action.Notify(stand, Kind.STANDUP, true)), Signals.decide(listOf(stand), false, false, false, defaults))
+        assertEquals(listOf<Action>(Action.Notify(stand, Kind.STANDUP, true)), Signals.decide(listOf(stand), false, false, false, styleOf = defaults))
         val loud = Signals.decide(listOf(stand), false, false, false) { if (it == Kind.STANDUP) Style.ALARM else null }
         assertEquals(listOf<Action>(Action.Ring(stand, Kind.STANDUP)), loud)
         val quiet = Signals.decide(listOf(stand), false, false, false) { if (it == Kind.STANDUP) Style.SILENT else null }
@@ -34,24 +34,32 @@ class SignalsTest {
     }
 
     @Test fun mixedBatchNotifiesAndRingsForTheFall() {
-        val acts = Signals.decide(listOf(sit, fall), true, false, false, defaults)
+        val acts = Signals.decide(listOf(sit, fall), true, false, false, styleOf = defaults)
         assertEquals(listOf(Action.Notify(sit, Kind.SITTING, true), Action.Ring(fall, Kind.FALL)), acts)
     }
 
     @Test fun serverClearedAlarmStopsRinging() {
-        assertEquals(listOf<Action>(Action.Stop), Signals.decide(emptyList(), alarmActive = false, ringing = true, silenced = false, defaults))
-        assertTrue(Signals.decide(emptyList(), alarmActive = false, ringing = false, silenced = false, defaults).isEmpty())
+        assertEquals(listOf<Action>(Action.Stop), Signals.decide(emptyList(), alarmActive = false, ringing = true, silenced = false, styleOf = defaults))
+        assertTrue(Signals.decide(emptyList(), alarmActive = false, ringing = false, silenced = false, styleOf = defaults).isEmpty())
     }
 
     @Test fun unacknowledgedOnServerRingsUnlessSilenced() {
-        assertEquals(listOf<Action>(Action.RingUnconfirmed), Signals.decide(emptyList(), true, ringing = false, silenced = false, defaults))
-        assertTrue(Signals.decide(emptyList(), true, ringing = false, silenced = true, defaults).isEmpty())
-        assertTrue(Signals.decide(emptyList(), true, ringing = true, silenced = false, defaults).isEmpty())
+        assertEquals(listOf<Action>(Action.RingUnconfirmed), Signals.decide(emptyList(), true, ringing = false, silenced = false, styleOf = defaults))
+        assertTrue(Signals.decide(emptyList(), true, ringing = false, silenced = true, styleOf = defaults).isEmpty())
+        assertTrue(Signals.decide(emptyList(), true, ringing = true, silenced = false, styleOf = defaults).isEmpty())
     }
 
     @Test fun newFallAfterSilenceRingsAgain() {
-        val acts = Signals.decide(listOf(fall), alarmActive = true, ringing = false, silenced = true, defaults)
+        val acts = Signals.decide(listOf(fall), alarmActive = true, ringing = false, silenced = true, styleOf = defaults)
         assertEquals(listOf<Action>(Action.Ring(fall, Kind.FALL)), acts)
+    }
+
+    @Test fun locallyEscalatedAlarmIsNotStoppedByServer() {
+        // «Встала» настроена как тревога: на следующем опросе сервер не знает о ней — звонок продолжается
+        assertTrue(Signals.decide(emptyList(), alarmActive = false, ringing = true, silenced = false, currentServerTracked = false, styleOf = defaults).isEmpty())
+        // а тревогу о падении сервер снимает
+        assertEquals(listOf<Action>(Action.Stop), Signals.decide(emptyList(), alarmActive = false, ringing = true, silenced = false, currentServerTracked = true, styleOf = defaults))
+        assertTrue(Signals.serverTracked(fall) && Signals.serverTracked(absence) && !Signals.serverTracked(stand))
     }
 
     @Test fun kindMapping() {
