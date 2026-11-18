@@ -51,6 +51,7 @@ class AlertService : Service() {
     @Volatile private var ringing = false
     @Volatile private var silencedUntilQuiet = false
     @Volatile private var linkText = "Подключение к серверу…"
+    @Volatile private var linkTitle = "FallGuard на страже"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -125,7 +126,9 @@ class AlertService : Service() {
                 }
                 else -> {
                     base = null
-                    setLink("Нет связи с сервером, пробую снова…")
+                    linkTitle = "Нет связи с сервером"
+                    setLink("Пробую снова… Тревоги придут, как только связь появится")
+                    Glance.update(this, null, false, "", false)
                     if (!lostWarned && System.currentTimeMillis() - lastOk > LOST_AFTER_MS) {
                         lostWarned = true
                         notifyEvent(NOTIF_LOST, "Нет связи с FallGuard", "Тревоги сейчас не дойдут до этого телефона. Проверьте интернет и сервер.")
@@ -182,7 +185,11 @@ class AlertService : Service() {
         }
         val mode = if (j.optString("mode") == "falls") "только падения" else "все события"
         val enabled = j.optBoolean("enabled", true)
+        val state = j.optString("state")
+        val (title, _) = Glance.describe(state, alarmActive)
+        linkTitle = title
         setLink(j.optString("status_line", "На связи") + (if (enabled) " · $mode" else " · тревоги выключены"))
+        Glance.update(this, state, alarmActive, if (enabled) "" else "тревоги выключены", true)
     }
 
     private fun post(path: String, body: JSONObject) {
@@ -325,7 +332,7 @@ class AlertService : Service() {
     private fun linkNotification(): Notification =
         NotificationCompat.Builder(this, CH_LINK)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("FallGuard на страже")
+            .setContentTitle(linkTitle)
             .setContentText(linkText)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -339,9 +346,11 @@ class AlertService : Service() {
         } catch (_: Exception) {}
     }
 
+    private var shownTitle = ""
     private fun setLink(text: String) {
-        if (text == linkText) return
+        if (text == linkText && linkTitle == shownTitle) return
         linkText = text
+        shownTitle = linkTitle
         try { nm.notify(NOTIF_LINK, linkNotification()) } catch (_: Exception) {}
     }
 
