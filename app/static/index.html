@@ -574,6 +574,11 @@
     .menu:not([hidden]) { animation: menu-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1.2) both; }
     .vp-alarm:not([hidden]) { animation: banner-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.2) both; }
     .chip.live::before { animation: rec 2s ease-in-out infinite; }
+    .viewport.shot::after { content: ""; position: absolute; inset: 0; z-index: 7; background: #fff; pointer-events: none; animation: fade-out 0.45s ease-out both; }
+    .chip.warn-chip { background: rgba(255, 181, 71, 0.92); color: #2B1A00; animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .app[data-lost="1"] .viewport video, .app[data-lost="1"] .viewport img.live, .app[data-lost="1"] .closeup canvas { filter: grayscale(1) brightness(0.45); transition: filter 0.6s; }
+    .app[data-lost="1"] .viewport canvas#overlay { opacity: 0; }
+    .app[data-lost="1"] .people { opacity: 0.45; filter: grayscale(1); transition: opacity 0.4s, filter 0.4s; }
     /* Нажатия ощущаются */
     .tool, .pcell, .vp-btn, .icon-btn, .seg button, .tab, .item, .switch { transition-property: background, color, transform, opacity, box-shadow; transition-duration: 0.18s; }
     .tool:active, .vp-btn:active, .icon-btn:active { transform: scale(0.92); }
@@ -696,8 +701,9 @@
             <canvas id="overlay"></canvas>
             <div class="vp-msg" id="vpMsg"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><circle cx="80" cy="48" r="40" fill="rgba(255,255,255,.035)"/><rect x="44" y="30" width="54" height="38" rx="9" fill="#1F232A" stroke="#48505F" stroke-width="3"/><path d="m98 42 18-9v32l-18-9Z" fill="#1F232A" stroke="#48505F" stroke-width="3" stroke-linejoin="round"/><circle cx="71" cy="49" r="9.5" fill="none" stroke="#48505F" stroke-width="3"/><g class="dots" fill="#959CA9"><circle cx="66" cy="88" r="3"/><circle cx="80" cy="88" r="3"/><circle cx="94" cy="88" r="3"/></g></svg><b id="vpMsgTitle">Подключаемся к камере</b><span id="vpMsgSub">Подключение к потоку…</span></div></div>
             <div class="vp-top">
-              <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span></div>
+              <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span><span class="chip warn-chip" id="chipStall" hidden>Видео подвисло · переподключаю</span><span class="chip warn-chip" id="chipLost" hidden></span></div>
               <div class="vp-btns">
+                <button class="vp-btn" id="btnShot" onclick="saveFrame()" aria-label="Сохранить кадр" title="Сохранить кадр (C)"><svg class="ico"><use href="#i-camera"/></svg></button>
                 <button class="vp-btn" id="btnZoom" aria-pressed="false" onclick="toggleBedZoom()" aria-label="Кровать крупно" title="Кровать крупно (Z, двойной щелчок)"><svg class="ico"><use href="#i-zoom"/></svg></button>
                 <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
                 <button class="vp-btn" onclick="toggleFullscreen()" aria-label="На весь экран" title="На весь экран (F)"><svg class="ico"><use href="#i-full"/></svg></button>
@@ -1145,6 +1151,7 @@
   setInterval(() => {
     if (!started || document.hidden) return;
     const stale = Date.now() - lastChunk;
+    $("chipStall").hidden = !(camOnline() && !serverLost && stale > 4500);
     if (mjpeg) { if (stale > 15000) startStream(true); return; }
     if (!ws || ws.readyState !== 1 || stale > 2500) { fails = 0; startStream(true); return; }
     trimBuffer();
@@ -1153,7 +1160,7 @@
   img.addEventListener("load", () => { lastChunk = Date.now(); layout(); });
   video.addEventListener("loadedmetadata", () => { layout(); if (!document.hidden) video.play().catch(() => {}); });
   video.addEventListener("resize", () => layout());
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && started) { startStream(true); connectTelemetry(); poll(); } });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && started) { lastOk = Date.now(); startStream(true); connectTelemetry(); poll(); } });
 
   /* ---------- Разметка поверх видео ---------- */
   const canvas = $("overlay"), ctx = canvas.getContext("2d");
@@ -1346,6 +1353,7 @@
       let m = null; try { m = JSON.parse(ev.data); } catch (_) {}
       if (!m || !Array.isArray(m.tracks)) return;
       live = m;
+      markOk();
       renderFast();
       draw();
     };
@@ -1391,12 +1399,17 @@
     else if (st === "paused") { eyebrow = "Пауза"; sub = src.pause_remaining_sec > 0 ? `Ещё ${timer(src.pause_remaining_sec)} · падение всё равно ловится` : ""; }
     else if (lvl === "alarm" && st !== "fallen") { title = "Тревога не подтверждена"; tone = "alarm"; }
     else if (!lvl && WARN_STATES.includes(st)) tone = "care"; // режим «только падения»: без тревожного вида
-    const camIssue = online && !lvl && st !== "paused" ? (src.camera_issue || (S && S.camera_issue) || "") : "";
-    if (camIssue === "moved") { title = "Камеру сдвинули"; tone = "warn"; sub = "Проверьте разметку кровати в настройках"; }
+    let camIssue = online && !lvl && st !== "paused" ? (src.camera_issue || (S && S.camera_issue) || "") : "";
+    if (serverLost && !lvl) { title = "Нет связи с сервером"; tone = "offline"; eyebrow = "Связь потеряна"; sub = "Состояние на " + clock(lastOk / 1000) + " · переподключаюсь"; camIssue = "lost"; }
+    $("app").dataset.lost = serverLost ? "1" : "0";
+    $("chipLost").hidden = !serverLost;
+    if (serverLost) $("chipLost").textContent = "Нет связи · кадр от " + clock(lastOk / 1000);
+    if (camIssue === "lost") {}
+    else if (camIssue === "moved") { title = "Камеру сдвинули"; tone = "warn"; sub = "Проверьте разметку кровати в настройках"; }
     else if (camIssue === "frozen") { title = "Изображение застыло"; tone = "warn"; sub = "Камера шлёт один и тот же кадр"; }
     $("status").dataset.tone = tone;
     $("statusEyebrow").textContent = eyebrow || EYEBROW[tone] || "";
-    $("statusSince").textContent = online ? sinceText(st) : "";
+    $("statusSince").textContent = online && !serverLost ? sinceText(st) : "";
     const tEl = $("statusTitle");
     if (tEl.textContent !== title) {
       tEl.textContent = title;
@@ -1415,7 +1428,7 @@
       $("vpMsgTitle").textContent = err ? "Нет связи с камерой" : "Подключаемся к камере";
       $("vpMsgSub").textContent = cap(sub);
     }
-    $("chipLight").hidden = !online;
+    $("chipLight").hidden = !online || serverLost;
     $("chipLight").textContent = clock(Date.now() / 1000) + (src.is_night_ir ? " · ночь" : "");
     $("chipVisit").hidden = !src.door_visit_active;
 
@@ -1625,6 +1638,40 @@
   setInterval(drawCloseup, 80);
   setInterval(() => { if (started) renderFast(); }, 15000);
 
+  /* ---------- Сохранить кадр: в той же ориентации, что на экране ---------- */
+  function frameCanvas() {
+    const [W, H] = srcSize(), c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    if (!video.hidden && video.readyState >= 2 && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight, rot = camRot();
+      if (cam.flip_h) { g.translate(W, 0); g.scale(-1, 1); }
+      if (rot === 90) { g.translate(vh, 0); g.rotate(Math.PI / 2); }
+      else if (rot === 180) { g.translate(vw, vh); g.rotate(Math.PI); }
+      else if (rot === 270) { g.translate(0, vw); g.rotate(-Math.PI / 2); }
+      g.drawImage(video, 0, 0);
+    } else if (!img.hidden && img.naturalWidth) g.drawImage(img, 0, 0, W, H);
+    else return null;
+    return c;
+  }
+  function saveFrame() {
+    let c = null;
+    try { c = frameCanvas(); } catch (_) {}
+    if (!c) { toast("Кадра пока нет", "info"); return; }
+    const d = new Date(), name = `fallguard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+    c.toBlob(async (blob) => {
+      if (!blob) { toast("Не получилось сохранить кадр", "error"); return; }
+      const file = new File([blob], name, { type: "image/jpeg" });
+      try { if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia("(pointer: coarse)").matches) { await navigator.share({ files: [file], title: "Кадр FallGuard" }); return; } } catch (_) { return; }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("Кадр сохранён");
+      const vp = $("viewport"); vp.classList.remove("shot"); void vp.offsetWidth; vp.classList.add("shot");
+    }, "image/jpeg", 0.92);
+  }
+
   /* ---------- Тревога и пауза ---------- */
   let dismissedWarn = "";
   function ackAlarm() {
@@ -1730,6 +1777,7 @@
     else if (k === "z" || k === "я") toggleBedZoom();
     else if (k === "j" || k === "о") openJournal();
     else if (k === "s" || k === "ы") openSheet();
+    else if ((k === "c" || k === "с") && !native) saveFrame();
     else if (k === "p" || k === "з") pauseMenu($("btnPause"));
     else if ((k === "m" || k === "ь") && !native) toggleSound();
   });
@@ -2440,6 +2488,19 @@
     await poll();
   }
   let pollBusy = false;
+  // Связь с сервером: если ответы пропали, пульт не делает вид, что всё спокойно
+  let lastOk = Date.now(), serverLost = false;
+  function markOk() {
+    lastOk = Date.now();
+    if (serverLost) { serverLost = false; toast("Связь с сервером восстановлена"); haptic("success"); renderFast(); }
+  }
+  setInterval(() => {
+    if (!started || document.hidden || serverLost || !S) return;
+    if (Date.now() - lastOk > 10000) {
+      serverLost = true; haptic("warning"); renderFast();
+      if (soundOn && audioCtx && !native) beep([[0, 0.18, 523, 0.2], [0.22, 0.18, 440, 0.2], [0.44, 0.3, 349, 0.2]]);
+    }
+  }, 2000);
   async function poll() {
     if (!started || pollBusy) return;
     pollBusy = true;
@@ -2448,6 +2509,7 @@
       if (r.status === 401) { showLock(); return; }
       if (!r.ok) return;
       S = await r.json();
+      markOk();
       if (S.zones && !drawMode) { const hadBed = zones.bed_polygon && zones.bed_polygon.length >= 3; zones = S.zones; if (bedZoom && !hadBed) zoomToBed(false); }
       if (S.camera) {
         const before = camRot() + ":" + Boolean(cam.flip_h);
@@ -2499,6 +2561,7 @@
     setTimeout(() => { $("app").classList.remove("intro"); syncPills(); }, 1100);
     requestAnimationFrame(() => syncPills());
     $("btnOverlay").setAttribute("aria-pressed", String(showOverlay));
+    $("btnShot").hidden = Boolean(native);
     syncSoundBtn();
     startStream(true);
     connectTelemetry();
