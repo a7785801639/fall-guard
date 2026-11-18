@@ -717,7 +717,7 @@
     body.pip .main { width: 100% !important; height: 100%; }
     body.pip .player { height: 100%; border-radius: 0; box-shadow: none; animation: none !important; }
     body.pip .viewport { aspect-ratio: auto; height: 100vh; }
-    body.pip .rail, body.pip .timeline, body.pip .vp-btns, body.pip .draw-bar, body.pip .scrim, body.pip .menu, body.pip .toast, body.pip .tip, body.pip #chipVisit, body.pip .vp-alarm, body.pip .scrub-badge, body.pip .recent { display: none !important; }
+    body.pip .rail, body.pip .timeline, body.pip .vp-btns, body.pip .draw-bar, body.pip .scrim, body.pip .menu, body.pip .toast, body.pip .tip, body.pip #chipVisit, body.pip .vp-alarm, body.pip .scrub-badge, body.pip .recent, body.pip #chipStatus { display: none !important; }
     body.pip .pip-status { display: flex; }
     body.pip .vp-top { top: 6px; left: 6px; right: 6px; }
     body.pip .chip { height: 20px; font-size: 10.5px; padding: 0 7px; }
@@ -1566,7 +1566,7 @@
   let theaterOff = false; // свернули вручную — до следующего поворота
   function applyTheater() {
     const ot = screen.orientation && screen.orientation.type; // с клавиатурой окно низкое и в портрете — это не поворот
-    const on = landMq.matches && (!ot || ot.startsWith("landscape")) && !theaterOff && !drawMode && !document.fullscreenElement;
+    const on = landMq.matches && (!ot || ot.startsWith("landscape")) && !document.body.classList.contains("pip") && !theaterOff && !drawMode && !document.fullscreenElement;
     if (viewport.classList.contains("theater") === on) return;
     viewport.classList.toggle("theater", on);
     document.body.classList.toggle("theater", on);
@@ -2052,6 +2052,7 @@
   };
   window.fallguardPip = (on) => {
     document.body.classList.toggle("pip", Boolean(on));
+    applyTheater(); // в маленьком окне — свой компактный вид, без «кинотеатра»
     if (on) { hideMenu(); $("tip").hidden = true; }
     setTimeout(() => { layout(); syncPills(); }, 60);
   };
