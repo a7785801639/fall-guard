@@ -88,7 +88,8 @@ class MainActivity : Activity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         if (!handlePairLink(intent)) route()
-        handleShortcut(intent)
+        // Из «Недавних» и после пересоздания система отдаёт исходный intent ярлыка — не повторяем действие
+        if (savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) handleShortcut(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -97,16 +98,12 @@ class MainActivity : Activity() {
         if (!handlePairLink(intent)) handleShortcut(intent)
     }
 
-    /** Быстрые действия с иконки приложения (долгое нажатие). */
+    /** Журнал с иконки приложения (долгое нажатие); остальные ярлыки обрабатывает ShortcutActivity. */
     private fun handleShortcut(intent: Intent?) {
         val what = intent?.getStringExtra(EXTRA_SHORTCUT) ?: return
         intent.removeExtra(EXTRA_SHORTCUT)
         if (!prefs.paired) return
-        when (what) {
-            "pause" -> AlertService.start(this, AlertService.ACTION_NEARBY)
-            "journal" -> runInPanel("openJournal()")
-            "settings" -> startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        if (what == "journal") runInPanel("openJournal()")
     }
 
     /** Выполнить в пульте сразу, если он загружен, иначе — как только загрузится. */

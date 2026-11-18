@@ -84,8 +84,8 @@ class AlertService : Service() {
             ACTION_NEARBY -> {
                 // «Я рядом» из уведомления о событии или с иконки приложения: пауза на 15 минут
                 val id = intent.getStringExtra(EXTRA_ID) ?: ""
-                if (id.isNotEmpty()) nm.cancel(eventNotifId(id))
                 post("/api/pause", JSONObject().put("seconds", 900)) { ok ->
+                    if (ok && id.isNotEmpty()) nm.cancel(eventNotifId(id))
                     val msg = if (ok) "Пауза 15 минут — вы рядом" else "Нет связи с сервером — пауза не включена"
                     ui.post { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show() }
                 }
@@ -216,9 +216,11 @@ class AlertService : Service() {
                 val a = byId[act.alert.id] ?: continue
                 // У каждого события своё уведомление: поздний кадр не перезапишет чужое
                 val nid = eventNotifId(act.alert.id)
-                notifyEvent(nid, a.optString("title"), a.optString("description"), alertId = act.alert.id)
+                // «Я рядом» — только когда речь о самой бабушке, не о камере или связи
+                val nearbyId = if (act.kind in NEARBY_KINDS) act.alert.id else ""
+                notifyEvent(nid, a.optString("title"), a.optString("description"), alertId = nearbyId)
                 if (act.sound) Sounds.playNotify(this, act.kind)
-                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"), act.alert.id)
+                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"), nearbyId)
             }
             is Signals.Action.Ring -> {
                 val a = byId[act.alert.id] ?: continue
@@ -458,6 +460,7 @@ class AlertService : Service() {
         const val ACTION_FALSE = "app.fallguard.FALSE"
         const val ACTION_SILENCE = "app.fallguard.SILENCE"
         const val ACTION_NEARBY = "app.fallguard.NEARBY"
+        private val NEARBY_KINDS = setOf(Signals.Kind.STANDUP, Signals.Kind.SITTING, Signals.Kind.HELP)
         const val ACTION_TEST = "app.fallguard.TEST"
         const val ACTION_TEST_SIGNAL = "app.fallguard.TEST_SIGNAL"
         const val EXTRA_ID = "alert_id"

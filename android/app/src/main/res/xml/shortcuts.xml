@@ -2,19 +2,19 @@
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut android:shortcutId="pause" android:enabled="true" android:icon="@drawable/sc_pause"
         android:shortcutShortLabel="@string/sc_pause" android:shortcutLongLabel="@string/sc_pause_long">
-        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.MainActivity">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.ShortcutActivity">
             <extra android:name="shortcut" android:value="pause" />
         </intent>
     </shortcut>
     <shortcut android:shortcutId="journal" android:enabled="true" android:icon="@drawable/sc_journal"
         android:shortcutShortLabel="@string/sc_journal" android:shortcutLongLabel="@string/sc_journal">
-        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.MainActivity">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.ShortcutActivity">
             <extra android:name="shortcut" android:value="journal" />
         </intent>
     </shortcut>
     <shortcut android:shortcutId="settings" android:enabled="true" android:icon="@drawable/sc_settings"
         android:shortcutShortLabel="@string/sc_settings" android:shortcutLongLabel="@string/sc_settings_long">
-        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.MainActivity">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="app.fallguard" android:targetClass="app.fallguard.ShortcutActivity">
             <extra android:name="shortcut" android:value="settings" />
         </intent>
     </shortcut>
