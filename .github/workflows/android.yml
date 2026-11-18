@@ -18,12 +18,12 @@ jobs:
     env:
       HAS_SIGNING_KEY: ${{ secrets.FG_KEYSTORE_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       # Постоянный ключ подписи из секретов: тогда новые версии ставятся поверх старых.
       # Секреты: FG_KEYSTORE_BASE64 (base64 от .jks), FG_KEYSTORE_PASSWORD, FG_KEY_ALIAS.
@@ -45,7 +45,7 @@ jobs:
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "FallGuard-1.${{ github.run_number }}.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: fallguard-apk
           path: android/FallGuard-*.apk
