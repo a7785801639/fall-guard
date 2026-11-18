@@ -9,6 +9,7 @@ import threading
 import time
 from typing import Any, Sequence
 
+from . import geometry as _geom_mod
 from .geometry import (
     PoseObservation,
     are_legs_hanging_outside_bed,
@@ -21,6 +22,135 @@ from .geometry import (
 from .homography import FloorHomography
 from .patient_id import Role, TrackIdentity
 from .zones import ZonesConfig
+
+
+class _FallbackPerspectiveScale:
+    """Локальный совместимый расчёт линейного поля масштаба S(v), если PerspectiveScaleField недоступен."""
+
+    def __init__(self, u_ref: float, v_ref: float, kp_slope: float) -> None:
+        self._u_ref = u_ref
+        self._v_ref = v_ref
+        self._kp = kp_slope
+
+    @classmethod
+    def from_zones(cls, zones: ZonesConfig | None) -> _FallbackPerspectiveScale:
+        if zones is not None and zones.has_bed and len(zones.bed_polygon) >= 3:
+            poly = zones.bed_polygon
+            xs = [float(p[0]) for p in poly]
+            ys = [float(p[1]) for p in poly]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            du_bed = max(0.05, max_x - min_x)
+            dv_bed = max(0.05, max_y - min_y)
+            l_ref = 1.95 if du_bed >= 0.95 * dv_bed else 1.00
+
+            spans: list[tuple[float, float]] = []
+            n_poly = len(poly)
+            for step_i in range(18):
+                vy = min_y + dv_bed * (0.06 + 0.84 * (step_i / 17.0))
+                inter_x: list[float] = []
+                for idx in range(n_poly):
+                    x1, y1 = float(poly[idx][0]), float(poly[idx][1])
+                    x2, y2 = float(poly[(idx + 1) % n_poly][0]), float(poly[(idx + 1) % n_poly][1])
+                    if (y1 <= vy <= y2) or (y2 <= vy <= y1):
+                        if abs(y2 - y1) > 1e-6:
+                            tx = x1 + (vy - y1) * (x2 - x1) / (y2 - y1)
+                            inter_x.append(tx)
+                if len(inter_x) >= 2:
+                    s_v = max(inter_x) - min(inter_x)
+                    if s_v >= 0.04:
+                        spans.append((vy, s_v))
+            if spans:
+                v_far, s_far = spans[0]
+                v_wide, s_wide = max(spans, key=lambda it: it[1])
+                u_wide = s_wide / l_ref
+                if (v_wide - v_far) >= 0.03:
+                    raw_kp = ((s_wide - s_far) / l_ref) / (v_wide - v_far)
+                    kp = max(0.08, min(0.32, raw_kp))
+                else:
+                    kp = 0.16
+                return cls(u_ref=u_wide, v_ref=v_wide, kp_slope=kp)
+        return cls(u_ref=0.24, v_ref=0.50, kp_slope=0.16)
+
+    def _u_1m(self, v: float) -> float:
+        vc = max(0.0, min(1.0, float(v)))
+        return max(0.14, min(0.38, self._u_ref + self._kp * (vc - self._v_ref)))
+
+    def dist_plane_cm(self, p1: tuple[float, float], p2: tuple[float, float]) -> float:
+        vm = 0.5 * (float(p1[1]) + float(p2[1]))
+        u1m = self._u_1m(vm)
+        v1m_plane = u1m * (16.0 / 9.0) * 0.58
+        du = (float(p1[0]) - float(p2[0])) / u1m
+        dv = (float(p1[1]) - float(p2[1])) / v1m_plane
+        return 100.0 * math.hypot(du, dv)
+
+    def box_plane_metrics_cm(
+        self, bbox: tuple[float, float, float, float]
+    ) -> tuple[float, float, float, float]:
+        vc = 0.5 * (float(bbox[1]) + float(bbox[3]))
+        u1m = self._u_1m(vc)
+        v1m_plane = u1m * (16.0 / 9.0) * 0.58
+        w_cm = 100.0 * max(0.0, float(bbox[2]) - float(bbox[0])) / u1m
+        h_cm = 100.0 * max(0.0, float(bbox[3]) - float(bbox[1])) / v1m_plane
+        diag_cm = math.hypot(w_cm, h_cm)
+        return w_cm, h_cm, diag_cm, w_cm * h_cm
+
+    def box_vert_height_cm(self, bbox: tuple[float, float, float, float]) -> float:
+        vc = 0.5 * (float(bbox[1]) + float(bbox[3]))
+        u1m = self._u_1m(vc)
+        v1m_vert = u1m * (16.0 / 9.0) * 0.80
+        return 100.0 * max(0.0, float(bbox[3]) - float(bbox[1])) / v1m_vert
+
+
+def _get_perspective_scale(zones: ZonesConfig | None) -> Any:
+    psf_cls = getattr(_geom_mod, "PerspectiveScaleField", None)
+    if psf_cls is not None and hasattr(psf_cls, "from_zones"):
+        bed_poly = zones.bed_polygon if (zones is not None and zones.has_bed) else None
+        try:
+            return psf_cls.from_zones(zones, bed_poly)
+        except TypeError:
+            return psf_cls.from_zones(zones)
+    return _FallbackPerspectiveScale.from_zones(zones)
+
+
+def _sanitize_bed_pose_sm(
+    obs: PoseObservation,
+    bed_polygon: Sequence[Sequence[float]],
+    other_observations: Sequence[PoseObservation] = (),
+    zones: ZonesConfig | None = None,
+) -> PoseObservation:
+    try:
+        return sanitize_collapsed_bed_keypoints(  # type: ignore[call-arg]
+            obs,
+            bed_polygon,
+            other_observations=other_observations,
+            zones=zones,
+        )
+    except TypeError:
+        return sanitize_collapsed_bed_keypoints(obs, bed_polygon)
+
+
+def _has_adult_limb_cm(obs: PoseObservation, sf: Any, min_cm: float = 22.0) -> bool:
+    chains = (
+        (5, 7, 9),
+        (6, 8, 10),
+        (11, 13, 15),
+        (12, 14, 16),
+    )
+    for a_idx, b_idx, c_idx in chains:
+        pa = obs.kp(a_idx, 0.30)
+        pb = obs.kp(b_idx, 0.30)
+        pc = obs.kp(c_idx, 0.30)
+        seg = 0.0
+        if pa is not None and pb is not None:
+            seg += float(sf.dist_plane_cm(pa, pb))
+        if pb is not None and pc is not None:
+            seg += float(sf.dist_plane_cm(pb, pc))
+        if seg == 0.0 and pa is not None and pc is not None:
+            seg = float(sf.dist_plane_cm(pa, pc))
+        if seg >= min_cm:
+            return True
+    return False
 
 
 class PatientState(str, enum.Enum):
@@ -66,6 +196,7 @@ class BedBaseline:
     bbox_h: float = 0.0
     bed_signature: tuple[float, float] = (0.0, 0.0)
     recalib_accum_sec: float = 0.0
+    hip_calibrated: bool = False
 
     @property
     def calibrated(self) -> bool:
@@ -79,6 +210,7 @@ class BedBaseline:
         self.torso_len_2d = 0.0
         self.bbox_h = 0.0
         self.recalib_accum_sec = 0.0
+        self.hip_calibrated = False
 
     def to_dict(self) -> dict[str, float | int | bool]:
         return {
@@ -619,10 +751,20 @@ class FallStateMachine:
         self._baseline.bed_signature = bed_sig
 
         upper = obs.upper_body_point
-        mh = obs.mid_hip or obs.body_center
+        raw_mh = obs.mid_hip
+        ms = obs.mid_shoulder
+        mh = raw_mh or obs.body_center
         rise = obs.torso_vertical_rise()
         t_len = obs.torso_length_2d() or abs(rise)
         angle = obs.torso_angle_from_vertical_deg()
+
+        sf = _get_perspective_scale(zones)
+        torso_cm = (
+            float(sf.dist_plane_cm(ms, raw_mh))
+            if (ms is not None and raw_mh is not None)
+            else 0.0
+        )
+        valid_hip_torso = raw_mh is not None and (ms is None or torso_cm >= 30.5)
 
         # Не калибруемся на человеке, который с первого же кадра сидит высоко вертикально
         if not self._baseline.calibrated:
@@ -634,12 +776,32 @@ class FallStateMachine:
                     return
             alpha = 1.0 if self._baseline.samples == 0 else (1.0 / float(self._baseline.samples + 1))
             self._baseline.shoulder_y += alpha * (upper[1] - self._baseline.shoulder_y)
-            self._baseline.hip_y += alpha * (mh[1] - self._baseline.hip_y)
-            self._baseline.torso_rise += alpha * (rise - self._baseline.torso_rise)
-            self._baseline.torso_len_2d += alpha * (t_len - self._baseline.torso_len_2d)
             self._baseline.bbox_h += alpha * (obs.bbox_height - self._baseline.bbox_h)
+            if valid_hip_torso and raw_mh is not None:
+                if not self._baseline.hip_calibrated:
+                    self._baseline.hip_y = raw_mh[1]
+                    self._baseline.torso_rise = rise
+                    self._baseline.torso_len_2d = t_len
+                    self._baseline.hip_calibrated = True
+                else:
+                    self._baseline.hip_y += alpha * (raw_mh[1] - self._baseline.hip_y)
+                    self._baseline.torso_rise += alpha * (rise - self._baseline.torso_rise)
+                    self._baseline.torso_len_2d += alpha * (t_len - self._baseline.torso_len_2d)
             self._baseline.samples += 1
             return
+
+        # При укрытом или сжатом тазе (mid_hip is None либо L_torso_cm < 30.5 см) обновляем только shoulder_y!
+        if not valid_hip_torso or raw_mh is None:
+            self._baseline.recalib_accum_sec = 0.0
+            if abs(upper[1] - self._baseline.shoulder_y) <= 0.045:
+                self._baseline.shoulder_y += 0.05 * (upper[1] - self._baseline.shoulder_y)
+            return
+
+        if not self._baseline.hip_calibrated:
+            self._baseline.hip_y = raw_mh[1]
+            self._baseline.torso_rise = rise
+            self._baseline.torso_len_2d = t_len
+            self._baseline.hip_calibrated = True
 
         # Когда эталон уже откалиброван: обновляем медленным EMA только пока человек лежит близко к уровню сна,
         # чтобы эталон НЕ «уплывал» за человеком в момент медленной посадки или медленного сползания!
@@ -651,7 +813,7 @@ class FallStateMachine:
             self._baseline.recalib_accum_sec = 0.0
             a_slow = 0.05
             self._baseline.shoulder_y += a_slow * (upper[1] - self._baseline.shoulder_y)
-            self._baseline.hip_y += a_slow * (mh[1] - self._baseline.hip_y)
+            self._baseline.hip_y += a_slow * (raw_mh[1] - self._baseline.hip_y)
             self._baseline.torso_rise += a_slow * (rise - self._baseline.torso_rise)
             self._baseline.torso_len_2d += a_slow * (t_len - self._baseline.torso_len_2d)
             self._baseline.bbox_h += a_slow * (obs.bbox_height - self._baseline.bbox_h)
@@ -660,7 +822,7 @@ class FallStateMachine:
             self._baseline.recalib_accum_sec += dt
             if self._baseline.recalib_accum_sec >= 25.0:
                 self._baseline.shoulder_y = upper[1]
-                self._baseline.hip_y = mh[1]
+                self._baseline.hip_y = raw_mh[1]
                 self._baseline.torso_rise = rise
                 self._baseline.torso_len_2d = t_len
                 self._baseline.bbox_h = obs.bbox_height
@@ -674,20 +836,40 @@ class FallStateMachine:
         zones: ZonesConfig,
         now: float,
     ) -> bool:
-        """Явно вертикально стоящая поза (прямой корпус и узкий силуэт либо 3D-рост >= 70 см без падения)."""
+        """Явно вертикально стоящая поза (включая наклон вперёд стоя на прямых ногах, кейс 130059)."""
         upper = obs.upper_body_point
         mh = obs.mid_hip or obs.body_center
         angle = obs.torso_angle_from_vertical_deg()
         m3d = FloorHomography.from_zones(
             zones, bed_polygon=zones.bed_polygon if zones.has_bed else None
         ).measure_pose(obs, zones.bed_polygon if zones.has_bed else None)
+        sf = _get_perspective_scale(zones)
 
         has_standing_legs = False
+        has_tall_support_leg = False
         for idx in (15, 16):
             ak = obs.kp(idx, 0.35)
-            if ak is not None and (ak[1] - mh[1]) >= 0.10:
-                has_standing_legs = True
-                break
+            if ak is not None:
+                dy_leg = ak[1] - mh[1]
+                if dy_leg >= 0.10:
+                    has_standing_legs = True
+                leg_v_cm = (
+                    float(sf.box_vert_height_cm((mh[0], mh[1], ak[0], ak[1])))
+                    if dy_leg > 0.0
+                    else 0.0
+                )
+                if dy_leg >= 0.16 or leg_v_cm >= 46.0:
+                    has_tall_support_leg = True
+        if (
+            angle is not None
+            and angle < 72.0
+            and has_tall_support_leg
+            and mh[1] <= 0.72
+            and obs.bbox_height >= 0.40
+            and obs.aspect_ratio_wh < 0.68
+            and not self._has_rapid_drop(now)
+        ):
+            return True
         return bool(
             angle is not None
             and angle < 30.0
@@ -807,7 +989,12 @@ class FallStateMachine:
             max_limb_y = max((pt[1] for pt in obs.lower_limbs), default=obs.bbox_norm[3])
             spilled_onto_floor = obs.bbox_norm[3] >= (bed_max_y + 0.055) or max_limb_y >= (bed_max_y + 0.055)
             dropped_below_mattress = (
-                (self._baseline.calibrated and (upper[1] - self._baseline.shoulder_y) >= 0.125 and (mh[1] - self._baseline.hip_y) >= 0.09)
+                (
+                    self._baseline.calibrated
+                    and self._baseline.hip_calibrated
+                    and (upper[1] - self._baseline.shoulder_y) >= 0.125
+                    and (mh[1] - self._baseline.hip_y) >= 0.09
+                )
                 or (
                     self._assisted_seated_latched
                     and (upper[1] - self._assisted_seated_upper_y) >= 0.11
@@ -859,6 +1046,7 @@ class FallStateMachine:
 
         if (
             self._baseline.calibrated
+            and self._baseline.hip_calibrated
             and (upper[1] - self._baseline.shoulder_y) >= 0.12
             and (mh[1] - self._baseline.hip_y) >= 0.10
             and obs.bbox_height <= 0.45
@@ -914,11 +1102,16 @@ class FallStateMachine:
 
     @staticmethod
     def _is_lying_on_floor(obs: PoseObservation, zones: ZonesConfig) -> bool:
-        """Строго горизонтальная низкая поза вне матраса (лежит на полу), без привязки к роли."""
+        """
+        Метрически и анатомически верифицированная низкая поза на полу вне матраса:
+        - пропускает горизонтальное падение, позу эмбриона и ракурс вдоль оси камеры (AR >= 0.68 при bh <= 0.34);
+        - отсекает мелкие предметы (кошка, тапки, подушка: < 52×26 см или Area < 1650 см²) и ходунки без анатомии.
+        """
         if obs.conf < 0.5 or obs.bbox_height > 0.40 or obs.bbox_height < 0.05:
             return False
         if zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones):
             return False
+        bed_max_y = 0.0
         if zones.has_bed:
             _, bed_max_y = polygon_y_bounds(zones.bed_polygon)
             anchor = obs.mid_hip or obs.body_center
@@ -928,10 +1121,41 @@ class FallStateMachine:
                 and polygon_distance_norm(anchor, zones.bed_polygon) >= 0.0
             ):
                 return False
+
+        sf = _get_perspective_scale(zones)
+        w_cm, h_pl_cm, _, area_cm2 = sf.box_plane_metrics_cm(obs.bbox_norm)
+        border_k = 0.78 if obs.is_near_border(0.02) else 1.0
+        l_major = max(float(w_cm), float(h_pl_cm))
+        l_minor = min(float(w_cm), float(h_pl_cm))
+        if (
+            l_major < 52.0 * border_k
+            or l_minor < 26.0 * border_k
+            or float(area_cm2) < 1650.0 * border_k
+        ):
+            return False
+
+        ms = obs.mid_shoulder
+        mh = obs.mid_hip
+        has_valid_anatomy = obs.has_confident_head(0.35) or (
+            ms is not None
+            and mh is not None
+            and float(sf.dist_plane_cm(ms, mh)) >= 28.0 * border_k
+            and _has_adult_limb_cm(obs, sf, 22.0 * border_k)
+        )
+        if not has_valid_anatomy:
+            return False
+
         angle = obs.torso_angle_from_vertical_deg()
-        if angle is not None:
-            return angle >= 62.0 and obs.aspect_ratio_wh >= 0.95
-        return obs.aspect_ratio_wh >= 1.45
+        ar = obs.aspect_ratio_wh
+        if angle is not None and angle >= 62.0 and ar >= 0.95:
+            return True
+        if angle is None and ar >= 1.15:
+            return True
+        if ar >= 0.68 and obs.bbox_height <= 0.34:
+            low_floor_band = (not zones.has_bed) or (obs.bbox_norm[1] >= (bed_max_y - 0.04))
+            if low_floor_band and (angle is None or angle >= 42.0 or obs.bbox_height <= 0.28):
+                return True
+        return False
 
     def _check_person_down(
         self,
@@ -1035,7 +1259,16 @@ class FallStateMachine:
             if ident is None:
                 continue
             if ident.role == Role.PATIENT:
-                pobs = sanitize_collapsed_bed_keypoints(obs, zones.bed_polygon) if zones.has_bed else obs
+                pobs = (
+                    _sanitize_bed_pose_sm(
+                        obs,
+                        zones.bed_polygon,
+                        other_observations=[x for x in observations if x.track_id != obs.track_id],
+                        zones=zones,
+                    )
+                    if zones.has_bed
+                    else obs
+                )
                 fallen, reason = self._check_fallen_or_slumped(pobs, zones, now)
                 if fallen:
                     break
@@ -1161,7 +1394,12 @@ class FallStateMachine:
                 ident = identities.get(obs.track_id)
                 if ident is not None and ident.role == Role.PATIENT:
                     patient_obs = (
-                        sanitize_collapsed_bed_keypoints(obs, zones.bed_polygon)
+                        _sanitize_bed_pose_sm(
+                            obs,
+                            zones.bed_polygon,
+                            other_observations=[x for x in observations if x.track_id != obs.track_id],
+                            zones=zones,
+                        )
                         if zones.has_bed
                         else obs
                     )
@@ -1245,6 +1483,9 @@ class FallStateMachine:
                             None,
                         )
 
+                if self._state == PatientState.CAREGIVER_ASSIST:
+                    self._state = PatientState.IDLE
+                    self._status_reason = "ожидание в кадре"
                 if self._state in (PatientState.MISSING, PatientState.LEFT_BED):
                     return self._check_prolonged_absence(now, None)
                 return None
@@ -1255,9 +1496,14 @@ class FallStateMachine:
             self._update_micro_movement(patient_obs, now)
 
             upper_pt = patient_obs.upper_body_point
-            hip_pt = patient_obs.mid_hip or patient_obs.body_center
+            pat_on_bed_step = zones.has_bed and is_person_on_bed(
+                patient_obs, zones.bed_polygon, zones=zones
+            )
             self._upper_y_history.append((now, upper_pt[1]))
-            self._hip_y_history.append((now, hip_pt[1]))
+            if patient_obs.mid_hip is not None:
+                self._hip_y_history.append((now, patient_obs.mid_hip[1]))
+            elif not pat_on_bed_step:
+                self._hip_y_history.append((now, patient_obs.body_center[1]))
 
             # Приоритет №1: Если рядом помощник (Caregiver Co-Presence) — уход под присмотром, подавляем тревоги
             if caregiver_nearby and self._suppress_with_caregiver:

@@ -528,16 +528,53 @@ class PoseTracker:
         self._next_anon_id += 1
         return allocated
 
+    @staticmethod
+    def _clip_bed_bbox_by_occluders(
+        box_norm: tuple[float, float, float, float],
+        obs: PoseObservation,
+        occluders: Sequence[PoseObservation],
+    ) -> tuple[float, float, float, float]:
+        """
+        Поджимает видимую спальную рамку со стороны перекрывающего второго человека (IoU >= 0.10),
+        не затрагивая внутренний долгосрочный эталон _bed_envelope_bbox.
+        """
+        if not occluders:
+            return box_norm
+        x1, y1, x2, y2 = box_norm
+        if (x2 - x1) <= 0.145:
+            return box_norm
+        anchor = obs.head_center or obs.mid_shoulder
+        if anchor is None:
+            return box_norm
+        vis_kps = [obs.kp(k, 0.30) for k in range(17)]
+        vis_xs = [pt[0] for pt in vis_kps if pt is not None]
+        min_kx = min(vis_xs) if vis_xs else anchor[0]
+        max_kx = max(vis_xs) if vis_xs else anchor[0]
+
+        for occ in occluders:
+            if occ.track_id == obs.track_id:
+                continue
+            if bbox_iou((x1, y1, x2, y2), occ.bbox_norm) < 0.10:
+                continue
+            occ_cx = 0.5 * (occ.bbox_norm[0] + occ.bbox_norm[2])
+            if anchor[0] > occ_cx and min_kx >= (occ_cx - 0.025) and (x2 - x1) > 0.14:
+                x1 = min(x2 - 0.14, max(x1, occ.bbox_norm[2] - 0.015))
+            elif anchor[0] < occ_cx and max_kx <= (occ_cx + 0.025) and (x2 - x1) > 0.14:
+                x2 = max(x1 + 0.14, min(x2, occ.bbox_norm[0] + 0.015))
+        return (x1, y1, x2, y2)
+
     def _stabilize_bed_sleeper_bbox(
         self,
         obs: PoseObservation,
         bed_polygon: Sequence[Sequence[float]],
         now: float,
+        occluders: Sequence[PoseObservation] = (),
     ) -> PoseObservation:
         """
         Удерживает полноразмерную спокойную рамку спящей в кровати бабушки (_bed_envelope_bbox):
         когда одеяло закрывает корпус и YOLO сжимает бокс до одной головы/воротника (bw < 0.16 или bh < 0.11
-        или площадь < 52% эталона сна), рамка монолитно держит контур спящего человека без прыжков.
+        или площадь < 52% эталона сна), рамка монолитно держит контур спящего человека без прыжков,
+        но аккуратно поджимается по границе перекрывающего родственника (occluders).
         """
         if len(bed_polygon) < 3 or not self._is_reclining_in_bed(obs, bed_polygon):
             return obs
@@ -553,8 +590,19 @@ class PoseTracker:
         bh = obs.bbox_height
         area = bw * bh
         stale_env = self._bed_envelope_bbox is None or (now - self._bed_envelope_ts) > 1800.0
+        any_box_overlap = any(
+            occ.track_id != obs.track_id
+            and (
+                bbox_iou(obs.bbox_norm, occ.bbox_norm) >= 0.08
+                or (
+                    self._bed_envelope_bbox is not None
+                    and bbox_iou(self._bed_envelope_bbox, occ.bbox_norm) >= 0.10
+                )
+            )
+            for occ in occluders
+        )
 
-        if bw >= 0.16 and bh >= 0.11:
+        if bw >= 0.16 and bh >= 0.11 and (stale_env or not any_box_overlap):
             if stale_env:
                 self._bed_envelope_bbox = obs.bbox_norm
             else:
@@ -593,6 +641,22 @@ class PoseTracker:
         if env is None:
             return obs
 
+        if any_box_overlap:
+            self._bed_envelope_ts = now
+            vis_box = self._clip_bed_bbox_by_occluders(env, obs, occluders)
+            return PoseObservation(
+                track_id=obs.track_id,
+                bbox_norm=vis_box,
+                conf=obs.conf,
+                keypoints_norm=obs.keypoints_norm,
+                liveness_verified=obs.liveness_verified,
+                spawn_center_hint=obs.spawn_center_hint,
+                confirmed_frames=obs.confirmed_frames,
+                outside_bed_disp=obs.outside_bed_disp,
+                is_still=obs.is_still,
+                _kp_stabilized=obs._kp_stabilized,
+            )
+
         env_area = max(1e-6, (env[2] - env[0]) * (env[3] - env[1]))
         is_shrunk = bw < 0.16 or bh < 0.11 or area < (0.52 * env_area)
         if is_shrunk:
@@ -611,9 +675,10 @@ class PoseTracker:
             )
             self._bed_envelope_bbox = stable_box
             self._bed_envelope_ts = now
+            vis_box = self._clip_bed_bbox_by_occluders(stable_box, obs, occluders)
             return PoseObservation(
                 track_id=obs.track_id,
-                bbox_norm=stable_box,
+                bbox_norm=vis_box,
                 conf=obs.conf,
                 keypoints_norm=obs.keypoints_norm,
                 liveness_verified=obs.liveness_verified,
@@ -633,9 +698,10 @@ class PoseTracker:
         )
         self._bed_envelope_bbox = steady_box
         self._bed_envelope_ts = now
+        vis_box = self._clip_bed_bbox_by_occluders(steady_box, obs, occluders)
         return PoseObservation(
             track_id=obs.track_id,
-            bbox_norm=steady_box,
+            bbox_norm=vis_box,
             conf=obs.conf,
             keypoints_norm=obs.keypoints_norm,
             liveness_verified=obs.liveness_verified,
@@ -724,6 +790,8 @@ class PoseTracker:
                     keypoints_norm=tuple(pts_list),
                 ),
                 zones.bed_polygon,
+                other_observations=existing_obs,
+                zones=zones,
             )
             hc = cand.head_center
             ms = cand.mid_shoulder
@@ -1047,9 +1115,18 @@ class PoseTracker:
                         conf=raw_c,
                         keypoints_norm=tuple(pts_list),
                     )
-                    if has_bed and zones is not None:
-                        raw_obs = sanitize_collapsed_bed_keypoints(raw_obs, zones.bed_polygon)
                     observations.append(raw_obs)
+
+        if has_bed and zones is not None and observations:
+            observations = [
+                sanitize_collapsed_bed_keypoints(
+                    o,
+                    zones.bed_polygon,
+                    other_observations=observations,
+                    zones=zones,
+                )
+                for o in observations
+            ]
 
         observations = filter_valid_poses(
             observations,
@@ -1074,14 +1151,15 @@ class PoseTracker:
                     else max(reclining_tracks, key=lambda o: o.conf)
                 )
                 raw_best_box = best_bed.bbox_norm
-                other_ids = {
-                    o.track_id
+                bed_occluders = [
+                    o
                     for o in observations
                     if o is not best_bed
                     and not self._is_bed_sleeper_duplicate(
                         o, raw_best_box, raw_best_box, zones.bed_polygon
                     )
-                }
+                ]
+                other_ids = {o.track_id for o in bed_occluders}
                 bed_cx = (raw_best_box[0] + raw_best_box[2]) * 0.5
                 bed_cy = (raw_best_box[1] + raw_best_box[3]) * 0.5
                 can_pin_bed_id = (
@@ -1103,33 +1181,41 @@ class PoseTracker:
                     if (can_pin_bed_id and best_bed.track_id != self._last_bed_track_id)
                     else best_bed.track_id
                 )
+                sanitized_best_bed = sanitize_collapsed_bed_keypoints(
+                    best_bed,
+                    zones.bed_polygon,
+                    other_observations=bed_occluders,
+                    zones=zones,
+                )
                 stabilized_bed = self._stabilize_bed_sleeper_bbox(
                     PoseObservation(
                         track_id=target_bed_tid,
                         bbox_norm=raw_best_box,
-                        conf=best_bed.conf,
-                        keypoints_norm=best_bed.keypoints_norm,
-                        liveness_verified=best_bed.liveness_verified,
-                        spawn_center_hint=best_bed.spawn_center_hint,
-                        confirmed_frames=best_bed.confirmed_frames,
-                        outside_bed_disp=best_bed.outside_bed_disp,
+                        conf=sanitized_best_bed.conf,
+                        keypoints_norm=sanitized_best_bed.keypoints_norm,
+                        liveness_verified=sanitized_best_bed.liveness_verified,
+                        spawn_center_hint=sanitized_best_bed.spawn_center_hint,
+                        confirmed_frames=sanitized_best_bed.confirmed_frames,
+                        outside_bed_disp=sanitized_best_bed.outside_bed_disp,
                     ),
                     zones.bed_polygon,
                     now,
+                    occluders=bed_occluders,
                 )
+                env_ref_box = self._bed_envelope_bbox or stabilized_bed.bbox_norm
                 deduped_obs: list[PoseObservation] = []
                 for o in observations:
                     if o is best_bed:
                         deduped_obs.append(stabilized_bed)
                     elif not self._is_bed_sleeper_duplicate(
-                        o, stabilized_bed.bbox_norm, raw_best_box, zones.bed_polygon
+                        o, env_ref_box, raw_best_box, zones.bed_polygon
                     ):
                         deduped_obs.append(o)
                 observations = deduped_obs
                 best_bed = stabilized_bed
 
                 self._last_bed_track_id = best_bed.track_id
-                self._last_bed_bbox = best_bed.bbox_norm
+                self._last_bed_bbox = self._bed_envelope_bbox or best_bed.bbox_norm
                 self._last_bed_seen_ts = now
                 self._cached_roi_obs = best_bed
                 self._cached_roi_ts = now
@@ -1166,11 +1252,16 @@ class PoseTracker:
                         candidate_track_id=roi_tid,
                     )
                     if roi_cand is not None:
-                        roi_cand = self._stabilize_bed_sleeper_bbox(roi_cand, zones.bed_polygon, now)
+                        roi_cand = self._stabilize_bed_sleeper_bbox(
+                            roi_cand,
+                            zones.bed_polygon,
+                            now,
+                            occluders=observations,
+                        )
                         self._cached_roi_obs = roi_cand
                         self._cached_roi_ts = now
                         self._last_bed_track_id = roi_cand.track_id
-                        self._last_bed_bbox = roi_cand.bbox_norm
+                        self._last_bed_bbox = self._bed_envelope_bbox or roi_cand.bbox_norm
                         self._last_bed_seen_ts = now
                         observations.append(roi_cand)
                     elif (
@@ -1285,6 +1376,16 @@ class PoseTracker:
                 zones=zones,
                 now=now,
             )
+            if has_bed and zones is not None and observations:
+                observations = [
+                    sanitize_collapsed_bed_keypoints(
+                        o,
+                        zones.bed_polygon,
+                        other_observations=observations,
+                        zones=zones,
+                    )
+                    for o in observations
+                ]
         return observations
 
 
@@ -1389,7 +1490,13 @@ def render_annotated_frame(
 
     # 2. Отрисовка подтверждённых живых людей
     for obs in observations:
-        if ignore_polys and is_pose_in_ignore_zones(obs, ignore_polys, door_polygon=door_poly_for_ignore):
+        if ignore_polys and is_pose_in_ignore_zones(
+            obs,
+            ignore_polys,
+            door_polygon=door_poly_for_ignore,
+            bed_polygon=zones.bed_polygon if zones.has_bed else None,
+            zones=zones,
+        ):
             continue
         ident = identities.get(obs.track_id)
         if ident is None:
@@ -1433,9 +1540,19 @@ def render_annotated_frame(
         else:
             skeleton_span = 0.0
 
-        hide_skeleton = skeleton_span < 0.11 or (
-            role == Role.PATIENT and state == PatientState.IN_BED and obs.mid_hip is None
+        calm_bed_no_hip = (
+            role == Role.PATIENT
+            and state
+            in (
+                PatientState.IN_BED,
+                PatientState.CAREGIVER_ASSIST,
+                PatientState.PAUSED,
+                PatientState.IDLE,
+            )
+            and obs.mid_hip is None
+            and (not zones.has_bed or is_person_on_bed(obs, zones.bed_polygon, zones=zones))
         )
+        hide_skeleton = skeleton_span < 0.11 or calm_bed_no_hip
         if not hide_skeleton:
             for a, b in SKELETON_EDGES:
                 pa = visible_pts[a] if a < len(visible_pts) else None

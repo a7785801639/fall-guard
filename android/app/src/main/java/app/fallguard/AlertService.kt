@@ -183,7 +183,11 @@ class AlertService : Service() {
             )
             ui.post { startAlarm(info) }
         }
-        val mode = if (j.optString("mode") == "falls") "только падения" else "все события"
+        val mode = when (j.optString("mode")) {
+            "falls" -> "только падения"
+            "standup" -> "только вставание"
+            else -> "все события"
+        }
         val enabled = j.optBoolean("enabled", true)
         val state = j.optString("state")
         val (title, _) = Glance.describe(state, alarmActive)

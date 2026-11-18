@@ -830,9 +830,16 @@ def test_filter_ignored_observations_preserves_door_crossing_on_real_zones() -> 
 def _build_fmp4_sample(width: int = 320, height: int = 180) -> bytes:
     import shutil
     import subprocess
+    import sys
     from app.capture import CREATE_NO_WINDOW
 
     ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin is None:
+        venv_ffmpeg = Path(sys.executable).resolve().parent / (
+            "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+        )
+        if venv_ffmpeg.is_file():
+            ffmpeg_bin = str(venv_ffmpeg)
     assert ffmpeg_bin is not None, "Для генерации тестового fMP4 требуется ffmpeg"
     cmd = [
         ffmpeg_bin,
@@ -2299,6 +2306,440 @@ def test_wave9_telegram_miniapp_auth_guard_http_and_websockets(
     assert r_logout.status_code == 200
     assert r_logout.json() == {"ok": True, "authenticated": False}
     assert "fg_tg_session=" in r_logout.headers.get("set-cookie", "")
+
+
+def test_wave12_ignore_track_and_zones_protect_bed_and_door_from_self_sabotage(
+    isolated_api: tuple[TestClient, FallGuardEngine, Path],
+) -> None:
+    """
+    Волна 12 (§2.5): защита кровати и двери от самострела ignore_polygons:
+    - POST /api/ignore-track возвращает 409 при клике на PATIENT, на трек поверх кровати (>= 12%)
+      или поверх двери (>= 25%), не трогая зоны, защёлку кровати и якорь внешности;
+    - POST /api/ignore-track возвращает 200 на статический фантом вне кровати и двери, сохраняя защёлку кровати;
+    - POST /api/zones автоматически вычищает полигоны, накрывающие >= 50% кровати;
+    - _filter_ignored_observations защищает человека на кровати даже при прямом конструировании ZonesConfig.
+    """
+    from app.engine import _filter_ignored_observations
+    from app.geometry import PoseObservation
+    from app.patient_id import Role, TrackIdentity
+    from app.zones import ZonesConfig
+
+    client, engine, _ = isolated_api
+
+    bed_poly = [[0.296, 0.422], [0.642, 0.433], [0.600, 0.802], [0.273, 0.785]]
+    door_poly = [[0.077, 0.250], [0.256, 0.170], [0.256, 0.860], [0.077, 0.940]]
+    zones = engine.zones.update(
+        bed_polygon=bed_poly,
+        door_polygon=door_poly,
+        ignore_polygons=[],
+    )
+
+    frame = np.full((360, 640, 3), 90, dtype=np.uint8)
+    obs_patient_bed = _make_pose_obs(101, (0.33, 0.46, 0.61, 0.72), horizontal=True)
+    # Точная геометрия фатального клика 13:55:20: сиделка у кровати (Role.VISITOR, покрывает ~79% кровати)
+    obs_caregiver_over_bed = _make_pose_obs(
+        102,
+        (0.29177, 0.46397, 0.66743, 0.83524),
+        horizontal=False,
+    )
+    obs_visitor_door = _make_pose_obs(103, (0.09, 0.26, 0.24, 0.84), horizontal=False)
+    obs_corner_ghost = _make_pose_obs(104, (0.84, 0.10, 0.95, 0.34), horizontal=False)
+
+    engine.identifier._patient_in_bed_latched = True  # type: ignore[attr-defined]
+    engine.identifier._latched_patient_bed_bbox = (0.33, 0.46, 0.61, 0.72)  # type: ignore[attr-defined]
+    engine.identifier._latched_patient_track_id = 101  # type: ignore[attr-defined]
+    assert engine.identifier.anchor_day_ready is True
+
+    with engine._lock:
+        engine._latest_raw_frame = frame
+        engine._latest_observations = [
+            obs_patient_bed,
+            obs_caregiver_over_bed,
+            obs_visitor_door,
+            obs_corner_ghost,
+        ]  # type: ignore[list-item]
+        engine._latest_identities = {
+            101: TrackIdentity(track_id=101, role=Role.PATIENT, reason="bed_sleep_lock", bed_accum_sec=40.0),
+            102: TrackIdentity(track_id=102, role=Role.VISITOR, reason="standing_near_bed"),
+            103: TrackIdentity(track_id=103, role=Role.VISITOR, reason="door_entry"),
+            104: TrackIdentity(track_id=104, role=Role.UNKNOWN, reason="static_artifact"),
+        }
+
+    # 1. Запрет игнор-зоны по PATIENT, поверх кровати и поверх двери -> HTTP 409
+    for forbidden_tid in (101, 102, 103):
+        resp_409 = client.post("/api/ignore-track", json={"track_id": forbidden_tid})
+        assert resp_409.status_code == 409
+        assert "Нельзя добавить игнор-зону поверх кровати или двери" in resp_409.json()["detail"]
+
+    assert engine.zones.get().ignore_polygons == []
+    assert engine.identifier.patient_in_bed_latched is True
+    assert engine.identifier.anchor_day_ready is True
+
+    # 2. Фантом в углу вне кровати и двери игнорируется штатно (HTTP 200), НЕ сбрасывая защёлку бабушки
+    resp_ok = client.post("/api/ignore-track", json={"track_id": 104})
+    assert resp_ok.status_code == 200
+    assert len(engine.zones.get().ignore_polygons) == 1
+    assert engine.identifier.patient_in_bed_latched is True
+
+    # 3. POST /api/zones отфильтровывает полигон, накрывающий >= 50% кровати, сохраняя валидную штору
+    curtain_poly = [[0.82, 0.05], [0.98, 0.05], [0.98, 0.45], [0.82, 0.45]]
+    killer_bed_poly = [
+        [0.29177, 0.46397],
+        [0.66743, 0.46397],
+        [0.66743, 0.83524],
+        [0.29177, 0.83524],
+    ]
+    r_zones = client.post(
+        "/api/zones",
+        json={
+            "bed_polygon": bed_poly,
+            "door_polygon": door_poly,
+            "ignore_polygons": [curtain_poly, killer_bed_poly],
+        },
+    )
+    assert r_zones.status_code == 200
+    saved_ignores = r_zones.json()["zones"]["ignore_polygons"]
+    assert len(saved_ignores) == 1
+    assert saved_ignores[0] == curtain_poly
+
+    # 4. Самозащита _filter_ignored_observations, даже если ZonesConfig создан в обход ZoneStore.update
+    corrupted_zones = ZonesConfig(
+        bed_polygon=bed_poly,
+        door_polygon=door_poly,
+        ignore_polygons=[killer_bed_poly],
+    )
+    kps_sit = [(0.0, 0.0, 0.0)] * 17
+    kps_sit[0] = (0.48, 0.49, 0.82)
+    kps_sit[5] = (0.45, 0.54, 0.85)
+    kps_sit[6] = (0.52, 0.54, 0.85)
+    kps_sit[11] = (0.46, 0.66, 0.78)
+    kps_sit[12] = (0.52, 0.66, 0.78)
+    kps_sit[13] = (0.45, 0.71, 0.98)
+    kps_sit[14] = (0.53, 0.71, 0.95)
+    obs_grandma_1407 = PoseObservation(
+        track_id=205,
+        bbox_norm=(0.39, 0.45, 0.58, 0.76),
+        conf=0.6197,
+        keypoints_norm=tuple(kps_sit),
+    )
+    kept = _filter_ignored_observations([obs_grandma_1407], corrupted_zones)
+    assert [o.track_id for o in kept] == [205]
+
+
+def test_wave12_assign_visitor_restores_bed_latch_caregiver_idle_reset_and_skeleton_unfreeze(
+    isolated_api: tuple[TestClient, FallGuardEngine, Path],
+) -> None:
+    """
+    Волна 12 (§2.6): исправление каскада 14:02 -> 14:07 -> 14:09:
+    - при ручном переводе ложного PATIENT вне кровати в VISITOR (POST /api/assign-visitor), когда
+      кровать временно перекрыта (best_bed_tid is None), восстанавливается patient_in_bed_latched == True
+      и карточка bed_covered_persistence;
+    - сидящая поза с conf=0.6197 и коленями >= 0.48 не отбрасывается старым порогом 0.65;
+    - в CAREGIVER_ASSIST у спящего без уверенного таза hide_skeleton == True, а при уходе перекрывающего
+      VISITOR замороженный контур обновляется;
+    - при пустом кадре без защёлки кровати и без сиделки FSM выходит из CAREGIVER_ASSIST в IDLE.
+    """
+    from app.geometry import PoseObservation
+    from app.patient_id import Role, TrackIdentity
+
+    client, engine, _ = isolated_api
+    zones = engine.zones.update(
+        bed_polygon=[[0.30, 0.42], [0.65, 0.42], [0.62, 0.80], [0.28, 0.80]],
+        door_polygon=[[0.07, 0.24], [0.25, 0.18], [0.25, 0.86], [0.07, 0.92]],
+    )
+    frame = np.full((360, 640, 3), 80, dtype=np.uint8)
+
+    # 1. Бабушка спала и надёжно зафиксирована в кровати
+    obs_bed = _make_pose_obs(11, (0.34, 0.47, 0.60, 0.73), horizontal=True)
+    for step_idx in range(12):
+        engine.identifier.update(
+            observations=[obs_bed],  # type: ignore[list-item]
+            zones=zones,
+            now=100.0 + step_idx * 1.0,
+            frame_bgr=frame,
+        )
+    assert engine.identifier.patient_in_bed_latched is True
+
+    # 2. Ложный трек вне кровати ошибочно получил PATIENT и сбросил patient_in_bed_latched, пока кровать перекрыта
+    obs_false_t0 = _make_pose_obs(22, (0.12, 0.26, 0.26, 0.88), horizontal=False)
+    obs_false_outside = _make_pose_obs(22, (0.20, 0.26, 0.31, 0.88), horizontal=False)
+    engine.identifier.update(
+        observations=[obs_false_t0],  # type: ignore[list-item]
+        zones=zones,
+        now=119.5,
+        frame_bgr=frame,
+    )
+    engine.identifier.update(
+        observations=[obs_false_outside],  # type: ignore[list-item]
+        zones=zones,
+        now=120.0,
+        frame_bgr=frame,
+    )
+    assert engine.identifier.force_assign_patient(22, now=120.1) is True
+    engine.identifier._patient_in_bed_latched = False  # type: ignore[attr-defined]
+    engine.identifier._latched_patient_bed_bbox = None  # type: ignore[attr-defined]
+
+    with engine._lock:
+        engine._latest_raw_frame = frame
+        engine._latest_observations = [obs_false_outside]  # type: ignore[list-item]
+        engine._latest_identities = dict(engine.identifier._tracks)
+        engine._sync_tracks_summary_locked()
+
+    # 3. Оператор жмёт «Свой» (POST /api/assign-visitor) -> ложный трек становится VISITOR, а защёлка кровати возвращается!
+    r_vis = client.post("/api/assign-visitor", json={"track_id": 22})
+    assert r_vis.status_code == 200
+    assert r_vis.json()["state"] == "idle"
+    assert engine.identifier.patient_in_bed_latched is True
+    assert engine.identifier.latched_patient_bed_bbox is not None
+
+    # Когда гость ушёл в слепую зону (0 живых YOLO-треков), бабушка остаётся в статусе как bed_covered_persistence
+    with engine._lock:
+        engine._latest_observations = []
+        engine._latest_identities = {}
+        engine._sync_tracks_summary_locked()
+    st_after = client.get("/api/status").json()
+    assert st_after["patient_in_bed_latched"] is True
+    assert any(t["reason"] == "bed_covered_persistence" for t in st_after["tracks"])
+
+    # 4. Порог 0.48 для сидячей позы с коленями (14:07: conf=0.6197, колени 0.9887 / 0.9463):
+    #    даже неподвижный вертикальный торс НЕ классифицируется как стоячий статический фантом!
+    sit_kps = [(0.0, 0.0, 0.0)] * 17
+    sit_kps[0] = (0.48, 0.46, 0.84)
+    sit_kps[5] = (0.45, 0.52, 0.86)
+    sit_kps[6] = (0.52, 0.52, 0.86)
+    sit_kps[11] = (0.46, 0.65, 0.74)
+    sit_kps[12] = (0.52, 0.65, 0.74)
+    sit_kps[13] = (0.45, 0.72, 0.9887)
+    sit_kps[14] = (0.53, 0.72, 0.9463)
+    sit_obs = PoseObservation(
+        track_id=33,
+        bbox_norm=(0.40, 0.40, 0.57, 0.78),
+        conf=0.6197,
+        keypoints_norm=tuple(sit_kps),
+    )
+    sit_tr = TrackIdentity(track_id=33, role=Role.UNKNOWN, reason="candidate", has_moved=False)
+    assert engine.identifier._is_standing_static_posture(sit_obs, sit_tr) is False  # type: ignore[attr-defined]
+
+    # 5. hide_skeleton == True в CAREGIVER_ASSIST без уверенного таза + разморозка контура после ухода VISITOR
+    no_hip_kps = [(0.0, 0.0, 0.0)] * 17
+    no_hip_kps[0] = (0.46, 0.49, 0.85)
+    no_hip_kps[5] = (0.43, 0.53, 0.83)
+    no_hip_kps[6] = (0.50, 0.53, 0.83)
+    obs_covered_occluded = PoseObservation(
+        track_id=44,
+        bbox_norm=(0.35, 0.46, 0.53, 0.66),
+        conf=0.71,
+        keypoints_norm=tuple(no_hip_kps),
+        is_still=True,
+    )
+    obs_visitor_overlap = _make_pose_obs(45, (0.48, 0.30, 0.68, 0.88), horizontal=False)
+    idents_pair = {
+        44: TrackIdentity(track_id=44, role=Role.PATIENT, reason="bed_sleep_lock", bed_accum_sec=35.0),
+        45: TrackIdentity(track_id=45, role=Role.VISITOR, reason="standing_near_bed"),
+    }
+    ui_occluded = engine._build_tracks_ui_for_frame(
+        live_observations=[obs_covered_occluded, obs_visitor_overlap],  # type: ignore[list-item]
+        identities=idents_pair,
+        zones=zones,
+        state_now=PatientState.CAREGIVER_ASSIST,
+        cur_opt_gray=None,
+        prev_opt_gray=None,
+        now_mono=500.0,
+    )
+    pat_item_1 = next(t for t in ui_occluded if t["track_id"] == 44)
+    assert pat_item_1["hide_skeleton"] is True
+    assert pat_item_1["bbox"] == [0.35, 0.46, 0.53, 0.66]
+
+    # Сиделка отошла, и реальная рамка спящей бабушки раскрылась шире -> frozen_bbox обязан обновиться!
+    obs_covered_full = PoseObservation(
+        track_id=44,
+        bbox_norm=(0.35, 0.46, 0.61, 0.72),
+        conf=0.76,
+        keypoints_norm=tuple(no_hip_kps),
+        is_still=True,
+    )
+    ui_unoccluded = engine._build_tracks_ui_for_frame(
+        live_observations=[obs_covered_full],
+        identities={44: idents_pair[44]},
+        zones=zones,
+        state_now=PatientState.CAREGIVER_ASSIST,
+        cur_opt_gray=None,
+        prev_opt_gray=None,
+        now_mono=500.5,
+    )
+    assert ui_unoccluded[0]["bbox"] == [0.35, 0.46, 0.61, 0.72]
+    assert ui_unoccluded[0]["hide_skeleton"] is True
+
+    # 6. Выход FSM из зависшего CAREGIVER_ASSIST в IDLE при отсутствии пациента, сиделки и защёлки
+    engine.fsm._state = PatientState.CAREGIVER_ASSIST
+    engine.fsm._was_monitored_recently = False
+    ev_idle = engine.fsm.step(
+        observations=[],
+        identities={},
+        caregiver_nearby=False,
+        zones=zones,
+        now=600.0,
+        patient_in_bed_latched=False,
+    )
+    assert ev_idle is None
+    assert engine.fsm.state == PatientState.IDLE
+    assert engine.fsm.status_reason == "ожидание в кадре"
+
+
+def test_wave12_fsm_metric_floor_doll_hip_baseline_shield_and_bent_standing_130059(
+    tmp_path: Path,
+) -> None:
+    """
+    Волна 12 (§2.4): метрические инварианты FallStateMachine:
+    - защита BedBaseline.hip_y и _hip_y_history от сжатого кукольного таза (L_torso_cm < 30.5) и mid_hip is None;
+    - метрический фильтр _is_lying_on_floor отсекает кошку / диванную подушку / ходунки без анатомии,
+      но пропускает реального взрослого человека на полу (включая позу калачиком вдоль оси камеры);
+    - наклонённое стояние у кровати (кейс 130059: angle ~ 56°, длинные вертикальные ноги, hip_y <= 0.72,
+      без стремительного падения) переходит в LEFT_BED, а НЕ в ложный FALLEN.
+    """
+    from app.geometry import PoseObservation
+    from app.patient_id import Role, TrackIdentity
+    from app.state_machine import FallStateMachine
+    from app.zones import ZonesConfig
+
+    fsm = FallStateMachine()
+    zones = ZonesConfig(
+        bed_polygon=[[0.30, 0.42], [0.66, 0.42], [0.62, 0.78], [0.28, 0.78]],
+        door_polygon=[],
+        floor_polygon=[[0.26, 0.79], [0.66, 0.79], [0.72, 0.98], [0.20, 0.98]],
+    )
+    ident_1 = {1: TrackIdentity(track_id=1, role=Role.PATIENT, reason="bed_sleep_lock", bed_accum_sec=30.0)}
+
+    # 1. Сжатый «кукольный» таз на подушке (L_torso_cm ~ 8 см < 30.5 см) НЕ калибрует hip_y
+    doll_kps = [(0.0, 0.0, 0.0)] * 17
+    doll_kps[0] = (0.44, 0.50, 0.85)
+    doll_kps[5] = (0.46, 0.51, 0.86)
+    doll_kps[6] = (0.49, 0.53, 0.86)
+    doll_kps[11] = (0.48, 0.52, 0.75)
+    doll_kps[12] = (0.50, 0.54, 0.75)
+    doll_obs = PoseObservation(
+        track_id=1,
+        bbox_norm=(0.40, 0.47, 0.62, 0.66),
+        conf=0.78,
+        keypoints_norm=tuple(doll_kps),
+    )
+    for idx in range(10):
+        fsm.step(
+            observations=[doll_obs],
+            identities=ident_1,
+            caregiver_nearby=False,
+            zones=zones,
+            now=10.0 + idx * 0.5,
+        )
+    assert fsm.baseline_in_bed["calibrated"] is True
+    assert fsm._baseline.hip_calibrated is False
+    assert fsm._baseline.torso_len_2d == 0.0
+
+    # Сон под одеялом без таза (mid_hip is None) НЕ загрязняет _hip_y_history суррогатом body_center
+    fsm._hip_y_history.clear()
+    blanket_kps = [(0.0, 0.0, 0.0)] * 17
+    blanket_kps[0] = (0.45, 0.50, 0.85)
+    blanket_kps[5] = (0.46, 0.53, 0.82)
+    blanket_kps[6] = (0.51, 0.53, 0.82)
+    blanket_obs = PoseObservation(
+        track_id=1,
+        bbox_norm=(0.38, 0.46, 0.62, 0.68),
+        conf=0.74,
+        keypoints_norm=tuple(blanket_kps),
+    )
+    fsm.step(
+        observations=[blanket_obs],
+        identities=ident_1,
+        caregiver_nearby=False,
+        zones=zones,
+        now=20.0,
+    )
+    assert len(fsm._hip_y_history) == 0
+
+    # 2. Метрический и анатомический фильтр _is_lying_on_floor
+    # (а) Кошка / мелкая подушка на ковре (примерно 34x22 см -> Area < 1650 см²) -> False
+    cat_kps = [(0.0, 0.0, 0.0)] * 17
+    cat_kps[0] = (0.44, 0.88, 0.65)
+    cat_obs = PoseObservation(
+        track_id=2,
+        bbox_norm=(0.42, 0.85, 0.49, 0.91),
+        conf=0.55,
+        keypoints_norm=tuple(cat_kps),
+    )
+    assert fsm._is_lying_on_floor(cat_obs, zones) is False
+
+    # (б) Крупный предмет / ходунки без уверенной головы и без связки торс+конечность -> False
+    walker_obs = PoseObservation(
+        track_id=3,
+        bbox_norm=(0.32, 0.78, 0.58, 0.95),
+        conf=0.58,
+        keypoints_norm=tuple([(0.0, 0.0, 0.0)] * 17),
+    )
+    assert fsm._is_lying_on_floor(walker_obs, zones) is False
+
+    # (в) Человек упал на ковёр калачиком вдоль оси камеры (AR ~ 0.76, но метрически >= 52x26 см + есть голова) -> True
+    curled_kps = [(0.0, 0.0, 0.0)] * 17
+    curled_kps[0] = (0.45, 0.83, 0.82)
+    curled_kps[1] = (0.44, 0.82, 0.79)
+    curled_kps[5] = (0.42, 0.85, 0.84)
+    curled_kps[6] = (0.49, 0.85, 0.84)
+    curled_kps[11] = (0.43, 0.92, 0.78)
+    curled_kps[12] = (0.49, 0.92, 0.78)
+    curled_obs = PoseObservation(
+        track_id=4,
+        bbox_norm=(0.36, 0.78, 0.54, 0.96),
+        conf=0.81,
+        keypoints_norm=tuple(curled_kps),
+    )
+    assert fsm._is_lying_on_floor(curled_obs, zones) is True
+
+    # 3. Кейс 130059: бабушка стоит у кровати, наклонившись вперёд к матрасу (angle ~ 56°, длинные вертикальные ноги)
+    fsm_stand = FallStateMachine()
+    ident_10 = {10: TrackIdentity(track_id=10, role=Role.PATIENT, reason="bed_sleep_lock", bed_accum_sec=35.0)}
+    normal_bed_obs = _make_pose_obs(10, (0.34, 0.46, 0.62, 0.72), horizontal=True)
+    for idx in range(8):
+        fsm_stand.step(
+            observations=[normal_bed_obs],  # type: ignore[list-item]
+            identities=ident_10,
+            caregiver_nearby=False,
+            zones=zones,
+            now=100.0 + idx * 0.5,
+        )
+    assert fsm_stand.state == PatientState.IN_BED
+
+    # Стоит на ногах перед кроватью, корпус наклонён (dx=0.105, dy=0.07 -> angle ~ 56.3°), лодыжки на полу y=0.88, таз y=0.61
+    bent_kps = [(0.0, 0.0, 0.0)] * 17
+    bent_kps[0] = (0.35, 0.50, 0.88)
+    bent_kps[5] = (0.375, 0.54, 0.90)
+    bent_kps[6] = (0.395, 0.54, 0.90)
+    bent_kps[11] = (0.48, 0.61, 0.87)
+    bent_kps[12] = (0.50, 0.61, 0.87)
+    bent_kps[13] = (0.48, 0.75, 0.86)
+    bent_kps[14] = (0.50, 0.75, 0.86)
+    bent_kps[15] = (0.48, 0.89, 0.85)
+    bent_kps[16] = (0.50, 0.89, 0.85)
+    bent_stand_obs = PoseObservation(
+        track_id=10,
+        bbox_norm=(0.33, 0.45, 0.54, 0.92),
+        conf=0.86,
+        keypoints_norm=tuple(bent_kps),
+    )
+
+    emitted_states: list[PatientState] = []
+    for step_i in range(10):
+        ev = fsm_stand.step(
+            observations=[bent_stand_obs],
+            identities=ident_10,
+            caregiver_nearby=False,
+            zones=zones,
+            now=110.0 + step_i * 0.4,
+        )
+        if ev is not None:
+            emitted_states.append(ev.state)
+
+    assert PatientState.FALLEN not in emitted_states
+    assert fsm_stand.state == PatientState.LEFT_BED
+
 
 
 

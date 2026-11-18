@@ -223,6 +223,198 @@ def polygon_y_bounds(polygon: Sequence[Sequence[float]]) -> tuple[float, float]:
     return (min(ys), max(ys))
 
 
+def _polygon_x_span_at_v(polygon: Sequence[Sequence[float]], v_query: float) -> float | None:
+    """Горизонтальная ширина сечения полигона на заданной экранной ординате v_query."""
+    n = len(polygon)
+    if n < 3:
+        return None
+    inter_x: list[float] = []
+    vq = float(v_query)
+    for i in range(n):
+        x1, y1 = float(polygon[i][0]), float(polygon[i][1])
+        x2, y2 = float(polygon[(i + 1) % n][0]), float(polygon[(i + 1) % n][1])
+        if abs(y2 - y1) < 1e-6:
+            if abs(vq - y1) <= 1e-4:
+                inter_x.extend((x1, x2))
+            continue
+        if (y1 <= vq <= y2) or (y2 <= vq <= y1):
+            t = (vq - y1) / (y2 - y1)
+            inter_x.append(x1 + t * (x2 - x1))
+    if len(inter_x) < 2:
+        return None
+    span = max(inter_x) - min(inter_x)
+    return span if span > 1e-4 else None
+
+
+def polygon_overlap_fraction(
+    target_polygon: Sequence[Sequence[float]],
+    mask_polygon: Sequence[Sequence[float]],
+    grid_n: int = 12,
+) -> float:
+    """Доля площади target_polygon, покрытая полигоном mask_polygon [0..1]."""
+    if len(target_polygon) < 3 or len(mask_polygon) < 3:
+        return 0.0
+    t_arr = np.asarray(target_polygon, dtype=np.float32) * 1000.0
+    m_arr = np.asarray(mask_polygon, dtype=np.float32) * 1000.0
+    tx_min, tx_max = float(np.min(t_arr[:, 0])), float(np.max(t_arr[:, 0]))
+    ty_min, ty_max = float(np.min(t_arr[:, 1])), float(np.max(t_arr[:, 1]))
+    mx_min, mx_max = float(np.min(m_arr[:, 0])), float(np.max(m_arr[:, 0]))
+    my_min, my_max = float(np.min(m_arr[:, 1])), float(np.max(m_arr[:, 1]))
+    if tx_max < mx_min or tx_min > mx_max or ty_max < my_min or ty_min > my_max:
+        return 0.0
+    tw = max(1e-3, tx_max - tx_min)
+    th = max(1e-3, ty_max - ty_min)
+    in_target = 0
+    in_both = 0
+    for iy in range(grid_n):
+        py = ty_min + th * ((iy + 0.5) / grid_n)
+        for ix in range(grid_n):
+            px = tx_min + tw * ((ix + 0.5) / grid_n)
+            if cv2.pointPolygonTest(t_arr, (px, py), False) >= 0.0:
+                in_target += 1
+                if cv2.pointPolygonTest(m_arr, (px, py), False) >= 0.0:
+                    in_both += 1
+    return (in_both / float(in_target)) if in_target > 0 else 0.0
+
+
+class PerspectiveScaleField:
+    """
+    Проективно-линейное поле метрического масштаба S(v) без сингулярности горизонта:
+    калибруется первично по сечениям bed_polygon (195 см продольно / 100 см с торца),
+    при отсутствии кровати — по трапеции floor_polygon, иначе по безопасному дефолту камеры.
+    """
+
+    _cache_lock = threading.Lock()
+    _cached_key: tuple[Any, ...] | None = None
+    _cached_inst: "PerspectiveScaleField | None" = None
+
+    def __init__(
+        self,
+        bed_polygon: Sequence[Sequence[float]] | None = None,
+        floor_polygon: Sequence[Sequence[float]] | None = None,
+        floor_width_cm: float = 200.0,
+    ) -> None:
+        u_ref = 0.24
+        v_ref = 0.50
+        slope = 0.16
+
+        if bed_polygon is not None and len(bed_polygon) >= 3:
+            xs = [float(p[0]) for p in bed_polygon]
+            ys = [float(p[1]) for p in bed_polygon]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            span_u = max(0.05, max_x - min_x)
+            span_v = max(0.05, max_y - min_y)
+            l_ref_m = 1.95 if span_u >= 0.95 * span_v else 1.00
+
+            spans: list[tuple[float, float]] = []
+            for idx_s in range(29):
+                frac = 0.06 + (0.84 * idx_s) / 28.0
+                vq = min_y + frac * span_v
+                sp = _polygon_x_span_at_v(bed_polygon, vq)
+                if sp is not None and sp >= 0.04:
+                    spans.append((vq, sp))
+
+            if spans:
+                v_far, s_far = spans[0]
+                v_wide, s_wide = max(spans, key=lambda item: item[1])
+                if s_wide < 0.08:
+                    s_wide = span_u
+                    v_wide = 0.5 * (min_y + max_y)
+                u_wide = s_wide / l_ref_m
+                u_far = s_far / l_ref_m
+                if v_wide > (v_far + 0.05) and u_wide > u_far:
+                    slope = max(0.08, min(0.32, (u_wide - u_far) / (v_wide - v_far)))
+                else:
+                    slope = 0.18
+                u_ref = u_wide
+                v_ref = v_wide
+            else:
+                u_ref = span_u / l_ref_m
+                v_ref = 0.5 * (min_y + max_y)
+                slope = 0.18
+        elif floor_polygon is not None and len(floor_polygon) >= 4:
+            pts = sorted([[float(p[0]), float(p[1])] for p in floor_polygon[:4]], key=lambda p: (p[1], p[0]))
+            far_two = sorted(pts[:2], key=lambda p: p[0])
+            near_two = sorted(pts[2:], key=lambda p: p[0])
+            v_far = 0.5 * (far_two[0][1] + far_two[1][1])
+            s_far = max(0.04, abs(far_two[1][0] - far_two[0][0]))
+            v_near = 0.5 * (near_two[0][1] + near_two[1][1])
+            s_near = max(0.05, abs(near_two[1][0] - near_two[0][0]))
+            fw_m = max(0.50, float(floor_width_cm) / 100.0)
+            u_near = s_near / fw_m
+            u_far = s_far / fw_m
+            if v_near > (v_far + 0.04) and u_near > u_far:
+                slope = max(0.08, min(0.32, (u_near - u_far) / (v_near - v_far)))
+            else:
+                slope = 0.16
+            u_ref = u_near
+            v_ref = v_near
+
+        self._u_ref = float(u_ref)
+        self._v_ref = float(v_ref)
+        self._slope = float(slope)
+
+    @classmethod
+    def from_zones(
+        cls,
+        zones: Any = None,
+        bed_polygon: Sequence[Sequence[float]] | None = None,
+    ) -> "PerspectiveScaleField":
+        raw_bp = (getattr(zones, "bed_polygon", None) if zones is not None else None) or bed_polygon or ()
+        raw_fp = (getattr(zones, "floor_polygon", None) if zones is not None else None) or ()
+        fw = float(getattr(zones, "floor_width_cm", 200.0) or 200.0) if zones is not None else 200.0
+        bp_key = tuple((round(float(p[0]), 5), round(float(p[1]), 5)) for p in raw_bp if len(p) >= 2)
+        fp_key = tuple((round(float(p[0]), 5), round(float(p[1]), 5)) for p in raw_fp[:4] if len(p) >= 2)
+        key = (bp_key, fp_key, round(fw, 1))
+        with cls._cache_lock:
+            if cls._cached_key == key and cls._cached_inst is not None:
+                return cls._cached_inst
+        inst = cls(
+            bed_polygon=list(bp_key) if len(bp_key) >= 3 else None,
+            floor_polygon=list(fp_key) if len(fp_key) >= 4 else None,
+            floor_width_cm=fw,
+        )
+        with cls._cache_lock:
+            cls._cached_key = key
+            cls._cached_inst = inst
+        return inst
+
+    def u_per_meter(self, v: float) -> float:
+        return max(0.14, min(0.38, self._u_ref + self._slope * (float(v) - self._v_ref)))
+
+    def v_per_meter_vert(self, v: float) -> float:
+        return self.u_per_meter(v) * (16.0 / 9.0) * 0.80
+
+    def v_per_meter_plane(self, v: float) -> float:
+        return self.u_per_meter(v) * (16.0 / 9.0) * 0.58
+
+    def dist_plane_cm(self, p1: Sequence[float], p2: Sequence[float]) -> float:
+        v_mid = 0.5 * (float(p1[1]) + float(p2[1]))
+        dx_cm = 100.0 * abs(float(p1[0]) - float(p2[0])) / self.u_per_meter(v_mid)
+        dy_cm = 100.0 * abs(float(p1[1]) - float(p2[1])) / self.v_per_meter_plane(v_mid)
+        return math.hypot(dx_cm, dy_cm)
+
+    def dist_vert_cm(self, p1: Sequence[float], p2: Sequence[float]) -> float:
+        v_mid = 0.5 * (float(p1[1]) + float(p2[1]))
+        dx_cm = 100.0 * abs(float(p1[0]) - float(p2[0])) / self.u_per_meter(v_mid)
+        dy_cm = 100.0 * abs(float(p1[1]) - float(p2[1])) / self.v_per_meter_vert(v_mid)
+        return math.hypot(dx_cm, dy_cm)
+
+    def box_plane_metrics_cm(self, bbox_norm: Sequence[float]) -> tuple[float, float, float, float]:
+        x1, y1, x2, y2 = float(bbox_norm[0]), float(bbox_norm[1]), float(bbox_norm[2]), float(bbox_norm[3])
+        vc = 0.5 * (y1 + y2)
+        w_cm = 100.0 * max(0.0, x2 - x1) / self.u_per_meter(vc)
+        h_plane_cm = 100.0 * max(0.0, y2 - y1) / self.v_per_meter_plane(vc)
+        diag_cm = math.hypot(w_cm, h_plane_cm)
+        return (w_cm, h_plane_cm, diag_cm, w_cm * h_plane_cm)
+
+    def box_vert_height_cm(self, bbox_norm: Sequence[float]) -> float:
+        y1, y2 = float(bbox_norm[1]), float(bbox_norm[3])
+        vc = 0.5 * (y1 + y2)
+        return 100.0 * max(0.0, y2 - y1) / self.v_per_meter_vert(vc)
+
+
 def bbox_iou(
     box_a: tuple[float, float, float, float],
     box_b: tuple[float, float, float, float],
@@ -341,22 +533,29 @@ def is_pose_in_ignore_zones(
     ignore_polygons: Sequence[Sequence[Sequence[float]]] | None,
     overlap_threshold: float = 0.55,
     door_polygon: Sequence[Sequence[float]] | None = None,
+    bed_polygon: Sequence[Sequence[float]] | None = None,
+    zones: Any = None,
 ) -> bool:
     """
     Проверяет, попадает ли скелет в любую из зон игнорирования предметов (ignore_polygons):
     отсекается только если поза НЕ касается door_polygon И при этом её body_center лежит внутри
     игнор-полигона либо >= overlap_threshold (по умолчанию 55%) площади bbox_norm перекрыто игнор-зоной.
-    Защищает стул для родственника у двери и ближнего переднего плана от поглощения высокой настенной ignore_polygon.
+    Защищает кровать от ошибочно созданных поверх матраса игнор-зон (>= 20% площади кровати) и стул у двери.
     """
     if not ignore_polygons:
         return False
-    if is_pose_touching_door(obs, door_polygon, min_overlap=0.10):
+    eff_door = door_polygon if door_polygon is not None else (getattr(zones, "door_polygon", None) if zones is not None else None)
+    eff_bed = bed_polygon if bed_polygon is not None else (getattr(zones, "bed_polygon", None) if zones is not None else None)
+    if is_pose_touching_door(obs, eff_door, min_overlap=0.10):
         return False
-    fg_seated = is_confident_foreground_seated_person(obs)
+    on_bed_pose = bool(eff_bed and len(eff_bed) >= 3 and is_person_on_bed(obs, eff_bed, zones=zones))
+    fg_seated = is_confident_foreground_seated_person(obs, eff_bed, zones=zones)
     bc = obs.body_center
     eff_overlap = max(float(overlap_threshold), 0.55)
     for poly in ignore_polygons:
         if len(poly) < 3:
+            continue
+        if on_bed_pose and eff_bed is not None and polygon_overlap_fraction(eff_bed, poly) >= 0.20:
             continue
         if fg_seated:
             poly_min_y = min(float(pt[1]) for pt in poly)
@@ -491,75 +690,236 @@ def is_person_on_bed(
     return point_in_polygon(obs.body_center, bed_polygon)
 
 
+def _is_kp_captured_by_occluder(
+    kx: float,
+    ky: float,
+    own_anchor: tuple[float, float] | None,
+    occluders: Sequence[PoseObservation],
+) -> bool:
+    """Проверяет, попала ли ключевая точка внутрь бокса другого человека ближе к нему, чем к верхнему поясу владельца."""
+    if not occluders:
+        return False
+    d_own = math.hypot(kx - own_anchor[0], ky - own_anchor[1]) if own_anchor is not None else 999.0
+    for occ in occluders:
+        ox1, oy1, ox2, oy2 = occ.bbox_norm
+        if not ((ox1 + 0.006) <= kx <= (ox2 - 0.006) and (oy1 + 0.006) <= ky <= (oy2 - 0.006)):
+            continue
+        ref_pts: list[tuple[float, float]] = [occ.body_center]
+        if occ.mid_hip is not None:
+            ref_pts.append(occ.mid_hip)
+        for j_idx in (KP_L_ELBOW, KP_R_ELBOW, KP_L_WRIST, KP_R_WRIST, KP_L_HIP, KP_R_HIP, KP_L_KNEE, KP_R_KNEE):
+            jp = occ.kp(j_idx, 0.30)
+            if jp is not None:
+                ref_pts.append(jp)
+        d_occ = min(math.hypot(kx - rx, ky - ry) for rx, ry in ref_pts)
+        if d_occ < d_own:
+            return True
+    return False
+
+
 def sanitize_collapsed_bed_keypoints(
     obs: PoseObservation,
     bed_polygon: Sequence[Sequence[float]],
+    other_observations: Sequence[PoseObservation] = (),
+    zones: Any = None,
 ) -> PoseObservation:
     """
-    Санирует смятые/сваленные кучей на подушку нижние ключевые точки (таз, колени, лодыжки 11..16)
-    у человека внутри bed_polygon: когда под одеялом видно только лицо/плечи, YOLO-pose может
-    свалить все 17 точек в крошечный головной комок (давая ложный вертикальный угол ~0..5° и
-    визуальный мусор микро-скелета на лице).
-    Обнуляет такие фантомные точки 11..16 в (0.0, 0.0, 0.0) до расчёта углов и сглаживания,
-    не затрагивая реальный горизонтальный скелет спящего вдоль кровати человека.
+    Антропометрическая и кинематическая санация фантомных/кукольных нижних точек (11..16) на кровати:
+    1) устраняет как сваленный на подушку микро-комок (angle ~ 0..5°), так и пропорционально сжатые
+       «кукольные ножки» (L_leg_chain < 44 см при хорде ms->ankle < 72 см) под одеялом или за спиной гостя;
+    2) очищает точки 11..16, захваченные чужими конечностями внутри бокса перекрывающего гостя (other_observations);
+    3) никогда не трогает реально сидящего человека с вертикальным взрослым корпусом и ноги, вышедшие
+       за передний борт кровати (защита SITTING_UP «Свесила ноги»).
     """
     if len(bed_polygon) < 3 or len(obs.keypoints_norm) < 17:
+        return obs
+    if are_legs_hanging_outside_bed(obs, bed_polygon, zones=zones):
         return obs
 
     hc = obs.head_center
     ms = obs.mid_shoulder
-    if hc is None or not point_in_polygon(hc, bed_polygon) or obs.bbox_height > 0.22:
+    mh = obs.mid_hip
+    if hc is None and ms is None:
         return obs
-    if ms is not None and not point_in_polygon(ms, bed_polygon):
+    # Если таз уже вышел за пределы полигона кровати (человек сполз на пол или встал), нижние точки реальны
+    if mh is not None and not point_in_polygon(mh, bed_polygon) and polygon_distance_norm(mh, bed_polygon) < -0.015:
+        return obs
+    if hc is not None and not point_in_polygon(hc, bed_polygon):
+        if ms is None or not point_in_polygon(ms, bed_polygon):
+            return obs
+    elif ms is not None and not point_in_polygon(ms, bed_polygon):
         return obs
 
-    mh = obs.mid_hip
-    raw_angle = obs.torso_angle_from_vertical_deg()
-    collapsed_box = obs.bbox_width <= 0.145 and obs.bbox_height <= 0.135
-    torso_len = (
-        math.hypot(ms[0] - mh[0], ms[1] - mh[1])
-        if (ms is not None and mh is not None)
-        else None
-    )
-    collapsed_torso = (
-        torso_len is not None
-        and (
-            torso_len < 0.042
-            or (torso_len < 0.068 and (raw_angle is None or raw_angle < 42.0))
-        )
-    )
+    psf = PerspectiveScaleField.from_zones(zones, bed_polygon=bed_polygon)
+    _, bed_max_y = polygon_y_bounds(bed_polygon)
+    occluders = [
+        o
+        for o in other_observations
+        if o.track_id != obs.track_id and bbox_iou(o.bbox_norm, obs.bbox_norm) < 0.78
+    ]
+    own_up = ms or hc
+
+    def _is_outside_front_rim(kx_f: float, ky_f: float) -> bool:
+        return ky_f >= (bed_max_y - 0.01) and polygon_distance_norm((kx_f, ky_f), bed_polygon) < -0.015
 
     pts = list(obs.keypoints_norm)
     changed = False
 
-    for idx in (KP_L_HIP, KP_R_HIP, KP_L_KNEE, KP_R_KNEE, KP_L_ANKLE, KP_R_ANKLE):
-        kx, ky, kc = pts[idx]
+    # Если головы не видно (сон лицом к стене hc is None) — проверяем только захват чужим окклюдером,
+    # сохраняя собственный горизонтальный скелет на матрасе.
+    if hc is None:
+        if not occluders:
+            return obs
+        for idx in (KP_L_HIP, KP_R_HIP, KP_L_KNEE, KP_R_KNEE, KP_L_ANKLE, KP_R_ANKLE):
+            kx, ky, kc = pts[idx]
+            if kc <= 0.0 and kx == 0.0 and ky == 0.0:
+                continue
+            if _is_outside_front_rim(kx, ky):
+                continue
+            if _is_kp_captured_by_occluder(kx, ky, own_up, occluders):
+                pts[idx] = (0.0, 0.0, 0.0)
+                changed = True
+        if not changed:
+            return obs
+        return PoseObservation(
+            track_id=obs.track_id,
+            bbox_norm=obs.bbox_norm,
+            conf=obs.conf,
+            keypoints_norm=tuple(pts),
+            liveness_verified=obs.liveness_verified,
+            spawn_center_hint=obs.spawn_center_hint,
+            confirmed_frames=obs.confirmed_frames,
+            outside_bed_disp=obs.outside_bed_disp,
+            is_still=obs.is_still,
+            _kp_stabilized=obs._kp_stabilized,
+        )
+
+    raw_angle = obs.torso_angle_from_vertical_deg()
+    if raw_angle is not None and raw_angle < 38.0:
+        if (obs.bbox_height > 0.24 or obs.torso_vertical_rise() >= 0.11) and (
+            ms is not None and mh is not None and psf.dist_vert_cm(ms, mh) >= 28.0
+        ):
+            return obs
+
+    def _pt_from_list(idx_p: int, min_c: float = 0.22) -> tuple[float, float] | None:
+        px, py, pc = pts[idx_p]
+        if pc < min_c or (px <= 0.0 and py <= 0.0):
+            return None
+        return (px, py)
+
+    # Длина видимой взрослой руки как внутренний репер пропорций (плечо -> локоть -> запястье)
+    arm_lengths: list[float] = []
+    for sh_i, el_i, wr_i in ((KP_L_SHOULDER, KP_L_ELBOW, KP_L_WRIST), (KP_R_SHOULDER, KP_R_ELBOW, KP_R_WRIST)):
+        p_sh = _pt_from_list(sh_i, 0.30)
+        p_el = _pt_from_list(el_i, 0.30)
+        p_wr = _pt_from_list(wr_i, 0.30)
+        if p_sh is not None and p_el is not None and p_wr is not None:
+            if not _is_kp_captured_by_occluder(p_wr[0], p_wr[1], own_up, occluders):
+                arm_lengths.append(psf.dist_plane_cm(p_sh, p_el) + psf.dist_plane_cm(p_el, p_wr))
+    l_arm_cm = max(arm_lengths, default=0.0)
+
+    # 1. Кинематическая проверка каждой ноги (бедро -> колено -> лодыжка)
+    for hip_i, knee_i, ank_i in ((KP_L_HIP, KP_L_KNEE, KP_L_ANKLE), (KP_R_HIP, KP_R_KNEE, KP_R_ANKLE)):
+        p_hp = _pt_from_list(hip_i, 0.22)
+        p_kn = _pt_from_list(knee_i, 0.22)
+        p_ak = _pt_from_list(ank_i, 0.22)
+
+        kn_outside = p_kn is not None and _is_outside_front_rim(p_kn[0], p_kn[1])
+        ak_outside = p_ak is not None and _is_outside_front_rim(p_ak[0], p_ak[1])
+        if kn_outside or ak_outside:
+            continue
+
+        if p_kn is not None and _is_kp_captured_by_occluder(p_kn[0], p_kn[1], own_up, occluders):
+            pts[knee_i] = (0.0, 0.0, 0.0)
+            p_kn = None
+            changed = True
+        if p_ak is not None and _is_kp_captured_by_occluder(p_ak[0], p_ak[1], own_up, occluders):
+            pts[ank_i] = (0.0, 0.0, 0.0)
+            p_ak = None
+            changed = True
+
+        ref_up = ms or hc
+        doll_leg = False
+        if p_hp is not None and p_kn is not None and p_ak is not None:
+            l_leg_chain = psf.dist_plane_cm(p_hp, p_kn) + psf.dist_plane_cm(p_kn, p_ak)
+            d_up_ank = psf.dist_plane_cm(ref_up, p_ak) if ref_up is not None else 999.0
+            if (l_leg_chain < 44.0 and d_up_ank < 72.0) or (
+                l_arm_cm >= 30.0 and l_leg_chain < (0.75 * l_arm_cm) and d_up_ank < 72.0
+            ):
+                doll_leg = True
+        elif p_hp is not None and p_kn is not None:
+            l_thigh = psf.dist_plane_cm(p_hp, p_kn)
+            d_up_kn = psf.dist_plane_cm(ref_up, p_kn) if ref_up is not None else 999.0
+            if l_thigh < 22.0 and d_up_kn < 48.0:
+                doll_leg = True
+        elif p_hp is not None and p_ak is not None:
+            l_ha = psf.dist_plane_cm(p_hp, p_ak)
+            d_up_ank = psf.dist_plane_cm(ref_up, p_ak) if ref_up is not None else 999.0
+            if l_ha < 38.0 and d_up_ank < 72.0:
+                doll_leg = True
+        elif p_hp is None and ref_up is not None:
+            if p_kn is not None and psf.dist_plane_cm(ref_up, p_kn) < 56.0:
+                doll_leg = True
+            if p_ak is not None and psf.dist_plane_cm(ref_up, p_ak) < 68.0:
+                doll_leg = True
+
+        if doll_leg:
+            if pts[knee_i] != (0.0, 0.0, 0.0):
+                pts[knee_i] = (0.0, 0.0, 0.0)
+                changed = True
+            if pts[ank_i] != (0.0, 0.0, 0.0):
+                pts[ank_i] = (0.0, 0.0, 0.0)
+                changed = True
+
+    # 2. Проверка таза (11, 12): сжатый торс (< 22 см безусловно или < 31.5 см при обнулённых кукольных ногах) и окклюдер
+    for hip_i in (KP_L_HIP, KP_R_HIP):
+        kx, ky, kc = pts[hip_i]
         if kc <= 0.0 and kx == 0.0 and ky == 0.0:
             continue
-        if collapsed_box or collapsed_torso:
-            pts[idx] = (0.0, 0.0, 0.0)
-            changed = True
-            continue
-
-        is_hip = idx in (KP_L_HIP, KP_R_HIP)
-        thr_head = 0.075 if is_hip else 0.088
-        near_head = math.hypot(kx - hc[0], ky - hc[1]) < thr_head
-        near_sh = (
-            ms is not None
-            and (obs.bbox_width <= 0.155 or raw_angle is None or raw_angle < 42.0)
-            and math.hypot(kx - ms[0], ky - ms[1]) < (0.062 if is_hip else 0.082)
-        )
-        if near_head or near_sh:
-            pts[idx] = (0.0, 0.0, 0.0)
+        if not _is_outside_front_rim(kx, ky) and _is_kp_captured_by_occluder(kx, ky, own_up, occluders):
+            pts[hip_i] = (0.0, 0.0, 0.0)
             changed = True
 
-    if changed and obs.bbox_height < 0.22:
-        l_hip_gone = pts[KP_L_HIP][2] < 0.30
-        r_hip_gone = pts[KP_R_HIP][2] < 0.30
-        if l_hip_gone and r_hip_gone:
-            for idx in (KP_L_KNEE, KP_R_KNEE, KP_L_ANKLE, KP_R_ANKLE):
-                if pts[idx] != (0.0, 0.0, 0.0):
-                    pts[idx] = (0.0, 0.0, 0.0)
+    both_legs_gone = all(
+        pts[idx_l][2] < 0.30 or (pts[idx_l][0] <= 0.0 and pts[idx_l][1] <= 0.0)
+        for idx_l in (KP_L_KNEE, KP_R_KNEE, KP_L_ANKLE, KP_R_ANKLE)
+    )
+    p_lh = _pt_from_list(KP_L_HIP, 0.22)
+    p_rh = _pt_from_list(KP_R_HIP, 0.22)
+    mh_rem: tuple[float, float] | None = None
+    if p_lh is not None and p_rh is not None:
+        mh_rem = (0.5 * (p_lh[0] + p_rh[0]), 0.5 * (p_lh[1] + p_rh[1]))
+    else:
+        mh_rem = p_lh or p_rh
+
+    if mh_rem is not None:
+        collapse_hips = False
+        if ms is not None:
+            l_torso_cm = psf.dist_plane_cm(ms, mh_rem)
+            if l_torso_cm < 22.0 or (l_torso_cm < 31.5 and both_legs_gone):
+                collapse_hips = True
+        elif hc is not None and psf.dist_plane_cm(hc, mh_rem) < 26.0:
+            collapse_hips = True
+
+        if collapse_hips:
+            for hip_i in (KP_L_HIP, KP_R_HIP):
+                if pts[hip_i] != (0.0, 0.0, 0.0):
+                    pts[hip_i] = (0.0, 0.0, 0.0)
+                    changed = True
+
+    # 3. Зачистка сиротских нижних точек внутри матраса при отсутствии таза
+    hips_gone = (
+        (pts[KP_L_HIP][2] < 0.30 or (pts[KP_L_HIP][0] <= 0.0 and pts[KP_L_HIP][1] <= 0.0))
+        and (pts[KP_R_HIP][2] < 0.30 or (pts[KP_R_HIP][0] <= 0.0 and pts[KP_R_HIP][1] <= 0.0))
+    )
+    if hips_gone and own_up is not None:
+        for idx_l in (KP_L_KNEE, KP_R_KNEE, KP_L_ANKLE, KP_R_ANKLE):
+            lx, ly, lc = pts[idx_l]
+            if lc <= 0.0 and lx == 0.0 and ly == 0.0:
+                continue
+            if not _is_outside_front_rim(lx, ly) and psf.dist_plane_cm(own_up, (lx, ly)) < 72.0:
+                pts[idx_l] = (0.0, 0.0, 0.0)
+                changed = True
 
     if not changed:
         return obs
@@ -577,38 +937,81 @@ def sanitize_collapsed_bed_keypoints(
     )
 
 
+def _passes_bed_anthropometric_gate(
+    obs: PoseObservation,
+    bed_polygon: Sequence[Sequence[float]],
+    min_kp_conf: float = 0.30,
+    zones: Any = None,
+) -> bool:
+    """
+    Двухрежимный метрический гейт кровати:
+    - при укрытом низе (mid_hip is None): головной/плечевой бокс max(W, H_pl) >= 24 см, min(W, H_pl) >= 16 см,
+      Diag >= 34 см + взрослый масштаб головы-плеч max(d(hc, ms), d(L_sh, R_sh)) >= 11.2 см;
+    - при открытом корпусе (mid_hip is not None): полноразмерный контур max(W, H_pl) >= 28 см,
+      min(W, H_pl) >= 16 см, Diag >= 68 см (либо сидящий корпус со свешенными ногами).
+    """
+    psf = PerspectiveScaleField.from_zones(zones, bed_polygon=bed_polygon)
+    w_cm, h_pl_cm, diag_cm, _ = psf.box_plane_metrics_cm(obs.bbox_norm)
+    if min(w_cm, h_pl_cm) < 16.0:
+        return False
+
+    angle = obs.torso_angle_from_vertical_deg()
+    if are_legs_hanging_outside_bed(obs, bed_polygon, zones=zones) or (
+        angle is not None and angle < 45.0 and obs.bbox_height >= 0.26
+    ):
+        return max(w_cm, h_pl_cm) >= 24.0 and diag_cm >= 38.0
+
+    if obs.mid_hip is None:
+        if max(w_cm, h_pl_cm) < 24.0 or diag_cm < 34.0:
+            return False
+        hc = obs.head_center
+        ms = obs.mid_shoulder
+        l_sh = obs.kp(KP_L_SHOULDER, min_kp_conf)
+        r_sh = obs.kp(KP_R_SHOULDER, min_kp_conf)
+        hs_cm = psf.dist_plane_cm(hc, ms) if (hc is not None and ms is not None) else 0.0
+        sw_cm = psf.dist_plane_cm(l_sh, r_sh) if (l_sh is not None and r_sh is not None) else 0.0
+        return max(hs_cm, sw_cm) >= 11.2
+
+    return max(w_cm, h_pl_cm) >= 28.0 and diag_cm >= 68.0
+
+
 def is_blanket_sleeper_in_bed(
     obs: PoseObservation,
     bed_polygon: Sequence[Sequence[float]],
     min_bed_box_conf: float = 0.072,
+    zones: Any = None,
 ) -> bool:
     """
     Распознаёт человека, спящего под плотным/пёстрым одеялом строго внутри bed_polygon
     (когда на подушке видна только голова и край плеч, бёдра скрыты одеялом, а box_conf
     может проседать до 0.072..0.47 из-за пёстрого рисунка одеяла и контрового света окна).
-    Исключает висящую на стене одежду и бесформенные складки пустого одеяла.
+    Исключает висящую на стене одежду, мелкие предметы и бесформенные складки пустого одеяла.
     """
     if len(bed_polygon) < 3 or obs.conf < min_bed_box_conf:
         return False
-    hc = obs.head_center
-    ms = obs.mid_shoulder
-    mh = obs.mid_hip
+    obs_s = sanitize_collapsed_bed_keypoints(obs, bed_polygon, zones=zones)
+    if not _passes_bed_anthropometric_gate(obs_s, bed_polygon, min_kp_conf=0.30, zones=zones):
+        return False
+
+    hc = obs_s.head_center
+    ms = obs_s.mid_shoulder
+    mh = obs_s.mid_hip
     if ms is None:
         return False
     if hc is None:
         # Сон отвернувшись лицом в подушку/к стене: требуем полный горизонтальный скелет корпуса и конечностей на матрасе
-        angle_body = obs.torso_angle_from_vertical_deg()
+        angle_body = obs_s.torso_angle_from_vertical_deg()
         return bool(
-            obs.conf >= max(min_bed_box_conf, 0.24)
-            and obs.aspect_ratio_wh >= 0.70
+            obs_s.conf >= max(min_bed_box_conf, 0.24)
+            and obs_s.aspect_ratio_wh >= 0.70
             and mh is not None
             and point_in_polygon(ms, bed_polygon)
             and point_in_polygon(mh, bed_polygon)
-            and obs.kp(KP_L_SHOULDER, 0.50) is not None
-            and obs.kp(KP_R_SHOULDER, 0.50) is not None
-            and obs.kp(KP_L_HIP, 0.50) is not None
-            and obs.kp(KP_R_HIP, 0.50) is not None
-            and obs.valid_keypoint_count(0.35) >= 8
+            and obs_s.kp(KP_L_SHOULDER, 0.50) is not None
+            and obs_s.kp(KP_R_SHOULDER, 0.50) is not None
+            and obs_s.kp(KP_L_HIP, 0.50) is not None
+            and obs_s.kp(KP_R_HIP, 0.50) is not None
+            and obs_s.valid_keypoint_count(0.35) >= 8
             and angle_body is not None
             and angle_body >= 55.0
         )
@@ -616,50 +1019,50 @@ def is_blanket_sleeper_in_bed(
         return False
 
     confident_head_pts = sum(
-        1 for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR) if obs.kp(i, 0.42) is not None
+        1 for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR) if obs_s.kp(i, 0.42) is not None
     )
-    if obs.conf < 0.17:
+    if obs_s.conf < 0.17:
         # Глубокое укрывание пёстрым одеялом по подбородок (0.072 <= box_conf < 0.17):
         # строгая проверка выраженной головы (глаз/ухо >= 0.45) + ОБОИХ плеч на подушке внутри bed_polygon
         has_eye_or_ear = any(
-            obs.kp(i, 0.45) is not None for i in (KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR)
+            obs_s.kp(i, 0.45) is not None for i in (KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR)
         )
         both_shoulders_visible = (
-            obs.kp(KP_L_SHOULDER, 0.32) is not None
-            and obs.kp(KP_R_SHOULDER, 0.32) is not None
-            and (obs.kp(KP_L_SHOULDER, 0.48) is not None or obs.kp(KP_R_SHOULDER, 0.48) is not None)
+            obs_s.kp(KP_L_SHOULDER, 0.32) is not None
+            and obs_s.kp(KP_R_SHOULDER, 0.32) is not None
+            and (obs_s.kp(KP_L_SHOULDER, 0.48) is not None or obs_s.kp(KP_R_SHOULDER, 0.48) is not None)
         )
         if not (
             confident_head_pts >= 2
             and has_eye_or_ear
             and both_shoulders_visible
-            and obs.bbox_height <= 0.32
-            and obs.aspect_ratio_wh >= 0.40
-            and obs.valid_keypoint_count(0.30) >= 5
+            and obs_s.bbox_height <= 0.32
+            and obs_s.aspect_ratio_wh >= 0.40
+            and obs_s.valid_keypoint_count(0.30) >= 5
         ):
             return False
     elif confident_head_pts >= 2:
-        if obs.kp(KP_L_SHOULDER, 0.45) is None and obs.kp(KP_R_SHOULDER, 0.45) is None:
+        if obs_s.kp(KP_L_SHOULDER, 0.45) is None and obs_s.kp(KP_R_SHOULDER, 0.45) is None:
             return False
-        if obs.valid_keypoint_count(0.30) < 4:
+        if obs_s.valid_keypoint_count(0.30) < 4:
             return False
     elif confident_head_pts == 1:
         # Сон на боку или с прикрытым предплечьем лицом (открыто ухо/висок >= 0.55 при обоих плечах и >= 6 точках)
         strong_ear_or_head = any(
-            obs.kp(i, 0.55) is not None for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR)
+            obs_s.kp(i, 0.55) is not None for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR)
         )
         both_shoulders = (
-            obs.kp(KP_L_SHOULDER, 0.55) is not None and obs.kp(KP_R_SHOULDER, 0.55) is not None
+            obs_s.kp(KP_L_SHOULDER, 0.55) is not None and obs_s.kp(KP_R_SHOULDER, 0.55) is not None
         )
-        if not (strong_ear_or_head and both_shoulders and obs.valid_keypoint_count(0.45) >= 6):
+        if not (strong_ear_or_head and both_shoulders and obs_s.valid_keypoint_count(0.45) >= 6):
             return False
     else:
         return False
 
-    angle = obs.torso_angle_from_vertical_deg()
-    if angle is not None and angle < 28.0 and obs.bbox_height >= 0.34 and obs.aspect_ratio_wh < 0.72:
+    angle = obs_s.torso_angle_from_vertical_deg()
+    if angle is not None and angle < 28.0 and obs_s.bbox_height >= 0.34 and obs_s.aspect_ratio_wh < 0.72:
         return False
-    if angle is not None and angle < 20.0 and obs.bbox_height >= 0.20 and obs.aspect_ratio_wh < 0.35:
+    if angle is not None and angle < 20.0 and obs_s.bbox_height >= 0.20 and obs_s.aspect_ratio_wh < 0.35:
         return False
     return True
 
@@ -771,72 +1174,131 @@ def is_valid_human_pose(
     zones: Any = None,
 ) -> bool:
     """
-    Анатомический фильтр против фантомных сработок YOLO на одеялах, подушках, куртках и вешалках:
-    1) порог уверенности бокса >= min_box_conf (по умолчанию 0.48);
-    2) игнорирование полигонов вещей (zones.ignore_polygons);
-    3) минимум min_valid_kps достоверных ключевых точек и опорная анатомия корпуса;
-    4) отсев «скелетов-вешалок» без уверенной головы (kpts 0..4 < 0.35) при узком/вертикальном силуэте вне кровати.
+    Анатомический и антропометрический фильтр против фантомных сработок YOLO на одеялах, подушках,
+    куртках, кошке/тапках и металлических ходунках:
+    1) порог уверенности бокса >= min_box_conf (по умолчанию 0.48) с исключением для сна под одеялом;
+    2) игнорирование полигонов вещей (zones.ignore_polygons) с самозащитой кровати;
+    3) перспективно-инвариантный фильтр физического масштаба взрослого человека (PerspectiveScaleField);
+    4) минимум min_valid_kps достоверных ключевых точек, опорная анатомия и отсев «скелетов-вешалок» / ходунков без головы.
     """
     if obs.bbox_width < 0.02 or obs.bbox_height < 0.03:
         return False
 
+    bed_poly = getattr(zones, "bed_polygon", ()) if zones is not None else ()
+    door_poly = getattr(zones, "door_polygon", None) if zones is not None else None
+    has_bed = len(bed_poly) >= 3
+
     if zones is not None:
         ignore_polys = getattr(zones, "ignore_polygons", None)
-        door_poly = getattr(zones, "door_polygon", None)
-        if ignore_polys and is_pose_in_ignore_zones(obs, ignore_polys, door_polygon=door_poly):
+        if ignore_polys and is_pose_in_ignore_zones(
+            obs,
+            ignore_polys,
+            door_polygon=door_poly,
+            bed_polygon=bed_poly if has_bed else None,
+            zones=zones,
+        ):
             return False
 
-    bed_poly = getattr(zones, "bed_polygon", ()) if zones is not None else ()
-    has_bed = len(bed_poly) >= 3
-    if obs.conf < min_box_conf:
+    obs_eval = sanitize_collapsed_bed_keypoints(obs, bed_poly, zones=zones) if has_bed else obs
+
+    if obs_eval.conf < min_box_conf:
         rich_seated_or_angled_person = (
-            obs.conf >= 0.34
-            and obs.valid_keypoint_count(0.65) >= 10
+            obs_eval.conf >= 0.34
+            and obs_eval.valid_keypoint_count(0.65) >= 10
             and sum(
-                1 for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR) if obs.kp(i, 0.65) is not None
+                1 for i in (KP_NOSE, KP_L_EYE, KP_R_EYE, KP_L_EAR, KP_R_EAR) if obs_eval.kp(i, 0.65) is not None
             ) >= 2
-            and obs.kp(KP_L_SHOULDER, 0.65) is not None
-            and obs.kp(KP_R_SHOULDER, 0.65) is not None
-            and (obs.kp(KP_L_HIP, 0.65) is not None or obs.kp(KP_R_HIP, 0.65) is not None)
+            and obs_eval.kp(KP_L_SHOULDER, 0.65) is not None
+            and obs_eval.kp(KP_R_SHOULDER, 0.65) is not None
+            and (obs_eval.kp(KP_L_HIP, 0.65) is not None or obs_eval.kp(KP_R_HIP, 0.65) is not None)
         )
-        if not (rich_seated_or_angled_person or (has_bed and is_blanket_sleeper_in_bed(obs, bed_poly))):
+        if not (rich_seated_or_angled_person or (has_bed and is_blanket_sleeper_in_bed(obs_eval, bed_poly, zones=zones))):
             return False
 
-    if obs.valid_keypoint_count(min_kp_conf) < min_valid_kps:
+    if obs_eval.valid_keypoint_count(min_kp_conf) < min_valid_kps:
         return False
-    if not obs.has_core_anatomy(min_kp_conf):
+    if not obs_eval.has_core_anatomy(min_kp_conf):
         return False
 
-    on_bed = is_person_on_bed(obs, bed_poly) if has_bed else False
-    angle = obs.torso_angle_from_vertical_deg()
+    psf = PerspectiveScaleField.from_zones(zones, bed_polygon=bed_poly if has_bed else None)
+    on_bed = is_person_on_bed(obs_eval, bed_poly, zones=zones) if has_bed else False
+    angle = obs_eval.torso_angle_from_vertical_deg()
     is_standing_coat_posture = (
         angle is not None
         and angle < 28.0
-        and obs.bbox_height >= 0.36
-        and obs.aspect_ratio_wh < 0.68
+        and obs_eval.bbox_height >= 0.36
+        and obs_eval.aspect_ratio_wh < 0.68
     )
     sleeping_in_bed = on_bed and not is_standing_coat_posture
+
+    if on_bed:
+        if not _passes_bed_anthropometric_gate(obs_eval, bed_poly, min_kp_conf=min_kp_conf, zones=zones):
+            return False
+    else:
+        _, _, diag_out_cm, _ = psf.box_plane_metrics_cm(obs_eval.bbox_norm)
+        border_scale = 0.78 if obs_eval.is_near_border(0.02) else 1.0
+        if diag_out_cm < (42.0 * border_scale):
+            return False
+        is_upright_out = (angle is not None and angle < 45.0) or obs_eval.aspect_ratio_wh < 0.68
+        in_door_out = bool(door_poly and len(door_poly) >= 3 and is_pose_touching_door(obs_eval, door_poly, min_overlap=0.10))
+        if is_upright_out and not in_door_out and obs_eval.bbox_norm[3] < 0.96 and obs_eval.bbox_norm[1] > 0.03:
+            if psf.box_vert_height_cm(obs_eval.bbox_norm) < (52.0 * border_scale):
+                return False
+
     has_arm_joint = any(
-        obs.kp(i, 0.40) is not None for i in (KP_L_ELBOW, KP_R_ELBOW, KP_L_WRIST, KP_R_WRIST)
+        obs_eval.kp(i, 0.40) is not None for i in (KP_L_ELBOW, KP_R_ELBOW, KP_L_WRIST, KP_R_WRIST)
     )
     back_body_joints = sum(
         1
         for i in (KP_L_ELBOW, KP_R_ELBOW, KP_L_WRIST, KP_R_WRIST, KP_L_HIP, KP_R_HIP)
-        if obs.kp(i, 0.40) is not None
+        if obs_eval.kp(i, 0.40) is not None
     )
     back_turned_human = (
-        obs.conf >= 0.52
-        and obs.kp(KP_L_SHOULDER, 0.50) is not None
-        and obs.kp(KP_R_SHOULDER, 0.50) is not None
+        obs_eval.conf >= 0.52
+        and obs_eval.kp(KP_L_SHOULDER, 0.50) is not None
+        and obs_eval.kp(KP_R_SHOULDER, 0.50) is not None
         and has_arm_joint
         and back_body_joints >= 2
-        and (obs.bbox_norm[3] >= 0.65 or obs.aspect_ratio_wh >= 0.45)
+        and (obs_eval.bbox_norm[3] >= 0.65 or obs_eval.aspect_ratio_wh >= 0.45)
     )
 
-    if not sleeping_in_bed and not obs.has_confident_head(0.35) and not back_turned_human:
-        is_hanging_silhouette = obs.aspect_ratio_wh < 0.75 or (angle is not None and angle < 38.0)
-        if is_hanging_silhouette:
-            return False
+    if not sleeping_in_bed and not obs_eval.has_confident_head(0.35):
+        if not back_turned_human:
+            is_hanging_silhouette = obs_eval.aspect_ratio_wh < 0.75 or (angle is not None and angle < 38.0)
+            if is_hanging_silhouette:
+                return False
+        # Защита от металлических ходунков / кресла-туалета (AR >= 0.68 без головы вне кровати):
+        if obs_eval.aspect_ratio_wh >= 0.68:
+            ms_o = obs_eval.mid_shoulder
+            mh_o = obs_eval.mid_hip
+            has_adult_torso = (
+                ms_o is not None and mh_o is not None and psf.dist_plane_cm(ms_o, mh_o) >= 28.0
+            )
+            limb_pairs = (
+                (KP_L_SHOULDER, KP_L_ELBOW),
+                (KP_R_SHOULDER, KP_R_ELBOW),
+                (KP_L_ELBOW, KP_L_WRIST),
+                (KP_R_ELBOW, KP_R_WRIST),
+                (KP_L_HIP, KP_L_KNEE),
+                (KP_R_HIP, KP_R_KNEE),
+                (KP_L_KNEE, KP_L_ANKLE),
+                (KP_R_KNEE, KP_R_ANKLE),
+            )
+            has_adult_limb = any(
+                (pa := obs_eval.kp(ia, min_kp_conf)) is not None
+                and (pb := obs_eval.kp(ib, min_kp_conf)) is not None
+                and psf.dist_plane_cm(pa, pb) >= 22.0
+                for ia, ib in limb_pairs
+            )
+            clipped_fg_back = (
+                back_turned_human
+                and obs_eval.bbox_norm[3] >= 0.94
+                and (l_s := obs_eval.kp(KP_L_SHOULDER, 0.50)) is not None
+                and (r_s := obs_eval.kp(KP_R_SHOULDER, 0.50)) is not None
+                and psf.dist_plane_cm(l_s, r_s) >= 18.0
+            )
+            if not ((has_adult_torso and has_adult_limb) or clipped_fg_back):
+                return False
 
     return True
 
@@ -1049,7 +1511,13 @@ class StaticObjectGate:
                 on_bed = is_person_on_bed(obs, bed_poly, zones=zones) if has_bed else False
                 in_door = has_door and is_pose_touching_door(obs, door_poly, min_overlap=0.20)
                 in_ignore = (
-                    is_pose_in_ignore_zones(obs, ignore_polys, door_polygon=door_poly)
+                    is_pose_in_ignore_zones(
+                        obs,
+                        ignore_polys,
+                        door_polygon=door_poly,
+                        bed_polygon=bed_poly if has_bed else None,
+                        zones=zones,
+                    )
                     if ignore_polys
                     else False
                 )
@@ -1065,8 +1533,11 @@ class StaticObjectGate:
                 # Сидящий на матрасе человек с отчётливо видимыми коленями (не плоская куртка/вешалка)
                 seated_with_knees_on_bed = (
                     on_bed
-                    and obs.conf >= 0.65
-                    and (obs.kp(KP_L_KNEE, 0.50) is not None or obs.kp(KP_R_KNEE, 0.50) is not None)
+                    and obs.conf >= 0.48
+                    and (
+                        obs.kp(KP_L_KNEE, 0.48) is not None
+                        or obs.kp(KP_R_KNEE, 0.48) is not None
+                    )
                 )
                 sleeping_or_sitting_in_bed = on_bed and (
                     not is_standing_coat_posture or seated_with_knees_on_bed
@@ -1616,10 +2087,12 @@ class OpticalKeypointStabilizer:
         prev_gray_small: np.ndarray | None,
         box_a: tuple[float, float, float, float] | Sequence[float],
         box_b: tuple[float, float, float, float] | Sequence[float],
+        exclude_boxes: Sequence[Sequence[float]] | None = None,
     ) -> float:
         """
         Вычисляет долю пикселей с |I_t - I_{t-1}| > 10 после даунсэмпла 48x36 и 3x3 blur
         по фиксированному объединённому окну кадра (без паразитного сдвига самого окна от джиттера YOLO).
+        При передаче exclude_boxes исключает из оценки движения область перекрывающих гостей.
         """
         if cur_gray_small is None or prev_gray_small is None:
             return 0.0
@@ -1654,6 +2127,32 @@ class OpticalKeypointStabilizer:
         cur_blur = cv2.GaussianBlur(cur_roi, (3, 3), 0)
         prev_blur = cv2.GaussianBlur(prev_roi, (3, 3), 0)
         diff = np.abs(cur_blur.astype(np.int16) - prev_blur.astype(np.int16))
+
+        if exclude_boxes:
+            roi_u1 = x1 / float(max(1, sw))
+            roi_v1 = y1 / float(max(1, sh))
+            roi_uw = max(1e-4, (x2 - x1) / float(max(1, sw)))
+            roi_vh = max(1e-4, (y2 - y1) / float(max(1, sh)))
+            keep_mask = np.ones((cls._ROI_H, cls._ROI_W), dtype=bool)
+            for ex in exclude_boxes:
+                if len(ex) < 4:
+                    continue
+                mx1 = int(math.floor(((float(ex[0]) - 0.01 - roi_u1) / roi_uw) * cls._ROI_W))
+                my1 = int(math.floor(((float(ex[1]) - 0.01 - roi_v1) / roi_vh) * cls._ROI_H))
+                mx2 = int(math.ceil(((float(ex[2]) + 0.01 - roi_u1) / roi_uw) * cls._ROI_W))
+                my2 = int(math.ceil(((float(ex[3]) + 0.01 - roi_v1) / roi_vh) * cls._ROI_H))
+                mx1 = max(0, min(cls._ROI_W, mx1))
+                mx2 = max(0, min(cls._ROI_W, mx2))
+                my1 = max(0, min(cls._ROI_H, my1))
+                my2 = max(0, min(cls._ROI_H, my2))
+                if mx2 > mx1 and my2 > my1:
+                    keep_mask[my1:my2, mx1:mx2] = False
+            unmasked_px = int(np.count_nonzero(keep_mask))
+            if unmasked_px >= 16:
+                return float(np.mean(diff[keep_mask] > 10))
+            if unmasked_px == 0:
+                return 0.0
+
         return float(np.mean(diff > 10))
 
     def is_box_optically_still(
@@ -1904,6 +2403,15 @@ class OpticalKeypointStabilizer:
                 st.outside_bed_disp = obs.outside_bed_disp
                 st.coast_motion_streak = 0
                 sub_ui_cap = round(self._min_pub_conf - 0.01, 4)
+                occ_boxes_for_sleep = (
+                    [
+                        o_oth.bbox_norm
+                        for o_oth in observations
+                        if o_oth.track_id != obs.track_id and not self._is_reclining_on_bed(o_oth, zones)
+                    ]
+                    if on_bed_reclining
+                    else None
+                )
                 opt_ratio = (
                     0.0
                     if same_frame_obj
@@ -1912,6 +2420,7 @@ class OpticalKeypointStabilizer:
                         self._prev_gray_small if prev_gray_valid else None,
                         obs.bbox_norm,
                         st.bbox,
+                        exclude_boxes=occ_boxes_for_sleep,
                     )
                 )
 
@@ -1949,7 +2458,28 @@ class OpticalKeypointStabilizer:
 
                 # РЕЖИМ 1: Полная оптическая неподвижность (is_still = True) — 0.0 сдвига и 0 миганий костей!
                 if not in_motion:
-                    if on_bed_reclining and st.anchor_roi_blur is None and cur_gray_small is not None and scene_textured:
+                    # При появлении/уходе перекрытия вторым человеком немедленно подстраиваем видимый бокс без лага
+                    if on_bed_reclining:
+                        max_edge_delta = max(
+                            abs(bx1 - st.bbox[0]),
+                            abs(by1 - st.bbox[1]),
+                            abs(bx2 - st.bbox[2]),
+                            abs(by2 - st.bbox[3]),
+                        )
+                        width_delta = abs((bx2 - bx1) - (st.bbox[2] - st.bbox[0]))
+                        if max_edge_delta > 0.04 and (bool(occ_boxes_for_sleep) or width_delta > 0.04):
+                            st.bbox = [bx1, by1, bx2, by2]
+                            if not occ_boxes_for_sleep and cur_gray_small is not None and scene_textured:
+                                st.anchor_roi_blur = self._extract_blurred_roi(cur_gray_small, st.bbox)
+                                st.anchor_frame_mean = float(np.mean(cur_gray_small))
+
+                    if (
+                        on_bed_reclining
+                        and not occ_boxes_for_sleep
+                        and st.anchor_roi_blur is None
+                        and cur_gray_small is not None
+                        and scene_textured
+                    ):
                         st.anchor_roi_blur = self._extract_blurred_roi(cur_gray_small, st.bbox)
                         st.anchor_frame_mean = float(np.mean(cur_gray_small))
 
@@ -1966,11 +2496,19 @@ class OpticalKeypointStabilizer:
                         non_zero = kx > 0.0 or ky > 0.0
 
                         eff_keep = 0.30 if (deep_blanket_head_mode and k <= 6) else self._keep_conf
+                        outside_clipped_box = bool(
+                            occ_boxes_for_sleep
+                            and k >= KP_L_HIP
+                            and (
+                                st.kp_xy[k][0] < (st.bbox[0] - 0.01)
+                                or st.kp_xy[k][0] > (st.bbox[2] + 0.01)
+                            )
+                        )
                         if st.kp_ui_visible[k]:
-                            if non_zero and kc >= eff_keep:
+                            if non_zero and kc >= eff_keep and not outside_clipped_box:
                                 st.kp_drop_streak[k] = 0
                                 frozen_pts.append((st.kp_xy[k][0], st.kp_xy[k][1], st.kp_pub_conf[k]))
-                            elif st.kp_drop_streak[k] < 3:
+                            elif st.kp_drop_streak[k] < 3 and not outside_clipped_box:
                                 # Не даём случайному однокадровому ИК-провалу погасить видимую кость в покое
                                 st.kp_drop_streak[k] += 1
                                 frozen_pts.append((st.kp_xy[k][0], st.kp_xy[k][1], st.kp_pub_conf[k]))

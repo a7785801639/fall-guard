@@ -15,6 +15,13 @@ from typing import Any, Callable
 
 import httpx
 
+from .devices import (
+    ALERT_MODE_ALL,
+    ALERT_MODE_FALLS,
+    ALERT_MODE_STANDUP,
+    alert_matches_mode,
+    normalize_alert_mode,
+)
 from .state_machine import AlertEvent, AlertSeverity
 
 logger = logging.getLogger("fallguard.notifier")
@@ -24,18 +31,10 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 BTN_MUTE_TEXT = "🔕 Отключить уведомления"
 BTN_UNMUTE_TEXT = "🔔 Включить уведомления"
+BTN_STANDUP_ONLY_TEXT = "🚶 Только вставание"
 BTN_FALLS_ONLY_TEXT = "🚨 Только падения"
 BTN_ALL_EVENTS_TEXT = "📣 Все события"
 BTN_PHOTO_TEXT = "📸 Снимок"
-
-ALERT_MODE_ALL = "all"
-ALERT_MODE_FALLS = "falls"
-
-
-def normalize_alert_mode(raw: object) -> str:
-    """Режим получателя: «all» — все события, «falls» — только падение / сползание."""
-    val = str(raw or "").strip().lower()
-    return ALERT_MODE_FALLS if val in ("falls", "fall", "falls_only", "fall_only") else ALERT_MODE_ALL
 
 
 def is_fall_event(event: object) -> bool:
@@ -51,6 +50,7 @@ BOT_COMMANDS_RU: list[dict[str, str]] = [
     {"command": "pause15", "description": "Я подошёл (пауза 15 минут)"},
     {"command": "pause60", "description": "Пауза 1 час"},
     {"command": "resume", "description": "Включить охрану снова"},
+    {"command": "standonly", "description": "Присылать мне только вставание и падение"},
     {"command": "fallsonly", "description": "Присылать мне только падение / сползание"},
     {"command": "allevents", "description": "Присылать мне все события"},
     {"command": "mute", "description": "Отключить уведомления себе"},
@@ -130,9 +130,13 @@ def _build_inline_keyboard() -> str:
 
 def _build_reply_keyboard(enabled: bool = True, mode: str = ALERT_MODE_ALL) -> str:
     toggle_label = BTN_MUTE_TEXT if enabled else BTN_UNMUTE_TEXT
-    mode_label = (
-        BTN_ALL_EVENTS_TEXT if normalize_alert_mode(mode) == ALERT_MODE_FALLS else BTN_FALLS_ONLY_TEXT
-    )
+    norm_mode = normalize_alert_mode(mode)
+    if norm_mode == ALERT_MODE_ALL:
+        mode_label = BTN_STANDUP_ONLY_TEXT
+    elif norm_mode == ALERT_MODE_STANDUP:
+        mode_label = BTN_FALLS_ONLY_TEXT
+    else:
+        mode_label = BTN_ALL_EVENTS_TEXT
     markup = {
         "keyboard": [
             [{"text": toggle_label}, {"text": mode_label}],
@@ -249,6 +253,9 @@ class TelegramNotifier:
         self._poll_thread: threading.Thread | None = None
         self._repeat_lock = threading.Lock()
         self._repeat_active = False
+        self._repeat_title = ""
+        self._repeat_alert_id: str | None = None
+        self._repeat_for_fall = True
 
     @property
     def enabled(self) -> bool:
@@ -359,10 +366,11 @@ class TelegramNotifier:
                 return bool(sub.get("enabled", True))
             return cid in self._env_chat_ids
 
-    def _target_chats(self, for_fall: bool = True) -> list[str]:
+    def _target_chats(self, for_fall: bool = True, *, event: AlertEvent | None = None) -> list[str]:
         """
-        Чаты с активной подпиской (enabled == True). Для событий, не являющихся падением
-        (for_fall=False), исключаются получатели в режиме «только падение / сползание».
+        Чаты с активной подпиской (enabled == True). Если передан event, фильтрация идёт
+        через alert_matches_mode(event.state, event.severity, mode); иначе обратная
+        совместимость по for_fall (True -> все enabled, False -> только mode == "all").
         """
         with self._sub_lock:
             seen: set[str] = set()
@@ -373,8 +381,14 @@ class TelegramNotifier:
                 seen.add(cid)
                 sub = self._subscribers.get(cid)
                 is_enabled = bool(sub.get("enabled", True)) if sub is not None else True
+                if not is_enabled:
+                    continue
                 mode = normalize_alert_mode(sub.get("mode")) if sub is not None else ALERT_MODE_ALL
-                if is_enabled and (for_fall or mode == ALERT_MODE_ALL):
+                if event is not None:
+                    matches = alert_matches_mode(event.state, event.severity, mode)
+                else:
+                    matches = bool(for_fall or mode == ALERT_MODE_ALL)
+                if matches:
                     result.append(cid)
             return result
 
@@ -390,7 +404,7 @@ class TelegramNotifier:
         )
 
     def set_subscriber_mode(self, chat_id: str, mode: str) -> dict[str, object] | None:
-        """Персональный режим получателя: все события или только падение / сползание."""
+        """Персональный режим получателя: все события, только вставание или только падения."""
         cid = str(chat_id or "").strip()
         target = normalize_alert_mode(mode)
         changed = False
@@ -417,7 +431,12 @@ class TelegramNotifier:
         if changed:
             self._save_subscribers()
             if self._on_event:
-                mode_ru = "только падения" if target == ALERT_MODE_FALLS else "все события"
+                if target == ALERT_MODE_FALLS:
+                    mode_ru = "только падения"
+                elif target == ALERT_MODE_STANDUP:
+                    mode_ru = "только вставание"
+                else:
+                    mode_ru = "все события"
                 self._on_event("info", f"Telegram-чат {sub_name}: режим тревог «{mode_ru}»")
         for item in self.list_subscribers():
             if item.get("chat_id") == cid:
@@ -803,7 +822,7 @@ class TelegramNotifier:
         """Мгновенно отправляет фото только в чаты с enabled=True и возвращает {chat_id: message_id}."""
         if not self.enabled:
             return {}
-        recipients = self._target_chats(for_fall=is_fall_event(event))
+        recipients = self._target_chats(event=event)
         eff_alert_id = str(alert_id or "").strip() or f"alert_{int(time.time() * 1000)}"
         compact_key = _make_compact_alert_key(eff_alert_id)
 
@@ -856,7 +875,11 @@ class TelegramNotifier:
             self._register_alert_post_locked(post)
 
         if event.severity == AlertSeverity.CRITICAL:
-            self._start_escalation_loop(event.title, alert_id=eff_alert_id)
+            self._start_escalation_loop(
+                event.title,
+                alert_id=eff_alert_id,
+                for_fall=is_fall_event(event),
+            )
         return msg_ids
 
     def replace_alert_photo_with_video(
@@ -1052,10 +1075,11 @@ class TelegramNotifier:
         text: str,
         with_buttons: bool = False,
         alert_id: str | None = None,
+        for_fall: bool = True,
     ) -> tuple[bool, str]:
         if not self.enabled:
             return False, "Не задан TG_BOT_TOKEN в .env"
-        recipients = self._target_chats()
+        recipients = self._target_chats(for_fall=for_fall)
         if not recipients:
             return (
                 False,
@@ -1130,8 +1154,16 @@ class TelegramNotifier:
                     last_err = str(exc)
         return (sent > 0), (f"Проверочный снимок доставлен ({sent})" if sent > 0 else last_err)
 
-    def _start_escalation_loop(self, title: str, alert_id: str | None = None) -> None:
+    def _start_escalation_loop(
+        self,
+        title: str,
+        alert_id: str | None = None,
+        for_fall: bool = True,
+    ) -> None:
         with self._repeat_lock:
+            self._repeat_title = title
+            self._repeat_alert_id = alert_id
+            self._repeat_for_fall = bool(for_fall)
             if self._repeat_active:
                 return
             self._repeat_active = True
@@ -1143,11 +1175,16 @@ class TelegramNotifier:
                         return
                     if not self._is_fall_unack():
                         return
+                    with self._repeat_lock:
+                        cur_title = self._repeat_title
+                        cur_alert_id = self._repeat_alert_id
+                        cur_for_fall = self._repeat_for_fall
                     self.send_text(
-                        f"🚨 Повтор #{attempt}: {title}\n"
+                        f"🚨 Повтор #{attempt}: {cur_title}\n"
                         f"Тревога не подтверждена! Нажмите «✅ Я рядом», чтобы остановить сигнал.",
                         with_buttons=True,
-                        alert_id=alert_id,
+                        alert_id=cur_alert_id,
+                        for_fall=cur_for_fall,
                     )
             finally:
                 with self._repeat_lock:
@@ -1578,19 +1615,32 @@ class TelegramNotifier:
             )
             return
 
-        if raw_txt in (BTN_FALLS_ONLY_TEXT, BTN_ALL_EVENTS_TEXT) or cmd in ("/fallsonly", "/allevents"):
-            want_falls = raw_txt == BTN_FALLS_ONLY_TEXT or cmd == "/fallsonly"
-            self.set_subscriber_mode(chat_id, ALERT_MODE_FALLS if want_falls else ALERT_MODE_ALL)
+        if raw_txt in (BTN_STANDUP_ONLY_TEXT, BTN_FALLS_ONLY_TEXT, BTN_ALL_EVENTS_TEXT) or cmd in (
+            "/standonly",
+            "/fallsonly",
+            "/allevents",
+        ):
+            if raw_txt == BTN_STANDUP_ONLY_TEXT or cmd == "/standonly":
+                target_mode = ALERT_MODE_STANDUP
+                reply_text = (
+                    "🚶 Режим «Только вставание»: вам будут приходить выход с кровати и падение.\n"
+                    "Посадка в кровати, жест рукой и напоминания — без уведомлений (видны в хронике пульта)."
+                )
+            elif raw_txt == BTN_FALLS_ONLY_TEXT or cmd == "/fallsonly":
+                target_mode = ALERT_MODE_FALLS
+                reply_text = (
+                    "🚨 Режим «Только падения»: вам будут приходить только падение и сползание.\n"
+                    "Посадка, выход из кровати и жест рукой — без уведомлений (видны в хронике пульта)."
+                )
+            else:
+                target_mode = ALERT_MODE_ALL
+                reply_text = "📣 Режим «Все события»: посадка, выход из кровати, жест рукой и падения."
+            self.set_subscriber_mode(chat_id, target_mode)
             client.post(
                 self._api_url("sendMessage"),
                 data={
                     "chat_id": chat_id,
-                    "text": (
-                        "🚨 Режим «Только падения»: вам будут приходить только падение и сползание.\n"
-                        "Посадка, выход из кровати и жест рукой — без уведомлений (видны в хронике пульта)."
-                        if want_falls
-                        else "📣 Режим «Все события»: посадка, выход из кровати, жест рукой и падения."
-                    ),
+                    "text": reply_text,
                     "reply_markup": self._user_keyboard(chat_id),
                 },
             )

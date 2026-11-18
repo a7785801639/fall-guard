@@ -114,6 +114,72 @@ def _sanitize_cm(raw: object, default: float, lo: float = 10.0, hi: float = 1000
     return round(max(lo, min(hi, val)), 1)
 
 
+def _point_in_poly_2d(px: float, py: float, poly: list[list[float]]) -> bool:
+    n = len(poly)
+    if n < 3:
+        return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = float(poly[i][0]), float(poly[i][1])
+        xj, yj = float(poly[j][0]), float(poly[j][1])
+        if ((yi > py) != (yj > py)) and (
+            px < (xj - xi) * (py - yi) / ((yj - yi) if abs(yj - yi) > 1e-12 else 1e-12) + xi
+        ):
+            inside = not inside
+        j = i
+    return inside
+
+
+def polygon_coverage_ratio(
+    cover_poly: list[list[float]],
+    target_poly: list[list[float]],
+    grid_n: int = 24,
+) -> float:
+    """Возвращает долю площади target_poly [0..1], накрытую полигоном cover_poly."""
+    if len(cover_poly) < 3 or len(target_poly) < 3:
+        return 0.0
+    txs = [float(p[0]) for p in target_poly]
+    tys = [float(p[1]) for p in target_poly]
+    min_x, max_x = min(txs), max(txs)
+    min_y, max_y = min(tys), max(tys)
+    tw = max_x - min_x
+    th = max_y - min_y
+    if tw <= 1e-5 or th <= 1e-5:
+        return 0.0
+
+    cxs = [float(p[0]) for p in cover_poly]
+    cys = [float(p[1]) for p in cover_poly]
+    if max(cxs) < min_x or min(cxs) > max_x or max(cys) < min_y or min(cys) > max_y:
+        return 0.0
+
+    target_hits = 0
+    both_hits = 0
+    for iy in range(grid_n):
+        py = min_y + th * ((iy + 0.5) / grid_n)
+        for ix in range(grid_n):
+            px = min_x + tw * ((ix + 0.5) / grid_n)
+            if _point_in_poly_2d(px, py, target_poly):
+                target_hits += 1
+                if _point_in_poly_2d(px, py, cover_poly):
+                    both_hits += 1
+    return (both_hits / float(target_hits)) if target_hits > 0 else 0.0
+
+
+def _filter_bed_covering_ignores(
+    ignore_polys: list[list[list[float]]],
+    bed_poly: list[list[float]],
+    max_bed_coverage: float = 0.50,
+) -> list[list[list[float]]]:
+    if len(bed_poly) < 3 or not ignore_polys:
+        return ignore_polys
+    return [
+        poly
+        for poly in ignore_polys
+        if polygon_coverage_ratio(poly, bed_poly) < max_bed_coverage
+    ]
+
+
 def _sanitize_polygon_list(raw: object) -> list[list[list[float]]]:
     if not isinstance(raw, list):
         return []
@@ -206,6 +272,8 @@ class ZoneStore:
                 if ignore_polygons is not None
                 else self._zones.ignore_polygons
             )
+            if ignore_polygons is not None and len(new_bed) >= 3:
+                new_ignore = _filter_bed_covering_ignores(new_ignore, new_bed, max_bed_coverage=0.50)
             new_floor = (
                 _sanitize_floor_polygon(floor_polygon)
                 if floor_polygon is not None
@@ -242,6 +310,10 @@ class ZoneStore:
         clean = _sanitize_polygon(polygon)
         with self._lock:
             if len(clean) >= 3:
+                if len(self._zones.bed_polygon) >= 3 and (
+                    polygon_coverage_ratio(clean, self._zones.bed_polygon) >= 0.50
+                ):
+                    return self._zones
                 updated = [*self._zones.ignore_polygons, clean]
                 self._zones = ZonesConfig(
                     bed_polygon=self._zones.bed_polygon,

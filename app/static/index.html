@@ -227,10 +227,12 @@
     .seg.wide { display: flex; width: 100%; }
     .seg.wide button { flex: 1 1 0; min-width: 0; min-height: 40px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
     .seg svg { width: 17px; height: 17px; }
+    #modeSeg.seg.wide button { flex: 1 1 auto; padding: 0 8px; gap: 5px; font-size: 13.5px; }
     #modeSeg button[data-v="all"][aria-pressed="true"] { background: var(--calm-soft); color: var(--calm); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
+    #modeSeg button[data-v="standup"][aria-pressed="true"] { background: var(--warn-soft); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(245, 178, 58, 0.3); }
     #modeSeg button[data-v="falls"][aria-pressed="true"] { background: var(--alarm-soft); color: var(--alarm); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
     .l-short { display: none; }
-    @media (max-width: 420px) { .rowi-actions .l-long, .rcp-ctrl .l-long { display: none; } .rowi-actions .l-short, .rcp-ctrl .l-short { display: inline; } }
+    @media (max-width: 640px) { .rowi-actions .l-long, .rcp-ctrl .l-long { display: none; } .rowi-actions .l-short, .rcp-ctrl .l-short { display: inline; } .rcp-ctrl .seg button { padding: 0 9px; font-size: 12.5px; } }
     .hint { font-size: 12.5px; color: var(--muted); margin: 8px 4px 0; height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ================= Док: пауза, звук, журнал, настройки ================= */
@@ -421,9 +423,9 @@
     .icon-btn.more:hover { background: var(--fill); color: var(--text); }
     .rowi.rcp { flex-wrap: wrap; }
     .rowi.rcp .rowi-body { flex: 1 1 0; }
-    .rcp-ctrl { flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-left: 48px; }
+    .rcp-ctrl { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding-left: 48px; }
     .rcp-sw { display: inline-flex; align-items: center; gap: 10px; }
-    @media (max-width: 420px) { .rcp-ctrl { padding-left: 0; } }
+    @media (max-width: 460px) { .rcp-ctrl { padding-left: 0; gap: 8px; } .rcp-sw .small { display: none; } }
     .faces { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 12px; }
     .face { position: relative; width: 72px; height: 72px; animation: pop-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
     .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); display: block; }
@@ -650,6 +652,7 @@
     .tabs > .pill { top: 8px; height: 36px; border-radius: 999px; background: var(--text); box-shadow: none; }
     .has-pill > button[aria-pressed="true"], .has-pill > button[aria-selected="true"] { background: transparent !important; box-shadow: none !important; }
     #modeSeg .pill[data-v="all"] { background: var(--calm-soft); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
+    #modeSeg .pill[data-v="standup"] { background: var(--warn-soft); box-shadow: inset 0 0 0 1px rgba(245, 178, 58, 0.3); }
     #modeSeg .pill[data-v="falls"] { background: var(--alarm-soft); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
     /* «Сейчас» на хронике дышит цветом текущего состояния */
     .ribbon-wrap { position: relative; }
@@ -879,8 +882,9 @@
         <section class="signal">
           <div class="caption"><b>Сигнал</b><span id="modeWho">в этом браузере</span></div>
           <div class="seg wide" id="modeSeg">
-            <button data-v="all" aria-pressed="true" onclick="setMyMode('all')"><svg class="ico"><use href="#i-bell"/></svg>Все события</button>
-            <button data-v="falls" aria-pressed="false" onclick="setMyMode('falls')"><svg class="ico"><use href="#i-alert"/></svg>Только падения</button>
+            <button data-v="all" aria-pressed="true" onclick="setMyMode('all')" title="Все события"><svg class="ico"><use href="#i-bell"/></svg>Все</button>
+            <button data-v="standup" aria-pressed="false" onclick="setMyMode('standup')" title="Только вставание и падение"><svg class="ico"><use href="#i-walk"/></svg>Вставание</button>
+            <button data-v="falls" aria-pressed="false" onclick="setMyMode('falls')" title="Только падения"><svg class="ico"><use href="#i-alert"/></svg>Падения</button>
           </div>
           <div class="hint" id="modeHint"></div>
         </section>
@@ -998,8 +1002,9 @@
   const WARN_STATES = ["help_call", "sitting_up", "left_bed", "missing"];
   const native = window.FallGuardAndroid || null;
 
+  const normMode = (m) => (m === "falls" || m === "standup" ? m : "all");
   let token = "";
-  let me = { kind: "lan", id: "", name: "Этот браузер", mode: lsGet("fg_mode", "all"), enabled: true };
+  let me = { kind: "lan", id: "", name: "Этот браузер", mode: normMode(lsGet("fg_mode", "all")), enabled: true };
   let started = false;
   let S = null;            // последний /api/status
   let live = null;         // последняя телеметрия
@@ -1135,6 +1140,7 @@
   function alarmLevel(st, unack) {
     if (st === "fallen") return "alarm";
     if (me.mode === "falls") return "";
+    if (me.mode === "standup") return st === "left_bed" ? "warn" : "";
     if (unack) return "alarm";
     return WARN_STATES.includes(st) ? "warn" : "";
   }
@@ -2015,16 +2021,27 @@
   }
   function snoozeSetup() { lsSet("fg_setup_snooze", String(Date.now() + 86400000)); renderSetup(); toast("Напомню завтра", "info"); }
 
-  /* ---------- Мой режим: только падение и сползание ---------- */
+  /* ---------- Мой режим: все / только вставание / только падения ---------- */
+  const MODE_HINT = {
+    all: "Сигнал при посадке, выходе и падении",
+    standup: "Сигнал, когда встала с кровати или упала",
+    falls: "Посадка и выход — только в журнал",
+  };
+  const MODE_TOAST = {
+    all: "Сигналят все события",
+    standup: "Сигнал только при вставании и падении",
+    falls: "Сигнал только при падении и сползании",
+  };
   function renderMode() {
-    const on = me.mode === "falls";
-    for (const b of $("modeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String((b.dataset.v === "falls") === on));
+    const cur = normMode(me.mode);
+    for (const b of $("modeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === cur));
     $("modeWho").textContent = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
-    $("modeHint").textContent = on ? "Посадка и выход — только в журнал" : "Сигнал при посадке, выходе и падении";
+    $("modeHint").textContent = MODE_HINT[cur] || MODE_HINT.all;
     syncPills($("modeSeg").parentNode);
   }
   async function setMyMode(next) {
-    if (next === me.mode) return;
+    next = normMode(next);
+    if (next === normMode(me.mode)) return;
     haptic();
     if (me.kind === "lan") { me.mode = next; lsSet("fg_mode", next); }
     else {
@@ -2034,7 +2051,7 @@
       poll();
     }
     renderMode(); renderFast();
-    toast(next === "falls" ? "Сигнал только при падении и сползании" : "Сигналят все события");
+    toast(MODE_TOAST[next] || MODE_TOAST.all);
   }
 
   /* ---------- Хроника под видео ---------- */
@@ -2550,7 +2567,10 @@
     $("sheetBody").scrollTop = 0;
   }
   const sw = (on, onclick, label) => `<button class="switch" role="switch" aria-checked="${on ? "true" : "false"}" aria-label="${esc(label)}" onclick="${onclick}"></button>`;
-  const modeSeg = (mode, fn) => `<div class="seg"><button aria-pressed="${mode !== "falls"}" onclick="${fn}('all')" title="Все события"><span class="l-long">Все события</span><span class="l-short">Все</span></button><button aria-pressed="${mode === "falls"}" onclick="${fn}('falls')" title="Только падения"><span class="l-long">Только падения</span><span class="l-short">Падения</span></button></div>`;
+  const modeSeg = (mode, fn) => {
+    const m = normMode(mode);
+    return `<div class="seg"><button data-v="all" aria-pressed="${m === "all"}" onclick="${fn}('all')" title="Все события"><span class="l-long">Все события</span><span class="l-short">Все</span></button><button data-v="standup" aria-pressed="${m === "standup"}" onclick="${fn}('standup')" title="Только вставание и падение"><span class="l-long">Только вставание</span><span class="l-short">Вставание</span></button><button data-v="falls" aria-pressed="${m === "falls"}" onclick="${fn}('falls')" title="Только падения"><span class="l-long">Только падения</span><span class="l-short">Падения</span></button></div>`;
+  };
 
   function tabRecipients() {
     const subs = S.telegram_subscribers || [], devs = S.devices || [];
@@ -2725,7 +2745,7 @@
   async function refreshMe() {
     try {
       const r = await api("/api/me");
-      if (r.ok) { const d = await r.json(); if (d.me && d.me.kind !== "lan") me = d.me; else if (d.me) me = Object.assign(d.me, { mode: lsGet("fg_mode", "all") }); }
+      if (r.ok) { const d = await r.json(); if (d.me && d.me.kind !== "lan") me = d.me; else if (d.me) me = Object.assign(d.me, { mode: normMode(lsGet("fg_mode", "all")) }); }
     } catch (_) {}
     renderMode();
     await poll();

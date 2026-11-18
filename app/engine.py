@@ -14,7 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Iterator, Sequence
 
 import cv2
 import numpy as np
@@ -46,7 +46,7 @@ from .runtime_prefs import RuntimePrefsStore
 from .state_machine import AlertEvent, FallStateMachine, PatientState
 from .stream_hub import H264StreamHub
 from .timeline import TimelineStore
-from .zones import ZonesConfig, ZoneStore
+from .zones import ZonesConfig, ZoneStore, polygon_coverage_ratio
 
 logger = logging.getLogger("fallguard.engine")
 
@@ -181,6 +181,23 @@ def _is_obs_touching_door(obs: PoseObservation, door_poly: list[list[float]]) ->
     return bbox_polygon_overlap_ratio(obs.bbox_norm, door_poly) >= 0.12
 
 
+def _sanitize_bed_obs_compat(
+    obs: PoseObservation,
+    bed_polygon: list[list[float]],
+    other_observations: Sequence[PoseObservation] = (),
+    zones: ZonesConfig | None = None,
+) -> PoseObservation:
+    try:
+        return sanitize_collapsed_bed_keypoints(  # type: ignore[call-arg]
+            obs,
+            bed_polygon,
+            other_observations=other_observations,
+            zones=zones,
+        )
+    except TypeError:
+        return sanitize_collapsed_bed_keypoints(obs, bed_polygon)
+
+
 def _filter_ignored_observations(
     observations: list[PoseObservation],
     zones: ZonesConfig,
@@ -190,12 +207,25 @@ def _filter_ignored_observations(
         return observations
     door_poly = getattr(zones, "door_polygon", None)
     has_door = isinstance(door_poly, list) and len(door_poly) >= 3
-    return [
-        obs
-        for obs in observations
-        if (has_door and _is_obs_touching_door(obs, door_poly))
-        or not any(_is_obs_in_ignore_zone(obs, poly) for poly in ignore_polys)
+    has_bed = zones.has_bed
+    safe_bed_ignores = [
+        poly
+        for poly in ignore_polys
+        if not (has_bed and polygon_coverage_ratio(poly, zones.bed_polygon) >= 0.20)
     ]
+    out: list[PoseObservation] = []
+    for obs in observations:
+        if has_door and _is_obs_touching_door(obs, door_poly):
+            out.append(obs)
+            continue
+        active_polys = (
+            safe_bed_ignores
+            if (has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones))
+            else ignore_polys
+        )
+        if not any(_is_obs_in_ignore_zone(obs, poly) for poly in active_polys):
+            out.append(obs)
+    return out
 
 
 class _FallbackThumbnailStore:
@@ -539,6 +569,7 @@ def _compute_roi_optical_motion(
     cur_gray: np.ndarray | None,
     prev_gray: np.ndarray | None,
     bbox_norm: tuple[float, float, float, float],
+    exclude_bboxes: Sequence[tuple[float, float, float, float]] = (),
 ) -> float | None:
     """Доля пикселей внутри расширенного бокса трека с |I_t - I_{t-1}| > 10 (подавляет ИК-зерно матрицы)."""
     if cur_gray is None or prev_gray is None or cur_gray.shape != prev_gray.shape:
@@ -551,6 +582,18 @@ def _compute_roi_optical_motion(
     if (x2 - x1) < 4 or (y2 - y1) < 4:
         return None
     diff = cv2.absdiff(cur_gray[y1:y2, x1:x2], prev_gray[y1:y2, x1:x2])
+    if exclude_bboxes:
+        mask = np.ones(diff.shape, dtype=bool)
+        for ex in exclude_bboxes:
+            ex1 = max(0, int(math.floor(float(ex[0]) * w)) - x1)
+            ey1 = max(0, int(math.floor(float(ex[1]) * h)) - y1)
+            ex2 = min(x2 - x1, int(math.ceil(float(ex[2]) * w)) - x1)
+            ey2 = min(y2 - y1, int(math.ceil(float(ex[3]) * h)) - y1)
+            if ex2 > ex1 and ey2 > ey1:
+                mask[ey1:ey2, ex1:ex2] = False
+        valid_px = int(np.count_nonzero(mask))
+        if valid_px >= 8:
+            return float(np.mean(diff[mask] > 10))
     return float(np.mean(diff > 10))
 
 
@@ -594,6 +637,7 @@ class _TrackTelemetryState:
     reason_code: str = ""
     bed_sec: float = 0.0
     on_bed: bool = False
+    occluded_by_other: bool = False
     last_confirmed_mono: float = 0.0
     anchor_opt_gray: np.ndarray | None = field(default=None, repr=False)
 
@@ -1172,49 +1216,92 @@ class FallGuardEngine:
             self._sync_tracks_summary_locked()
         self.publish_telemetry()
 
+    IGNORE_CONFLICT_DETAIL: str = (
+        "Нельзя добавить игнор-зону поверх кровати или двери — используйте кнопку «Свой»"
+    )
+
     def ignore_track(self, track_id: int) -> tuple[bool, ZonesConfig]:
         bbox: tuple[float, float, float, float] | None = None
+        obs_found: PoseObservation | None = None
+        role_found: Role | None = None
         with self._lock:
             for obs in self._latest_observations:
                 if obs.track_id == track_id:
+                    obs_found = obs
                     bbox = obs.bbox_norm
                     break
-            if bbox is None:
-                for tr_item in self._active_tracks_summary:
-                    if tr_item.get("track_id") == track_id and isinstance(tr_item.get("bbox"), list):
+            ident_lat = self._latest_identities.get(track_id)
+            if ident_lat is not None:
+                role_found = ident_lat.role
+            for tr_item in self._active_tracks_summary:
+                if tr_item.get("track_id") == track_id:
+                    if role_found is None and str(tr_item.get("role") or "") == Role.PATIENT.value:
+                        role_found = Role.PATIENT
+                    if bbox is None and isinstance(tr_item.get("bbox"), list):
                         b = tr_item["bbox"]
                         if len(b) == 4:
                             bbox = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
-                            break
+                    break
 
+        ident_tracks = getattr(self.identifier, "_tracks", None)
+        if role_found is None and isinstance(ident_tracks, dict) and track_id in ident_tracks:
+            role_found = ident_tracks[track_id].role
+
+        cur_zones = self.zones.get()
         if bbox is None:
-            return False, self.zones.get()
+            return False, cur_zones
 
         pad = 0.02
         x1 = max(0.0, round(bbox[0] - pad, 5))
         y1 = max(0.0, round(bbox[1] - pad, 5))
         x2 = min(1.0, round(bbox[2] + pad, 5))
         y2 = min(1.0, round(bbox[3] + pad, 5))
+        cand_bbox = (x1, y1, x2, y2)
         poly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
+        if role_found == Role.PATIENT:
+            raise ValueError(self.IGNORE_CONFLICT_DETAIL)
+        if cur_zones.has_bed:
+            on_bed_flag = obs_found is not None and is_person_on_bed(
+                obs_found, cur_zones.bed_polygon, zones=cur_zones
+            )
+            box_in_bed = bbox_polygon_overlap_ratio(cand_bbox, cur_zones.bed_polygon, grid_n=12)
+            bed_cov = polygon_coverage_ratio(poly, cur_zones.bed_polygon, grid_n=24)
+            if on_bed_flag or box_in_bed >= 0.12 or bed_cov >= 0.12:
+                raise ValueError(self.IGNORE_CONFLICT_DETAIL)
+        if cur_zones.has_door:
+            box_in_door = bbox_polygon_overlap_ratio(cand_bbox, cur_zones.door_polygon, grid_n=12)
+            door_cov = polygon_coverage_ratio(poly, cur_zones.door_polygon, grid_n=24)
+            if box_in_door >= 0.25 or door_cov >= 0.25:
+                raise ValueError(self.IGNORE_CONFLICT_DETAIL)
+
         updated_zones = self.zones.add_ignore_polygon(poly)
-        self.clear_patient_anchor()
+        if hasattr(self.identifier, "rollback_or_clear_polluted_anchor"):
+            with contextlib.suppress(Exception):
+                self.identifier.rollback_or_clear_polluted_anchor(track_id)  # type: ignore[attr-defined]
+        if isinstance(ident_tracks, dict):
+            ident_lock = getattr(self.identifier, "_lock", self._lock)
+            with ident_lock:
+                ident_tracks.pop(track_id, None)
 
         with self._lock:
             self._telemetry_latch.pop(track_id, None)
+            self._latest_identities.pop(track_id, None)
             self._latest_observations = [
                 o for o in self._latest_observations if o.track_id != track_id
             ]
             self._active_tracks_summary = [
                 t for t in self._active_tracks_summary if t.get("track_id") != track_id
             ]
+            self._sync_tracks_summary_locked()
 
-        if hasattr(self.fsm, "reset_to_idle"):
-            self.fsm.reset_to_idle()  # type: ignore[attr-defined]
-        elif self.fsm.state not in (PatientState.PAUSED, PatientState.IN_BED):
-            rem = self.fsm.pause_remaining_sec(time.monotonic())
-            if rem <= 0:
-                self.fsm.acknowledge_and_pause(time.monotonic(), 0.0)
+        if not self._is_patient_in_bed_latched():
+            if hasattr(self.fsm, "reset_to_idle"):
+                self.fsm.reset_to_idle()  # type: ignore[attr-defined]
+            elif self.fsm.state not in (PatientState.PAUSED, PatientState.IN_BED):
+                rem = self.fsm.pause_remaining_sec(time.monotonic())
+                if rem <= 0:
+                    self.fsm.acknowledge_and_pause(time.monotonic(), 0.0)
 
         if hasattr(self.pose, "reset_smoother"):
             self.pose.reset_smoother()  # type: ignore[attr-defined]
@@ -1277,10 +1364,16 @@ class FallGuardEngine:
         optical_motion_ratio: float | None = None,
         cur_opt_gray: np.ndarray | None = None,
         now_mono: float | None = None,
+        other_observations: Sequence[PoseObservation] = (),
     ) -> dict[str, Any]:
         ts_mono = time.monotonic() if now_mono is None else now_mono
         obs_clean = (
-            sanitize_collapsed_bed_keypoints(obs, zones.bed_polygon)
+            _sanitize_bed_obs_compat(
+                obs,
+                zones.bed_polygon,
+                other_observations=other_observations,
+                zones=zones,
+            )
             if zones.has_bed
             else obs
         )
@@ -1324,21 +1417,27 @@ class FallGuardEngine:
             skeleton_span = 0.0
 
         has_confident_hip = active_mask[11] or active_mask[12]
+        on_bed_now = bool(
+            (zones.has_bed and is_person_on_bed(obs_clean, zones.bed_polygon, zones=zones))
+            or reason_code in ("bed_sleep_lock", "sole_bed_sleeper_recovery")
+        )
+        calm_state = state in (
+            PatientState.IN_BED,
+            PatientState.CAREGIVER_ASSIST,
+            PatientState.PAUSED,
+            PatientState.IDLE,
+        )
         hide_skeleton = bool(
             skeleton_span < 0.11
             or (
                 role_val == Role.PATIENT.value
-                and state == PatientState.IN_BED
+                and calm_state
+                and (on_bed_now or state == PatientState.IN_BED)
                 and not has_confident_hip
             )
         )
         height_cm, floor_xy_cm = _compute_track_25d_metrics(obs_clean, zones)
         angle_deg = round(obs_clean.torso_angle_from_vertical_deg() or 0.0, 1)
-
-        on_bed_now = bool(
-            (zones.has_bed and is_person_on_bed(obs_clean, zones.bed_polygon, zones=zones))
-            or reason_code in ("bed_sleep_lock", "sole_bed_sleeper_recovery")
-        )
         in_bed_sleep = state == PatientState.IN_BED or reason_code in (
             "bed_sleep_lock",
             "sole_bed_sleeper_recovery",
@@ -1380,6 +1479,16 @@ class FallGuardEngine:
                             entry = prev_rec
                             break
 
+            occluded_now = bool(
+                on_bed_now
+                and other_observations
+                and any(
+                    bbox_iou(raw_bbox, o.bbox_norm) >= 0.08
+                    or (entry is not None and bbox_iou(entry.anchor_bbox, o.bbox_norm) >= 0.08)
+                    for o in other_observations
+                )
+            )
+
             if entry is not None:
                 entry.last_seen_mono = ts_mono
                 entry.last_confirmed_mono = ts_mono
@@ -1389,6 +1498,10 @@ class FallGuardEngine:
                 entry.on_bed = on_bed_now
 
                 bbox_delta = max(abs(raw_bbox[i] - entry.anchor_bbox[i]) for i in range(4))
+                occlusion_shift = (occluded_now != entry.occluded_by_other) or (
+                    occluded_now and bbox_delta > 0.020
+                )
+                entry.occluded_by_other = occluded_now
                 kp_deltas: list[float] = []
                 for k in range(17):
                     if entry.active_mask[k] and raw_kps[k][2] >= 0.50:
@@ -1423,6 +1536,19 @@ class FallGuardEngine:
                         or common_kp_delta > deadzone_k
                         or sudden_limb_emergence
                     )
+
+                if is_still and (occlusion_shift or (hide_skeleton != entry.frozen_hide_skeleton)):
+                    entry.anchor_bbox = raw_bbox
+                    entry.frozen_bbox = [round(v, 4) for v in raw_bbox]
+                    entry.anchor_kps = list(raw_kps)
+                    entry.active_mask = list(active_mask)
+                    entry.frozen_kps = [
+                        [round(kx, 4), round(ky, 4), round(kc, 3)]
+                        if kc >= KP_TELEMETRY_MIN_CONF
+                        else [0.0, 0.0, 0.0]
+                        for (kx, ky, kc) in raw_kps
+                    ]
+                    entry.frozen_hide_skeleton = hide_skeleton
 
                 if is_still:
                     entry.was_still = True
@@ -1485,6 +1611,7 @@ class FallGuardEngine:
                 reason_code=reason_code,
                 bed_sec=bed_sec,
                 on_bed=on_bed_now,
+                occluded_by_other=occluded_now,
                 last_confirmed_mono=ts_mono,
                 anchor_opt_gray=cur_opt_gray,
             )
@@ -1660,9 +1787,13 @@ class FallGuardEngine:
                     cur_opt_gray,
                     prev_opt_gray,
                     obs.bbox_norm,
+                    exclude_bboxes=[
+                        o.bbox_norm for o in live_observations if o.track_id != obs.track_id
+                    ],
                 ),
                 cur_opt_gray=cur_opt_gray,
                 now_mono=ts_mono,
+                other_observations=[o for o in live_observations if o.track_id != obs.track_id],
             )
             for obs in live_observations
         ]

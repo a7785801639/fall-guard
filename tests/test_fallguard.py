@@ -2744,8 +2744,8 @@ def test_sanitize_collapsed_bed_keypoints_eliminates_false_vertical_angle_and_pr
     crumpled_kps[0] = (0.552, 0.542, 0.88)   # нос
     crumpled_kps[1] = (0.548, 0.538, 0.86)   # левый глаз
     crumpled_kps[2] = (0.556, 0.538, 0.84)   # правый глаз
-    crumpled_kps[5] = (0.544, 0.555, 0.78)   # левое плечо
-    crumpled_kps[6] = (0.560, 0.556, 0.76)   # правое плечо
+    crumpled_kps[5] = (0.524, 0.555, 0.78)   # левое плечо (физиологическая ширина ±0.028)
+    crumpled_kps[6] = (0.580, 0.556, 0.76)   # правое плечо
     # Фантомно сваленные на подушку бёдра, колени и лодыжки прямо под подбородком (dy = 0.04 -> angle ~ 2°)
     crumpled_kps[11] = (0.545, 0.595, 0.52)
     crumpled_kps[12] = (0.559, 0.596, 0.50)
@@ -2803,8 +2803,8 @@ def test_bed_envelope_bbox_stabilizer_and_clean_hud_without_face_micro_skeleton(
     head_only_kps = [(0.0, 0.0, 0.0)] * 17
     head_only_kps[0] = (0.555, 0.555, 0.85)
     head_only_kps[1] = (0.560, 0.550, 0.82)
-    head_only_kps[5] = (0.540, 0.570, 0.76)
-    head_only_kps[6] = (0.558, 0.575, 0.74)
+    head_only_kps[5] = (0.527, 0.570, 0.76)
+    head_only_kps[6] = (0.583, 0.575, 0.74)
     tiny_head_obs = PoseObservation(
         track_id=1,
         bbox_norm=(0.520, 0.525, 0.595, 0.600),  # сжался до 0.075 x 0.075!
@@ -4801,4 +4801,244 @@ def test_wave8_restore_bed_presence_recovers_latch_and_persists_anchor_json(tmp_
     )
     assert ident_reloaded.patient_in_bed_latched is True
     assert ident_reloaded.latched_patient_bed_bbox is not None
+
+
+# 67. Волна 12: PerspectiveScaleField, отсев фантомов пустой кровати (clutter_roi#roi0/#roi1) и ходунков (< 105 см)
+def test_wave12_perspective_scale_field_and_empty_bed_clutter_rejection() -> None:
+    from app.geometry import PerspectiveScaleField, is_pose_in_ignore_zones, is_valid_human_pose
+
+    bed_poly = [
+        [0.59805, 0.79135],
+        [0.60234, 0.65649],
+        [0.66389, 0.64504],
+        [0.69395, 0.56997],
+        [0.66890, 0.41858],
+        [0.30964, 0.40458],
+        [0.25740, 0.57888],
+        [0.27815, 0.78880],
+    ]
+    zones_with_floor = ZonesConfig(
+        bed_polygon=bed_poly,
+        door_polygon=[[0.20659, 0.19211], [0.26885, 0.82188], [0.21947, 0.99746], [0.18297, 0.99746], [0.06847, 0.26845]],
+        floor_polygon=DEFAULT_FLOOR_POLYGON_STD,
+    )
+    zones_no_floor = ZonesConfig(bed_polygon=bed_poly, door_polygon=[], floor_polygon=[])
+
+    psf_a = PerspectiveScaleField.from_zones(zones_with_floor)
+    psf_b = PerspectiveScaleField.from_zones(zones_no_floor)
+    for v_probe in (0.44, 0.58, 0.80, 0.92):
+        assert psf_a.u_per_meter(v_probe) == pytest.approx(psf_b.u_per_meter(v_probe), abs=1e-5)
+    assert psf_a.u_per_meter(0.44) < psf_a.u_per_meter(0.58) < psf_a.u_per_meter(0.80) < psf_a.u_per_meter(0.92)
+
+    # Фантом пустой кровати clutter_roi#roi0 (тёмно-синий плед + подушка, conf=0.642 >= 0.48, 15 микро-точек!)
+    roi0_kps = [(0.0, 0.0, 0.0)] * 17
+    roi0_kps[0] = (0.595, 0.542, 0.72)
+    roi0_kps[1] = (0.598, 0.539, 0.70)
+    roi0_kps[2] = (0.593, 0.540, 0.68)
+    roi0_kps[5] = (0.579, 0.547, 0.66)
+    roi0_kps[6] = (0.580, 0.540, 0.65)   # sh_width ~ 3.1 см, head-sh ~ 7.5 см
+    roi0_kps[11] = (0.539, 0.556, 0.58)  # sh-hip ~ 18.3 см
+    roi0_kps[12] = (0.540, 0.549, 0.57)
+    roi0_kps[13] = (0.522, 0.564, 0.52)
+    roi0_kps[14] = (0.524, 0.555, 0.50)
+    roi0_kps[15] = (0.511, 0.572, 0.49)  # leg_chain ~ 23.4 см
+    roi0_kps[16] = (0.513, 0.562, 0.48)
+    clutter_roi0 = PoseObservation(
+        track_id=9001,
+        bbox_norm=(0.5081, 0.5114, 0.6430, 0.6016),
+        conf=0.642,
+        keypoints_norm=tuple(roi0_kps),
+    )
+    san_roi0 = sanitize_collapsed_bed_keypoints(clutter_roi0, bed_poly, zones=zones_with_floor)
+    assert san_roi0.mid_hip is None
+    assert is_valid_human_pose(clutter_roi0, min_box_conf=0.48, zones=zones_with_floor) is False
+    assert is_blanket_sleeper_in_bed(clutter_roi0, bed_poly, zones=zones_with_floor) is False
+
+    # Мелкая складка одеяла clutter_roi#roi1 (w=0.0583, h=0.0633, Diag ~ 39.5 см < 44 см)
+    roi1_kps = [(0.0, 0.0, 0.0)] * 17
+    roi1_kps[0] = (0.462, 0.535, 0.62)
+    roi1_kps[1] = (0.465, 0.532, 0.60)
+    roi1_kps[5] = (0.442, 0.544, 0.58)
+    roi1_kps[6] = (0.445, 0.538, 0.56)
+    clutter_roi1 = PoseObservation(
+        track_id=9002,
+        bbox_norm=(0.4250, 0.5120, 0.4833, 0.5753),
+        conf=0.290,
+        keypoints_norm=tuple(roi1_kps),
+    )
+    assert is_valid_human_pose(clutter_roi1, min_box_conf=0.48, zones=zones_with_floor) is False
+    assert is_blanket_sleeper_in_bed(clutter_roi1, bed_poly, zones=zones_with_floor) is False
+
+    # Проверка FloorHomography: низкий предмет высотой ~82 см (ходунки/стул) не проходит как стоящий человек (< 105 см)
+    hom = FloorHomography.from_zones(zones_with_floor, bed_polygon=bed_poly)
+    walker_obs = make_pose(
+        track_id=77,
+        bbox=(0.44, 0.68, 0.52, 0.89),
+        shoulder=(0.48, 0.72),
+        hip=(0.48, 0.80),
+        ankle=(0.48, 0.88),
+        conf=0.60,
+    )
+    m_walker = hom.measure_pose(walker_obs, bed_polygon=bed_poly)
+    assert m_walker.height_cm is None
+    assert m_walker.standing_on_floor_in_front is False
+
+    # Самозащита кровати от ошибочного ignore_polygon поверх матраса (>= 20% площади кровати, кейс 14:07/14:09)
+    bad_bed_ignore = [[[0.29177, 0.46397], [0.66743, 0.46397], [0.66743, 0.83524], [0.29177, 0.83524]]]
+    real_sleeper = make_pose(1, (0.282, 0.519, 0.583, 0.648), (0.535, 0.570), (0.455, 0.580), ankle=(0.310, 0.590))
+    assert (
+        is_pose_in_ignore_zones(
+            real_sleeper,
+            bad_bed_ignore,
+            bed_polygon=bed_poly,
+            zones=zones_with_floor,
+        )
+        is False
+    )
+
+
+# 68. Волна 12: Скриншот пользователя (user_shot_1080#det1) — санация кукольных ног 22.3 см,
+# обрезка конверта кровати по окклюдеру Свой без потери эталона и скрытие полускелета в CAREGIVER_ASSIST
+def test_wave12_user_screenshot_doll_legs_sanitized_bbox_clipped_by_occluder_and_skeleton_hidden(
+    tmp_path: Path,
+) -> None:
+    from app.geometry import bbox_iou, is_valid_human_pose
+
+    bed_poly = [
+        [0.59805, 0.79135],
+        [0.60234, 0.65649],
+        [0.66389, 0.64504],
+        [0.69395, 0.56997],
+        [0.66890, 0.41858],
+        [0.30964, 0.40458],
+        [0.25740, 0.57888],
+        [0.27815, 0.78880],
+    ]
+    zones = ZonesConfig(
+        bed_polygon=bed_poly,
+        door_polygon=[[0.20659, 0.19211], [0.26885, 0.82188], [0.21947, 0.99746], [0.18297, 0.99746], [0.06847, 0.26845]],
+        floor_polygon=DEFAULT_FLOOR_POLYGON_STD,
+    )
+
+    # Сидящая на левом краю кровати родственница «Свой»
+    vis_kps = [(0.0, 0.0, 0.0)] * 17
+    vis_kps[0] = (0.388, 0.458, 0.88)
+    vis_kps[5] = (0.355, 0.515, 0.92)
+    vis_kps[6] = (0.378, 0.502, 0.90)
+    vis_kps[7] = (0.365, 0.595, 0.86)
+    vis_kps[9] = (0.428, 0.625, 0.85)  # кисти родственницы на руках бабушки
+    vis_kps[10] = (0.425, 0.612, 0.84)
+    vis_kps[11] = (0.345, 0.652, 0.91)
+    vis_kps[12] = (0.368, 0.638, 0.89)
+    vis_kps[13] = (0.402, 0.722, 0.90)
+    vis_kps[14] = (0.425, 0.698, 0.88)
+    vis_kps[15] = (0.375, 0.865, 0.89)
+    vis_kps[16] = (0.408, 0.825, 0.87)
+    visitor_obs = PoseObservation(
+        track_id=2,
+        bbox_norm=(0.3188, 0.4107, 0.4476, 0.9006),
+        conf=0.91,
+        keypoints_norm=tuple(vis_kps),
+    )
+
+    # Реконструированный скелет Бабушки со скриншота: взрослый верх + кукольные ноги 22.3 см на кистях гостя
+    pat_kps = [(0.0, 0.0, 0.0)] * 17
+    pat_kps[0] = (0.5449, 0.5396, 0.82)
+    pat_kps[5] = (0.5370, 0.6127, 0.84)
+    pat_kps[6] = (0.5290, 0.5596, 0.81)
+    pat_kps[7] = (0.4991, 0.6623, 0.78)
+    pat_kps[8] = (0.4985, 0.5537, 0.72)
+    pat_kps[9] = (0.4507, 0.6351, 0.76)
+    pat_kps[10] = (0.4799, 0.5431, 0.68)
+    pat_kps[11] = (0.4726, 0.6245, 0.66)
+    pat_kps[12] = (0.4653, 0.5903, 0.64)
+    pat_kps[13] = (0.4500, 0.6210, 0.61)
+    pat_kps[14] = (0.4347, 0.5820, 0.59)
+    pat_kps[15] = (0.4254, 0.6422, 0.58)
+    pat_kps[16] = (0.4288, 0.6127, 0.57)
+    raw_pat_obs = PoseObservation(
+        track_id=1,
+        bbox_norm=(0.4100, 0.5150, 0.5805, 0.6830),
+        conf=0.62,
+        keypoints_norm=tuple(pat_kps),
+    )
+
+    san_pat = sanitize_collapsed_bed_keypoints(
+        raw_pat_obs,
+        bed_poly,
+        other_observations=[visitor_obs],
+        zones=zones,
+    )
+    assert san_pat.head_center is not None
+    assert san_pat.mid_shoulder is not None
+    assert san_pat.mid_hip is None
+    assert san_pat.lower_limbs == []
+    assert is_valid_human_pose(san_pat, min_box_conf=0.48, zones=zones) is True
+
+    # Проверка обрезки _stabilize_bed_sleeper_bbox по окклюдеру и возврата полного конверта после ухода гостя
+    tracker = PoseTracker("yolo11m-pose.pt", tmp_path, smooth_keypoints=False)
+    full_sleep = make_pose(1, (0.2865, 0.4259, 0.5807, 0.7741), (0.533, 0.586), (0.420, 0.595), ankle=(0.305, 0.600))
+    st_full = tracker._stabilize_bed_sleeper_bbox(full_sleep, bed_poly, now=1.0)
+    assert st_full.bbox_norm[0] == pytest.approx(0.2865, abs=1e-3)
+
+    st_occluded = tracker._stabilize_bed_sleeper_bbox(
+        san_pat,
+        bed_poly,
+        now=2.0,
+        occluders=[visitor_obs],
+    )
+    assert st_occluded.bbox_norm[0] >= 0.425
+    assert bbox_iou(st_occluded.bbox_norm, visitor_obs.bbox_norm) < 0.06
+    # Внутренний конверт кровати сохранён и мгновенно раскрывается после ухода родственницы
+    assert tracker._bed_envelope_bbox is not None and tracker._bed_envelope_bbox[0] == pytest.approx(0.2865, abs=1e-3)
+    st_after_leave = tracker._stabilize_bed_sleeper_bbox(san_pat, bed_poly, now=3.0, occluders=[])
+    assert st_after_leave.bbox_norm[0] < 0.31
+
+    # В режиме CAREGIVER_ASSIST укрытая бабушка без таза рисуется с чистой рамкой без обрубка скелета!
+    blank_canvas = np.full((360, 640, 3), 42, dtype=np.uint8)
+    roles = {
+        1: TrackIdentity(track_id=1, role=Role.PATIENT, reason="bed_sleep_lock"),
+        2: TrackIdentity(track_id=2, role=Role.VISITOR, reason="door_entry"),
+    }
+    rendered_cg = render_annotated_frame(
+        frame_bgr=blank_canvas,
+        observations=[st_occluded, visitor_obs],
+        identities=roles,
+        zones=ZonesConfig(bed_polygon=bed_poly, door_polygon=[]),
+        state=PatientState.CAREGIVER_ASSIST,
+    )
+    # В области груди/лица бабушки (0.49..0.56 x 0.53..0.63) нет ни одного зелёного пикселя костей!
+    chest_patch = rendered_cg[int(0.53 * 360) : int(0.63 * 360), int(0.49 * 640) : int(0.56 * 640)]
+    assert int(np.max(np.abs(chest_patch.astype(np.int16) - 42))) == 0
+
+    # И проверка StaticObjectGate на сидящей бабушке в 14:07 с conf=0.6197 (< 0.65), согнутыми коленями и свешенными ногами
+    gate = StaticObjectGate()
+    sitting_1407 = make_pose(
+        track_id=11,
+        bbox=(0.4031, 0.4705, 0.5023, 0.8906),
+        shoulder=(0.456, 0.525),
+        hip=(0.458, 0.625),
+        knee=(0.445, 0.715),
+        ankle=(0.442, 0.855),
+        conf=0.6197,
+    )
+    assert is_person_on_bed(sitting_1407, bed_poly, zones=zones) is True
+    live_1407 = gate.update_and_filter([sitting_1407], zones=zones, now=10.0)
+    assert len(live_1407) == 1 and live_1407[0].track_id == 11
+
+    # OpticalKeypointStabilizer маскирует оптическое движение внутри бокса гостя (exclude_boxes)
+    # и мгновенно поджимает замороженный bbox бабушки при перекрытии без впуска кукольных ног
+    opt_stab = OpticalKeypointStabilizer()
+    rng = np.random.default_rng(12)
+    fr1 = rng.integers(50, 90, size=(216, 384, 3), dtype=np.uint8)
+    fr2 = fr1.copy()
+    # Сильное движение пикселей ТОЛЬКО внутри бокса родственницы (x=0.32..0.44, y=0.42..0.88)
+    fr2[int(0.42 * 216) : int(0.88 * 216), int(0.32 * 384) : int(0.44 * 384)] = 210
+    opt_stab.stabilize([st_full], frame_bgr=fr1, zones=zones, now=1.0)
+    stab_pair = opt_stab.stabilize([st_occluded, visitor_obs], frame_bgr=fr2, zones=zones, now=1.25)
+    stab_pat = next(o for o in stab_pair if o.track_id == 1)
+    assert stab_pat.is_still is True
+    assert stab_pat.bbox_norm[0] >= 0.425
+    assert stab_pat.lower_limbs == []
+
 

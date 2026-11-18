@@ -24,12 +24,30 @@ FAILED_CLAIM_WINDOW_SEC: float = 600.0
 MAX_DEVICES: int = 24
 
 ALERT_MODE_ALL = "all"
+ALERT_MODE_STANDUP = "standup"
 ALERT_MODE_FALLS = "falls"
 
 
 def normalize_alert_mode(raw: object) -> str:
     val = str(raw or "").strip().lower()
-    return ALERT_MODE_FALLS if val in ("falls", "fall", "falls_only", "fall_only") else ALERT_MODE_ALL
+    if val in ("standup", "stand", "stand_only", "standup_only", "getting_up", "left_bed"):
+        return ALERT_MODE_STANDUP
+    if val in ("falls", "fall", "falls_only", "fall_only"):
+        return ALERT_MODE_FALLS
+    return ALERT_MODE_ALL
+
+
+def alert_matches_mode(state: object, severity: object, mode: object) -> bool:
+    st = str(getattr(state, "value", state) or "").strip().lower()
+    sev = str(getattr(severity, "value", severity) or "").strip().lower()
+    m = normalize_alert_mode(mode)
+    if m == ALERT_MODE_ALL:
+        return True
+    if st == "fallen":
+        return True
+    if m == ALERT_MODE_STANDUP:
+        return st == "left_bed" and sev != "critical"
+    return False
 
 
 def _hash_token(token: str) -> str:
@@ -269,14 +287,14 @@ class AlertFeed:
             return dict(item)
 
     def since(self, after_seq: int, mode: str = ALERT_MODE_ALL, max_age_sec: float = 0.0) -> list[dict[str, Any]]:
-        falls_only = normalize_alert_mode(mode) == ALERT_MODE_FALLS
+        eff_mode = normalize_alert_mode(mode)
         now = time.time()
         with self._lock:
             out = []
             for item in self._items:
                 if item["seq"] <= after_seq:
                     continue
-                if falls_only and not item["is_fall"]:
+                if not alert_matches_mode(item["state"], item["severity"], eff_mode):
                     continue
                 if max_age_sec > 0.0 and (now - float(item["ts"])) > max_age_sec:
                     continue

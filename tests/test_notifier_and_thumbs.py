@@ -244,14 +244,16 @@ def test_notifier_multi_user_mute_unmute_and_persistent_reply_keyboard(tmp_path:
     cmds = {c["command"]: c["description"] for c in BOT_COMMANDS_RU}
     assert "mute" in cmds and "unmute" in cmds
 
-    # Проверяем структуру ReplyKeyboardMarkup для обоих состояний
+    # Проверяем структуру ReplyKeyboardMarkup для всех трёх режимов (all -> standup -> falls -> all)
     kb_on = json.loads(_build_reply_keyboard(enabled=True))
     assert kb_on["resize_keyboard"] is True
     assert kb_on["is_persistent"] is True
     assert kb_on["keyboard"] == [
-        [{"text": BTN_MUTE_TEXT}, {"text": "🚨 Только падения"}],
+        [{"text": BTN_MUTE_TEXT}, {"text": "🚶 Только вставание"}],
         [{"text": BTN_PHOTO_TEXT}, {"text": BTN_STATUS_TEXT}],
     ]
+    kb_stand = json.loads(_build_reply_keyboard(enabled=True, mode="standup"))
+    assert kb_stand["keyboard"][0] == [{"text": BTN_MUTE_TEXT}, {"text": "🚨 Только падения"}]
     kb_off = json.loads(_build_reply_keyboard(enabled=False, mode="falls"))
     assert kb_off["keyboard"][0] == [{"text": BTN_UNMUTE_TEXT}, {"text": "📣 Все события"}]
 

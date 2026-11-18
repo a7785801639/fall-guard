@@ -75,6 +75,24 @@ DAY_DESCRIPTOR_DIM = 48
 NIGHT_DESCRIPTOR_DIM = 64
 
 
+def _sanitize_bed_pose_compat(
+    obs: PoseObservation,
+    bed_polygon: Sequence[Sequence[float]],
+    other_observations: Sequence[PoseObservation] = (),
+    zones: ZonesConfig | None = None,
+) -> PoseObservation:
+    """Вызывает sanitize_collapsed_bed_keypoints с поддержкой расширенной сигнатуры v2."""
+    try:
+        return sanitize_collapsed_bed_keypoints(  # type: ignore[call-arg]
+            obs,
+            bed_polygon,
+            other_observations=other_observations,
+            zones=zones,
+        )
+    except TypeError:
+        return sanitize_collapsed_bed_keypoints(obs, bed_polygon)
+
+
 class Role(str, enum.Enum):
     PATIENT = "patient"
     VISITOR = "visitor"
@@ -1277,6 +1295,7 @@ class PatientIdentifier:
         # Закон сохранения Бабушки в кровати (Волна 7: patient_in_bed_latched)
         self._patient_in_bed_latched: bool = False
         self._latched_patient_bed_bbox: tuple[float, float, float, float] | None = None
+        self._last_confirmed_bed_bbox: tuple[float, float, float, float] | None = None
         self._latched_patient_track_id: int = 1
         self._latched_bed_wall_ts: float = 0.0
 
@@ -1516,7 +1535,9 @@ class PatientIdentifier:
             else:
                 vals = tuple(float(v) for v in value)
                 if len(vals) == 4:
-                    self._latched_patient_bed_bbox = (vals[0], vals[1], vals[2], vals[3])
+                    box4 = (vals[0], vals[1], vals[2], vals[3])
+                    self._latched_patient_bed_bbox = box4
+                    self._last_confirmed_bed_bbox = box4
 
     @property
     def latched_patient_track_id(self) -> int:
@@ -1534,6 +1555,7 @@ class PatientIdentifier:
             was_latched = self._patient_in_bed_latched or (self._latched_patient_bed_bbox is not None)
             self._patient_in_bed_latched = False
             self._latched_patient_bed_bbox = None
+            self._last_confirmed_bed_bbox = None
             self._latched_bed_wall_ts = 0.0
             self._sole_mover_at_door_ts = -1e9
             self._sole_mover_last_seen_ts = -1e9
@@ -1556,6 +1578,8 @@ class PatientIdentifier:
             self._sole_mover_at_door_ts = -1e9
             self._sole_mover_last_seen_ts = -1e9
             self._ever_locked_patient = True
+            if self._latched_patient_bed_bbox is None and self._last_confirmed_bed_bbox is not None:
+                self._latched_patient_bed_bbox = self._last_confirmed_bed_bbox
             if self._latched_patient_bed_bbox is None and self._last_zones is not None and self._last_zones.has_bed:
                 xs = [float(p[0]) for p in self._last_zones.bed_polygon]
                 ys = [float(p[1]) for p in self._last_zones.bed_polygon]
@@ -1569,6 +1593,8 @@ class PatientIdentifier:
                     min(1.0, max_x - 0.12 * bw),
                     min(1.0, max_y - 0.15 * bh),
                 )
+            if self._latched_patient_bed_bbox is not None:
+                self._last_confirmed_bed_bbox = self._latched_patient_bed_bbox
             if self._last_patient_pos is None and self._latched_patient_bed_bbox is not None:
                 bx1, by1, bx2, by2 = self._latched_patient_bed_bbox
                 self._last_patient_pos = ((bx1 + bx2) * 0.5, (by1 + by2) * 0.5)
@@ -1673,6 +1699,7 @@ class PatientIdentifier:
             self._last_patient_seen_at = -1e9
             self._patient_in_bed_latched = False
             self._latched_patient_bed_bbox = None
+            self._last_confirmed_bed_bbox = None
             self._latched_bed_wall_ts = 0.0
             self._first_update_ts = None
             self._sole_mover_at_door_ts = -1e9
@@ -1807,12 +1834,14 @@ class PatientIdentifier:
                     self._clean_bed_anchor_night = self._anchor_vec_night.copy()
                 raw_bbox = raw.get("latched_patient_bed_bbox")
                 if isinstance(raw_bbox, list) and len(raw_bbox) == 4:
-                    self._latched_patient_bed_bbox = (
+                    loaded_box = (
                         float(raw_bbox[0]),
                         float(raw_bbox[1]),
                         float(raw_bbox[2]),
                         float(raw_bbox[3]),
                     )
+                    self._latched_patient_bed_bbox = loaded_box
+                    self._last_confirmed_bed_bbox = loaded_box
                 raw_tid = raw.get("latched_patient_track_id")
                 if isinstance(raw_tid, int) and raw_tid > 0:
                     self._latched_patient_track_id = int(raw_tid)
@@ -2049,6 +2078,7 @@ class PatientIdentifier:
                     self._patient_in_bed_latched = True
                     self._latched_patient_track_id = track_id
                     self._latched_patient_bed_bbox = obs_t.bbox_norm
+                    self._last_confirmed_bed_bbox = obs_t.bbox_norm
                     self._latched_bed_wall_ts = self._wall_clock()
                     saved_any = True
             day_vec = self._get_track_mode_vec(target, night_ir=False)
@@ -2083,6 +2113,23 @@ class PatientIdentifier:
                 return False
 
             was_patient = target.role == Role.PATIENT or self._last_patient_track_id == track_id
+            prev_was_on_bed = bool(target.was_on_bed)
+            obs_target_pre = self._last_obs_by_id.get(track_id)
+            zones_pre = self._last_zones
+            target_on_bed_pre = bool(
+                obs_target_pre is not None
+                and zones_pre is not None
+                and zones_pre.has_bed
+                and is_person_on_bed(obs_target_pre, zones_pre.bed_polygon, zones=zones_pre)
+            )
+            demoted_false_patient_outside_bed = bool(
+                was_patient
+                and not target_on_bed_pre
+                and (obs_target_pre is not None or not prev_was_on_bed)
+            )
+            prev_saved_bed_bbox = self._latched_patient_bed_bbox or self._last_confirmed_bed_bbox
+            prev_saved_bed_tid = self._latched_patient_track_id
+
             target.role = Role.VISITOR
             target.reason = "manual_visitor_override"
             target.confirmed_second_track = True
@@ -2207,6 +2254,7 @@ class PatientIdentifier:
                     prom_obs = self._last_obs_by_id.get(best_bed_tid)
                     if prom_obs is not None:
                         self._latched_patient_bed_bbox = prom_obs.bbox_norm
+                        self._last_confirmed_bed_bbox = prom_obs.bbox_norm
 
                     mode_night = self._is_night_ir
                     p_vec = self._get_track_mode_vec(promoted, mode_night)
@@ -2218,6 +2266,37 @@ class PatientIdentifier:
                         and (v_vec is None or cosine_sim(p_vec, v_vec) < 0.82)
                     ):
                         self._set_mode_anchor(p_vec, night_ir=mode_night, now=ts)
+                elif demoted_false_patient_outside_bed and self._ever_locked_patient:
+                    # Если разжалован ложный PATIENT вне кровати, а бабушка в кровати скрыта одеялом/окклюзией
+                    # (best_bed_tid is None), возвращаем защёлку присутствия на сохранённом спальном контуре.
+                    restored_box = prev_saved_bed_bbox
+                    if restored_box is None:
+                        xs = [float(p[0]) for p in zones.bed_polygon]
+                        ys = [float(p[1]) for p in zones.bed_polygon]
+                        min_x, max_x = min(xs), max(xs)
+                        min_y, max_y = min(ys), max(ys)
+                        bw = max(0.06, max_x - min_x)
+                        bh = max(0.06, max_y - min_y)
+                        restored_box = (
+                            max(0.0, min_x + 0.12 * bw),
+                            max(0.0, min_y + 0.15 * bh),
+                            min(1.0, max_x - 0.12 * bw),
+                            min(1.0, max_y - 0.15 * bh),
+                        )
+                    self._patient_in_bed_latched = True
+                    self._latched_patient_bed_bbox = restored_box
+                    self._last_confirmed_bed_bbox = restored_box
+                    self._latched_bed_wall_ts = self._wall_clock()
+                    self._sole_mover_at_door_ts = -1e9
+                    self._sole_mover_last_seen_ts = -1e9
+                    if prev_saved_bed_tid > 0 and prev_saved_bed_tid != track_id:
+                        self._latched_patient_track_id = prev_saved_bed_tid
+                    else:
+                        self._latched_patient_track_id = 1
+                    self._last_patient_pos = (
+                        (restored_box[0] + restored_box[2]) * 0.5,
+                        (restored_box[1] + restored_box[3]) * 0.5,
+                    )
 
             self._save_anchor_state()
             return True
@@ -2231,7 +2310,7 @@ class PatientIdentifier:
         return polygon_distance_norm(anchor, zones.bed_polygon) >= -0.05
 
     def _is_standing_static_posture(self, obs: PoseObservation, tr: TrackIdentity) -> bool:
-        if obs.conf >= 0.65 and (obs.kp(13, 0.50) is not None or obs.kp(14, 0.50) is not None):
+        if obs.conf >= 0.48 and (obs.kp(13, 0.48) is not None or obs.kp(14, 0.48) is not None):
             return False
         angle = obs.torso_angle_from_vertical_deg()
         return (
@@ -2967,8 +3046,15 @@ class PatientIdentifier:
 
             # Слой 0: Санация смятых точек сна + анатомический фильтр + ignore_polygons + фильтр неподвижных вещей
             if zones.has_bed:
+                raw_in_obs = list(observations)
                 observations = [
-                    sanitize_collapsed_bed_keypoints(o, zones.bed_polygon) for o in observations
+                    _sanitize_bed_pose_compat(
+                        o,
+                        zones.bed_polygon,
+                        other_observations=[x for x in raw_in_obs if x.track_id != o.track_id],
+                        zones=zones,
+                    )
+                    for o in raw_in_obs
                 ]
             valid_obs = filter_valid_poses(
                 observations,
@@ -3958,6 +4044,7 @@ class PatientIdentifier:
                         self._sole_mover_at_door_ts = -1e9
                         if prev_bed_bbox is None or patient_obs.bbox_width >= 0.14:
                             self._latched_patient_bed_bbox = patient_obs.bbox_norm
+                            self._last_confirmed_bed_bbox = patient_obs.bbox_norm
                         if not was_latched_before or prev_bed_bbox is None:
                             self._save_anchor_state()
                     elif (

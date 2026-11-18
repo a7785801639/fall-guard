@@ -938,7 +938,10 @@ def create_web_app(engine: FallGuardEngine) -> FastAPI:
 
     @app.post("/api/ignore-track")
     async def ignore_track(payload: AssignTrackPayload) -> dict:
-        ok, updated = engine.ignore_track(payload.track_id)
+        try:
+            ok, updated = engine.ignore_track(payload.track_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if not ok:
             raise HTTPException(status_code=404, detail="Трек не найден в текущем кадре")
         return {"ok": True, "zones": updated.to_dict()}

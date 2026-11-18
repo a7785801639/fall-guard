@@ -512,3 +512,257 @@ def test_camera_health_telegram_push_respects_notify_camera_offline(tmp_path: Pa
     engine._handle_camera_health(dummy_frame, False)
     assert len(sent) == 1 and "застыло" in sent[0]
 
+
+# --- Режим «Только вставание» (standup) и защита /api/ignore-track --------------------
+
+
+def test_standup_mode_normalization_matching_and_alert_feed() -> None:
+    from app.devices import ALERT_MODE_ALL, ALERT_MODE_FALLS, ALERT_MODE_STANDUP, alert_matches_mode, normalize_alert_mode
+
+    for syn in ("standup", "stand", "stand_only", "standup_only", "getting_up", "left_bed", "  STANDUP  "):
+        assert normalize_alert_mode(syn) == ALERT_MODE_STANDUP
+    for syn in ("falls", "fall", "falls_only", "fall_only"):
+        assert normalize_alert_mode(syn) == ALERT_MODE_FALLS
+    for syn in ("all", "", None, "unknown"):
+        assert normalize_alert_mode(syn) == ALERT_MODE_ALL
+
+    assert alert_matches_mode(PatientState.LEFT_BED, AlertSeverity.WARNING, "standup") is True
+    assert alert_matches_mode(PatientState.LEFT_BED, AlertSeverity.CRITICAL, "standup") is False
+    assert alert_matches_mode(PatientState.SITTING_UP, AlertSeverity.WARNING, "standup") is False
+    assert alert_matches_mode(PatientState.HELP_CALL, AlertSeverity.WARNING, "standup") is False
+    assert alert_matches_mode(PatientState.MISSING, AlertSeverity.WARNING, "standup") is False
+    assert alert_matches_mode(PatientState.IN_BED, "info", "standup") is False
+    assert alert_matches_mode(PatientState.FALLEN, AlertSeverity.CRITICAL, "standup") is True
+    assert alert_matches_mode(PatientState.FALLEN, AlertSeverity.CRITICAL, "falls") is True
+    assert alert_matches_mode(PatientState.LEFT_BED, AlertSeverity.WARNING, "falls") is False
+
+    feed = AlertFeed()
+    feed.push("s1", "sitting_up", "warning", "Садится", "")
+    feed.push("h1", "help_call", "warning", "Зовёт рукой", "")
+    feed.push("m1", "missing", "warning", "Ушла из кадра", "")
+    feed.push("l_ok", "left_bed", "warning", "Встала с кровати одна", "")
+    feed.push("l_crit", "left_bed", "critical", "Долго не возвращается в кровать!", "")
+    feed.push("f1", "fallen", "critical", "Падение!", "")
+
+    assert [x["id"] for x in feed.since(0, mode="all")] == ["s1", "h1", "m1", "l_ok", "l_crit", "f1"]
+    assert [x["id"] for x in feed.since(0, mode="standup")] == ["l_ok", "f1"]
+    assert [x["id"] for x in feed.since(0, mode="falls")] == ["f1"]
+
+
+def test_standup_mode_telegram_delivery_escalation_and_cyclic_keyboard(tmp_path: Path) -> None:
+    import time
+    from urllib.parse import parse_qs
+
+    from app.notifier import (
+        ALERT_MODE_ALL,
+        ALERT_MODE_FALLS,
+        ALERT_MODE_STANDUP,
+        BOT_COMMANDS_RU,
+        BTN_ALL_EVENTS_TEXT,
+        BTN_FALLS_ONLY_TEXT,
+        BTN_STANDUP_ONLY_TEXT,
+        alert_matches_mode,
+        normalize_alert_mode,
+    )
+
+    assert normalize_alert_mode("stand_only") == ALERT_MODE_STANDUP
+    assert alert_matches_mode("left_bed", "warning", ALERT_MODE_STANDUP) is True
+    assert any(c["command"] == "standonly" for c in BOT_COMMANDS_RU)
+
+    # Циклическая кнопка режима: all -> standup -> falls -> all
+    assert BTN_STANDUP_ONLY_TEXT in _build_reply_keyboard(True, ALERT_MODE_ALL)
+    assert BTN_FALLS_ONLY_TEXT in _build_reply_keyboard(True, ALERT_MODE_STANDUP)
+    assert BTN_ALL_EVENTS_TEXT in _build_reply_keyboard(True, ALERT_MODE_FALLS)
+
+    photos: list[str] = []
+    messages: list[tuple[str, str]] = []
+    events_log: list[tuple[str, str]] = []
+    unack = {"val": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        endpoint = request.url.path.rsplit("/", 1)[-1]
+        body = request.read().decode("utf-8", "ignore")
+        if endpoint == "sendPhoto":
+            for cid in ("1001", "2002", "3003"):
+                if f'name="chat_id"\r\n\r\n{cid}' in body:
+                    photos.append(cid)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 15}})
+        if endpoint == "sendMessage":
+            parsed = parse_qs(body)
+            cid = (parsed.get("chat_id") or [""])[0]
+            txt = (parsed.get("text") or [""])[0]
+            if cid:
+                messages.append((cid, txt))
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 16}})
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    transport = httpx.MockTransport(handler)
+    notifier = TelegramNotifier(
+        bot_token="123456:MOCK",
+        chat_ids=("1001", "2002", "3003"),
+        on_pause_cmd=lambda _: None,
+        on_resume_cmd=lambda: None,
+        get_snapshot_jpeg=lambda: b"\xff\xd8\xff\xd9",
+        is_fall_unacknowledged=lambda: unack["val"],
+        repeat_interval_sec=10.0,
+        max_repeats=1,
+        subscribers_path=tmp_path / "subs.json",
+        on_event=lambda lvl, txt: events_log.append((lvl, txt)),
+        transport=transport,
+    )
+
+    with httpx.Client(transport=transport) as client:
+        # 2002 включает режим «Только вставание» кнопкой, 3003 пробует /standonly и затем «Только падения»
+        notifier._handle_update(
+            client,
+            {
+                "update_id": 1,
+                "message": {
+                    "chat": {"id": 2002},
+                    "from": {"id": 2002, "first_name": "Анна"},
+                    "text": BTN_STANDUP_ONLY_TEXT,
+                },
+            },
+        )
+        assert notifier.get_subscriber_mode("2002") == "standup"
+        assert any("только вставание" in txt for _, txt in events_log)
+
+        notifier._handle_update(
+            client,
+            {
+                "update_id": 2,
+                "message": {
+                    "chat": {"id": 3003},
+                    "from": {"id": 3003, "first_name": "Иван"},
+                    "text": "/standonly",
+                },
+            },
+        )
+        assert notifier.get_subscriber_mode("3003") == "standup"
+        notifier._handle_update(
+            client,
+            {
+                "update_id": 3,
+                "message": {
+                    "chat": {"id": 3003},
+                    "from": {"id": 3003, "first_name": "Иван"},
+                    "text": BTN_FALLS_ONLY_TEXT,
+                },
+            },
+        )
+        assert notifier.get_subscriber_mode("3003") == "falls"
+
+    assert notifier.get_subscriber_mode("1001") == "all"
+
+    # 1. Посадка -> только all (1001)
+    photos.clear()
+    notifier.send_alert_photo(_event(PatientState.SITTING_UP, AlertSeverity.WARNING), b"jpg", alert_id="s1")
+    assert photos == ["1001"]
+
+    # 2. Штатное вставание (left_bed + warning) -> all (1001) и standup (2002)
+    photos.clear()
+    notifier.send_alert_photo(_event(PatientState.LEFT_BED, AlertSeverity.WARNING), b"jpg", alert_id="l1")
+    assert photos == ["1001", "2002"]
+
+    # 3. Критическое напоминание prolonged_absence (left_bed + critical) -> ТОЛЬКО all (1001), и повторы ТОЛЬКО в all!
+    photos.clear()
+    messages.clear()
+    unack["val"] = True
+    notifier._stop_event.wait = lambda timeout=None: False  # type: ignore[method-assign]
+    notifier.send_alert_photo(
+        AlertEvent(PatientState.LEFT_BED, AlertSeverity.CRITICAL, "Долго не возвращается в кровать!", "Описание", 2.0, 1),
+        b"jpg",
+        alert_id="pa1",
+    )
+    assert photos == ["1001"]
+    deadline = time.monotonic() + 2.0
+    while notifier._repeat_active and time.monotonic() < deadline:
+        time.sleep(0.01)
+    escalation_cids = [cid for cid, txt in messages if "Повтор #1" in txt]
+    assert escalation_cids == ["1001"]
+
+    # 4. Реальное падение (fallen + critical) -> во ВСЕ 3 режима, и повторы во ВСЕ 3 режима!
+    photos.clear()
+    messages.clear()
+    notifier.send_alert_photo(
+        AlertEvent(PatientState.FALLEN, AlertSeverity.CRITICAL, "Падение!", "Описание", 3.0, 1),
+        b"jpg",
+        alert_id="fall1",
+    )
+    assert photos == ["1001", "2002", "3003"]
+    deadline = time.monotonic() + 2.0
+    while notifier._repeat_active and time.monotonic() < deadline:
+        time.sleep(0.01)
+    fall_escalation_cids = [cid for cid, txt in messages if "Повтор #1" in txt]
+    assert fall_escalation_cids == ["1001", "2002", "3003"]
+    unack["val"] = False
+
+    # Перезагрузка сохраняет standup
+    reloaded = TelegramNotifier(
+        bot_token="123456:MOCK",
+        chat_ids=("1001", "2002", "3003"),
+        on_pause_cmd=lambda _: None,
+        on_resume_cmd=lambda: None,
+        get_snapshot_jpeg=lambda: None,
+        is_fall_unacknowledged=lambda: False,
+        subscribers_path=tmp_path / "subs.json",
+        transport=transport,
+    )
+    assert reloaded.get_subscriber_mode("2002") == "standup"
+
+
+def test_standup_mode_http_api_poll_alarm_active_and_ignore_track_conflict(tmp_path: Path, monkeypatch) -> None:
+    settings = _build_test_settings(tmp_path)
+    engine = FallGuardEngine(settings)
+    engine.notifier.register_subscriber("7700", name="Мария", username="maria", force_enable=True)
+    client = TestClient(create_web_app(engine))
+
+    # /api/subscribers/{id}/mode принимает standup
+    sub_res = client.post("/api/subscribers/7700/mode", json={"mode": "standup"})
+    assert sub_res.status_code == 200 and sub_res.json()["subscriber"]["mode"] == "standup"
+
+    # Привязка телефона и переключение через /api/me/mode и /api/devices/{id}
+    pair = client.post("/api/devices/pair-code").json()
+    client.cookies.clear()
+    claimed = client.post("/api/devices/claim", json={"code": pair["code"], "name": "Galaxy"}, headers=EXTERNAL).json()
+    client.cookies.clear()
+    token = claimed["token"]
+    dev_id = claimed["device"]["id"]
+    auth = {**EXTERNAL, "authorization": f"Bearer {token}"}
+
+    me_res = client.post("/api/me/mode", json={"mode": "standup"}, headers=auth)
+    assert me_res.status_code == 200 and me_res.json()["me"]["mode"] == "standup"
+    assert client.post(f"/api/devices/{dev_id}", json={"mode": "falls"}).json()["device"]["mode"] == "falls"
+    assert client.post(f"/api/devices/{dev_id}", json={"mode": "stand_only"}).json()["device"]["mode"] == "standup"
+
+    # Лента /api/alerts/poll для телефона в режиме standup
+    s_seq = engine.alert_feed.push("s1", "sitting_up", "warning", "Садится", "")["seq"]
+    engine.alert_feed.push("l_ok", "left_bed", "warning", "Встала с кровати одна", "")
+    engine.alert_feed.push("l_crit", "left_bed", "critical", "Долго не возвращается в кровать!", "")
+    polled = client.get(f"/api/alerts/poll?after={s_seq - 1}&wait=0", headers=auth).json()
+    assert polled["mode"] == "standup"
+    assert [a["id"] for a in polled["alerts"]] == ["l_ok"]
+
+    # Сирена alarm_active в режиме standup НЕ звенит при неподтверждённом left_bed, но звенит при fallen
+    engine.fsm._state = PatientState.LEFT_BED
+    engine.fsm._fall_unacknowledged = True
+    poll_standup = client.get(f"/api/alerts/poll?after={polled['cursor']}&wait=0", headers=auth).json()
+    assert poll_standup["fall_active"] is False and poll_standup["alarm_active"] is False
+    poll_lan_all = client.get(f"/api/alerts/poll?after={polled['cursor']}&wait=0&mode=all").json()
+    assert poll_lan_all["alarm_active"] is True
+
+    engine.fsm._state = PatientState.FALLEN
+    engine.fsm._fall_unacknowledged = True
+    poll_fall = client.get(f"/api/alerts/poll?after={polled['cursor']}&wait=0", headers=auth).json()
+    assert poll_fall["fall_active"] is True and poll_fall["alarm_active"] is True
+
+    # /api/ignore-track переводит ValueError от движка в 409 Conflict с текстом причины
+    def _deny_bed_ignore(_tid: int):
+        raise ValueError("Нельзя добавить игнор-зону поверх кровати или двери — используйте кнопку «Свой»")
+
+    monkeypatch.setattr(engine, "ignore_track", _deny_bed_ignore)
+    conflict = client.post("/api/ignore-track", json={"track_id": 1})
+    assert conflict.status_code == 409
+    assert "поверх кровати" in conflict.json()["detail"]
+
+

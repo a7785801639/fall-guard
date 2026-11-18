@@ -439,9 +439,10 @@ class FloorHomography:
 
         height_cm: float | None = None
         hip_z_cm: float | None = None
+        raw_h: float | None = None
         if upright_body and feet_reach_floor_zone and (foot_v <= 0.988 or by2 <= 0.992):
             raw_h = self.estimate_standing_height_cm((foot_u, foot_v), top_uv)
-            if raw_h is not None and 68.0 <= raw_h <= 225.0:
+            if raw_h is not None and 105.0 <= raw_h <= 225.0:
                 height_cm = raw_h
                 hip_z_cm = round(0.53 * raw_h, 1)
 
@@ -458,7 +459,9 @@ class FloorHomography:
             fx_cm, fy_cm = floor_xy_raw
             # Точка опоры стоп физически находится на плоскости пола Z = 0 перед ножкой кровати (fy_cm >= -8 см)
             feet_in_front_3d = fy_cm >= -8.0 and foot_v >= (bed_max_y + 0.03)
-            valid_human_scale = height_cm is None or (70.0 <= height_cm <= 225.0)
+            valid_human_scale = (raw_h is None and height_cm is None) or (
+                height_cm is not None and 105.0 <= height_cm <= 225.0
+            )
             if feet_in_front_3d and valid_human_scale:
                 mh = obs.mid_hip
                 if mh is None:
