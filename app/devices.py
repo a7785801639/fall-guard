@@ -204,12 +204,21 @@ class DeviceStore:
                     return self._public(dev)
         return None
 
+    # Телефон опрашивает сервер постоянно, а last_seen обновляется раз в 5 минут:
+    # молчание дольше 15 минут значит, что тревоги до него сейчас не дойдут
+    STALE_AFTER_SEC: float = 900.0
+
     def list(self) -> list[dict[str, Any]]:
+        now = float(self._clock())
         with self._lock:
-            return [
-                self._public(d)
-                for d in sorted(self._devices.values(), key=lambda d: d["created_at"])
-            ]
+            out = []
+            for d in sorted(self._devices.values(), key=lambda d: d["created_at"]):
+                pub = self._public(d)
+                seen = float(d.get("last_seen") or d.get("created_at") or 0.0)
+                pub["offline_sec"] = round(max(0.0, now - seen)) if d["enabled"] else 0
+                pub["stale"] = bool(d["enabled"]) and (now - seen) > self.STALE_AFTER_SEC
+                out.append(pub)
+            return out
 
     def get(self, dev_id: str) -> dict[str, Any] | None:
         with self._lock:

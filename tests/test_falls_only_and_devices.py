@@ -929,3 +929,20 @@ def test_camera_health_masks_dynamic_zones_lamp_transition_and_exposes_status_sn
 
 
 
+
+
+def test_device_list_flags_phones_that_went_silent(tmp_path: Path) -> None:
+    """Телефон, который давно не опрашивал сервер, помечен: тревоги до него не дойдут."""
+    clock = [1_000_000.0]
+    store = DeviceStore(tmp_path / "devices.json", wall_clock=lambda: clock[0])
+    code, _ = store.create_pair_code()
+    dev, _tok = store.claim(code, name="Pixel")
+    code2, _ = store.create_pair_code()
+    dev2, _tok2 = store.claim(code2, name="Galaxy")
+    store.update(dev2["id"], enabled=False)
+    clock[0] += 20 * 60
+    items = {d["name"]: d for d in store.list()}
+    assert items["Pixel"]["stale"] is True and items["Pixel"]["offline_sec"] >= 1200
+    assert items["Galaxy"]["stale"] is False, "выключенный получатель не считается пропавшим"
+    clock[0] -= 19 * 60
+    assert {d["name"]: d for d in store.list()}["Pixel"]["stale"] is False

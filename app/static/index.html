@@ -492,7 +492,13 @@
     .setup-step.done { color: var(--muted); font-weight: 500; }
     .setup-step.done span:not(.ri) { text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.25); }
     .setup-step > svg { margin-left: auto; width: 16px; height: 16px; color: var(--faint); }
-    @media (max-width: 979px) { .setup { order: 1; } }
+    @media (max-width: 979px) { .setup { order: 1; } .notice { order: 1; } }
+    /* Получатель пропал со связи — тревоги до него не дойдут */
+    .notice { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: var(--r); background: var(--warn-soft); box-shadow: inset 0 0 0 1px rgba(255, 181, 71, 0.28); text-align: left; animation: rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .notice .ri { background: rgba(255, 181, 71, 0.18); color: var(--warn); }
+    .notice b { display: block; font-size: 14px; font-weight: 650; }
+    .notice span.s { display: block; font-size: 12.5px; color: var(--muted); }
+    .notice > svg { margin-left: auto; width: 18px; height: 18px; color: var(--warn); flex: none; }
     /* Журнал */
     .list { display: grid; gap: 2px; }
     .item { display: flex; align-items: center; gap: 14px; padding: 8px; margin: 0 -8px; border-radius: 12px; width: calc(100% + 16px); min-width: 0; }
@@ -896,6 +902,7 @@
         </section>
 
         <section class="setup" id="setupCard" hidden aria-label="Настройка охраны"></section>
+        <button class="notice" id="noticeCard" hidden onclick="openSheet('recipients')"></button>
 
         <section class="signal">
           <div class="caption"><b>Сигнал</b><span id="modeWho">в этом браузере</span></div>
@@ -2138,6 +2145,17 @@
       <div class="bar"><i style="width:${Math.round((done / steps.length) * 100)}%"></i></div>`
       + steps.map((x) => `<button class="setup-step${x.done ? " done" : ""}" ${x.done ? "disabled" : `onclick="${x.go}"`}>${x.done ? ri("i-check", "calm") : ri(x.icon, "care")}<span>${x.label}</span>${x.done ? "" : ico("i-chev-r")}</button>`).join(""));
   }
+  // Телефон получателя давно не выходил на связь — сказать об этом прямо на главном экране
+  function renderNotice() {
+    if (!S) return;
+    const stale = (S.devices || []).filter((d) => d.stale);
+    const el = $("noticeCard");
+    el.hidden = !stale.length;
+    if (!stale.length) return;
+    const names = stale.map((d) => "«" + d.name + "»").join(", ");
+    const longest = Math.max(...stale.map((d) => d.offline_sec || 0));
+    setHtml(el, `${ri("i-wifi-off", "warn")}<span style="min-width:0"><b>${esc(stale.length > 1 ? "Телефоны " + names + " не на связи" : "Телефон " + names + " не на связи")}</b><span class="s">${esc(dur(longest))} · тревоги до ${stale.length > 1 ? "них" : "него"} сейчас не дойдут</span></span>${ico("i-chev-r")}`);
+  }
   function snoozeSetup() { lsSet("fg_setup_snooze", String(Date.now() + 86400000)); renderSetup(); toast("Напомню завтра", "info"); }
 
   /* ---------- Мой режим: все / только вставание / только падения ---------- */
@@ -2737,7 +2755,7 @@
     if (devs.length) h += `<div class="rows">` + devs.map((d) => {
       const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && Date.now() / 1000 - d.last_seen < 600;
       return recipientRow(ri("i-phone", fresh ? "calm" : ""), esc(d.name) + (mine ? ' <span class="badge calm">этот телефон</span>' : ""),
-        d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь",
+        d.stale ? `<span class="badge warn">не на связи ${esc(dur(d.offline_sec || 0))}</span>` : d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь",
         modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`), sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги"),
         `devMenu(this,'${id}')`);
     }).join("") + `</div>`;
@@ -2954,7 +2972,7 @@
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
       if (me.kind === "telegram") { const mine = (S.telegram_subscribers || []).find((s) => String(s.chat_id) === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
       if (me.kind === "device") { const mine = (S.devices || []).find((d) => d.id === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
-      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); renderSetup(); renderRecent(); draw();
+      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); renderSetup(); renderNotice(); renderRecent(); draw();
       techLine = [S.runtime, (S.infer_fps || 0).toFixed(1) + " кадр/с", cam.resolution && cam.resolution[0] ? cam.resolution.join("×") : "", mjpeg ? "MJPEG" : "H.264"].filter(Boolean).join(" · ");
       if (pendingClip && clips.some((c) => c.id === pendingClip)) { const id = pendingClip; pendingClip = ""; openClip(id); }
     } catch (_) {} finally { pollBusy = false; }
