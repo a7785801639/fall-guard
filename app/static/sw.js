@@ -1,4 +1,4 @@
-const CACHE_NAME = "fallguard-shell-v14";
+const CACHE_NAME = "fallguard-shell-v15";
 const SHELL_ASSETS = [
   "/",
   "/manifest.webmanifest",

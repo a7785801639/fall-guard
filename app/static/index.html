@@ -230,7 +230,7 @@
     #modeSeg button[data-v="all"][aria-pressed="true"] { background: var(--calm-soft); color: var(--calm); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
     #modeSeg button[data-v="falls"][aria-pressed="true"] { background: var(--alarm-soft); color: var(--alarm); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
     .l-short { display: none; }
-    @media (max-width: 420px) { .rowi-actions .l-long { display: none; } .rowi-actions .l-short { display: inline; } }
+    @media (max-width: 420px) { .rowi-actions .l-long, .rcp-ctrl .l-long { display: none; } .rowi-actions .l-short, .rcp-ctrl .l-short { display: inline; } }
     .hint { font-size: 12.5px; color: var(--muted); margin: 8px 4px 0; height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ================= Док: пауза, звук, журнал, настройки ================= */
@@ -375,7 +375,8 @@
     .rows { display: grid; border-radius: 14px; overflow: hidden; background: var(--raise-2); }
     .rowi { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; min-height: 56px; }
     .rowi + .rowi { border-top: 1px solid var(--line); }
-    .rowi-body { flex: 1 1 170px; min-width: 0; }
+    .rowi-body { flex: 1 1 0; min-width: 0; }
+    .rowi.wr .rowi-body { flex-basis: 170px; }
     .rowi-title { font-weight: 600; }
     .rowi-sub { color: var(--muted); font-size: 13px; }
     .rowi-actions { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
@@ -414,6 +415,14 @@
     .btn svg { width: 18px; height: 18px; }
     .btn.sm svg { width: 16px; height: 16px; }
     .btn.icon-only { padding: 0; width: 36px; }
+    .icon-btn.more { background: transparent; color: var(--muted); }
+    .more-ph { width: 36px; flex: none; }
+    .icon-btn.more:hover { background: var(--fill); color: var(--text); }
+    .rowi.rcp { flex-wrap: wrap; }
+    .rowi.rcp .rowi-body { flex: 1 1 0; }
+    .rcp-ctrl { flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-left: 48px; }
+    .rcp-sw { display: inline-flex; align-items: center; gap: 10px; }
+    @media (max-width: 420px) { .rcp-ctrl { padding-left: 0; } }
     .faces { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 12px; }
     .face { position: relative; width: 72px; height: 72px; animation: pop-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
     .face img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; background: var(--fill-2); }
@@ -857,7 +866,7 @@
 
         <section class="closeup" id="closeup" aria-label="Бабушка крупно">
           <canvas id="closeupCanvas"></canvas>
-          <div class="closeup-empty" id="closeupEmpty"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><path d="M20 86h120" stroke="#2C313B" stroke-width="2.5" stroke-linecap="round"/><rect x="30" y="40" width="9" height="46" rx="4.5" fill="#2A2F39"/><rect x="35" y="60" width="92" height="15" rx="5" fill="#2A2F39"/><rect x="35" y="56.5" width="92" height="8.5" rx="4.25" fill="#363C49"/><rect x="119" y="70" width="7" height="16" rx="3" fill="#2A2F39"/><rect x="40" y="48" width="21" height="10" rx="5" fill="#48505F"/><path d="M64 60c5-4.5 54-4.5 60 0Z" fill="#48505F"/><g class="tw"><circle cx="104" cy="27" r="15" fill="rgba(255,255,255,.04)" stroke="#48505F" stroke-width="2"/><path d="M99.5 23.5a4.6 4.6 0 1 1 6.2 4.3c-1.1.4-1.7 1.3-1.7 2.4v.8M104 35v.3" fill="none" stroke="#959CA9" stroke-width="2.4" stroke-linecap="round"/></g></svg><b>Бабушки не видно</b><span>Крупный план появится, как только она будет в кадре</span></div></div>
+          <div class="closeup-empty" id="closeupEmpty"><div class="empty-art"><svg class="art" viewBox="0 0 160 100" aria-hidden="true"><path d="M20 86h120" stroke="#2C313B" stroke-width="2.5" stroke-linecap="round"/><rect x="30" y="40" width="9" height="46" rx="4.5" fill="#2A2F39"/><rect x="35" y="60" width="92" height="15" rx="5" fill="#2A2F39"/><rect x="35" y="56.5" width="92" height="8.5" rx="4.25" fill="#363C49"/><rect x="119" y="70" width="7" height="16" rx="3" fill="#2A2F39"/><rect x="40" y="48" width="21" height="10" rx="5" fill="#48505F"/><path d="M64 60c5-4.5 54-4.5 60 0Z" fill="#48505F"/><g class="tw"><circle cx="104" cy="27" r="15" fill="rgba(255,255,255,.04)" stroke="#48505F" stroke-width="2"/><path d="M99.5 23.5a4.6 4.6 0 1 1 6.2 4.3c-1.1.4-1.7 1.3-1.7 2.4v.8M104 35v.3" fill="none" stroke="#959CA9" stroke-width="2.4" stroke-linecap="round"/></g></svg><b>Бабушки не видно</b></div></div>
           <span class="closeup-label" id="closeupLabel">Крупно</span>
         </section>
 
@@ -1634,7 +1643,7 @@
     hideMenu();
     if (it && it.fn) it.fn();
   });
-  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause")) hideMenu(); }, true);
+  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest("#btnShot")) hideMenu(); }, true);
   function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
     const id = Number(t.track_id);
@@ -2199,13 +2208,13 @@
     const st = S.clips_stats || {};
     let body = "";
     if (journalView === "alerts") {
-      if (!clips.length) body = emptyArt("shield", "Тревог пока не было", "Здесь появятся записи падений, подъёмов и других событий — с видео");
+      if (!clips.length) body = emptyArt("shield", "Тревог пока не было", "");
       else {
         let last = "";
         body = `<div class="list">` + clips.map((c) => { const dl = dayLabel(c.ts); const h = dl !== last ? `<div class="day">${dl}</div>` : ""; last = dl; return h + clipItem(c); }).join("") + `</div>`;
       }
       body = `<div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div><div class="group">${body}</div>
-        <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ. Старые удаляются автоматически.</p><button class="btn red-text" onclick="clearArchive()">${ico("i-trash")}Очистить архив</button></div>`;
+        <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ</p><button class="btn red-text" onclick="clearArchive()">${ico("i-trash")}Очистить архив</button></div>`;
     } else {
       const evs = (S.events || []).filter((e) => logFilter === "all" || e.category === logFilter);
       body = `<div class="group"><div style="margin-bottom:12px" class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div>`
@@ -2500,20 +2509,24 @@
   function tabRecipients() {
     const subs = S.telegram_subscribers || [], devs = S.devices || [];
     const bot = S.telegram_bot_username || "";
-    let h = `<div class="group"><h3>Telegram</h3><p>Каждый получатель сам выбирает, что ему присылать. То же можно переключить кнопкой в боте.</p>`;
+    let h = `<div class="group"><h3>Telegram</h3>`;
     if (!S.telegram_configured) h += `<div class="rows"><div class="rowi">${ri("i-send", "tg")}<div class="rowi-body"><div class="rowi-title">Бот не настроен</div><div class="rowi-sub">Укажите TG_BOT_TOKEN в файле .env</div></div></div></div>`;
-    else if (!subs.length) h += emptyArt("phone", "Пока никто не подключён", "Откройте бота и нажмите «Старт» — тревоги начнут приходить в Telegram");
+    else if (!subs.length) h += emptyArt("phone", "Пока никто не подключён", "Откройте бота и нажмите «Старт»");
     else h += `<div class="rows">` + subs.map((s) => {
       const cid = esc(s.chat_id), mine = me.kind === "telegram" && me.id === String(s.chat_id);
-      return `<div class="rowi">${`<span class="ri tg">${initial(s.name)}</span>`}<div class="rowi-body"><div class="rowi-title">${esc(s.name)}${mine ? ' <span class="badge calm">это вы</span>' : ""}</div><div class="rowi-sub">${s.enabled ? "уведомления включены" : "уведомления выключены"}${s.username ? " · @" + esc(s.username) : ""}</div></div>
-        <div class="rowi-actions">${modeSeg(s.mode, `(m=>setSubMode('${cid}',m))`)}${sw(s.enabled, `toggleSub('${cid}')`, "Уведомления")}${s.removable ? `<button class="btn sm ghost red-text icon-only" onclick="removeSub('${cid}')" aria-label="Удалить" title="Отключить чат">${ico("i-trash")}</button>` : ""}</div></div>`;
+      return recipientRow(`<span class="ri tg">${initial(s.name)}</span>`, esc(s.name) + (mine ? ' <span class="badge calm">это вы</span>' : ""),
+        (s.enabled ? "тревоги включены" : "тревоги выключены") + (s.username ? " · @" + esc(s.username) : ""),
+        modeSeg(s.mode, `(m=>setSubMode('${cid}',m))`), sw(s.enabled, `toggleSub('${cid}')`, "Тревоги"),
+        s.removable ? `subMenu(this,'${cid}')` : "");
     }).join("") + `</div>`;
     if (S.telegram_configured) h += `<div class="row" style="margin-top:10px"><a class="btn" href="${esc(S.telegram_bot_url || "https://t.me/" + bot)}" target="_blank" rel="noopener">${ico("i-send")}Открыть @${esc(bot)}</a><button class="btn" onclick="testTelegram()">${ico("i-camera")}Проверочный кадр всем</button></div>`;
-    h += `</div><div class="group"><h3>Телефоны с приложением</h3><p>Приложение FallGuard для Android поднимает громкую тревогу на весь экран, даже в беззвучном режиме.</p>`;
+    h += `</div><div class="group"><h3>Телефоны с приложением</h3>`;
     if (devs.length) h += `<div class="rows">` + devs.map((d) => {
       const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && Date.now() / 1000 - d.last_seen < 600;
-      return `<div class="rowi">${ri("i-phone", fresh ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">${esc(d.name)}${mine ? ' <span class="badge calm">этот телефон</span>' : ""}</div><div class="rowi-sub">${d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь"}</div></div>
-        <div class="rowi-actions">${modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`)}${sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги")}<button class="btn sm ghost red-text icon-only" onclick="removeDevice('${id}')" aria-label="Отвязать" title="Отвязать телефон">${ico("i-trash")}</button></div></div>`;
+      return recipientRow(ri("i-phone", fresh ? "calm" : ""), esc(d.name) + (mine ? ' <span class="badge calm">этот телефон</span>' : ""),
+        d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь",
+        modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`), sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги"),
+        `devMenu(this,'${id}')`);
     }).join("") + `</div>`;
     if (pairInfo) {
       const C = 2 * Math.PI * 19;
@@ -2526,11 +2539,21 @@
     } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">${ico("i-phone-plus")}Подключить телефон</button>`;
     if (native && typeof native.isPipEnabled === "function") {
       let pipOn = true; try { pipOn = native.isPipEnabled(); } catch (_) {}
-      h += `<div class="rows" style="margin-top:10px"><div class="rowi">${ri("i-pip", pipOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Видео в маленьком окне</div><div class="rowi-sub">Свернули приложение — видео продолжает идти поверх других, как в YouTube</div></div>${sw(pipOn, "togglePipSetting()", "Маленькое окно")}</div></div>`;
+      h += `<div class="rows" style="margin-top:10px"><div class="rowi">${ri("i-pip", pipOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Видео в маленьком окне</div><div class="rowi-sub">при сворачивании приложения</div></div>${sw(pipOn, "togglePipSetting()", "Маленькое окно")}</div></div>`;
     }
     if (native) h += `<button class="btn block" style="margin-top:8px" onclick="FallGuardAndroid.openAppSettings()">${ico("i-gear")}Настройки приложения на этом телефоне</button>`;
     return h + `</div>`;
   }
+  // Строка получателя: кто — сверху, управление — строкой ниже; удаление только через «⋯»
+  const moreBtn = (fn, label) => `<button class="icon-btn more" onclick="${fn}" aria-label="${label || "Ещё"}" title="${label || "Ещё"}">${ico("i-dots")}</button>`;
+  function recipientRow(icon, title, sub, seg, toggle, menuFn) {
+    return `<div class="rowi rcp">${icon}<div class="rowi-body"><div class="rowi-title">${title}</div><div class="rowi-sub">${sub}</div></div>${menuFn ? moreBtn(menuFn, "Ещё") : ""}
+      <div class="rcp-ctrl">${seg}<span class="rcp-sw"><span class="muted small">Тревоги</span>${toggle}</span></div></div>`;
+  }
+  function subMenu(el, cid) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отключить чат", icon: "i-trash", cls: "danger", fn: () => removeSub(cid) }]); }
+  function devMenu(el, id) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отвязать телефон", icon: "i-trash", cls: "danger", fn: () => removeDevice(id) }]); }
+  function zoneMenu(el, payload) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Убрать зону", icon: "i-trash", cls: "danger", fn: () => clearZone(payload) }]); }
+  function ignoreMenu(el) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Убрать все игнор-зоны", icon: "i-trash", cls: "danger", fn: () => clearIgnore() }]); }
   async function setSubMode(cid, mode) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/mode", { json: { mode } })) await refreshMe(); }
   async function toggleSub(cid) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/toggle", { method: "POST" })) poll(); }
   async function removeSub(cid) { if (await ask("Отключить чат?", "Тревоги в этот чат Telegram приходить перестанут.", "Отключить") && await call("/api/subscribers/" + encodeURIComponent(cid), { method: "DELETE" }, "Чат отключён")) poll(); }
@@ -2557,26 +2580,26 @@
 
   function tabZones() {
     const z = zones, has = (p, n) => Array.isArray(p) && p.length >= n;
-    const zrow = (mode, icon, title, sub, ok, clearPayload) => `<div class="rowi">${ri(icon, ok ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${title} ${ok ? '<span class="badge calm">задана</span>' : '<span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
-      <div class="rowi-actions">${ok && clearPayload ? `<button class="btn sm ghost" onclick='clearZone(${JSON.stringify(clearPayload)})'>Убрать</button>` : ""}<button class="btn sm" onclick="startDraw('${mode}')">${ok ? "Перерисовать" : "Нарисовать"}</button></div></div>`;
+    const zrow = (mode, icon, title, sub, ok, clearPayload) => `<div class="rowi">${ri(icon, ok ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${title}${ok ? "" : ' <span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
+      <div class="rowi-actions"><button class="btn sm" onclick="startDraw('${mode}')">${ok ? "Изменить" : "Отметить"}</button>${ok && clearPayload ? moreBtn(`zoneMenu(this,${esc(JSON.stringify(clearPayload))})`, "Ещё") : '<span class="more-ph"></span>'}</div></div>`;
     const ig = (z.ignore_polygons || []).length;
-    let h = `<div class="group"><h3>Зоны на видео</h3><p>Кровать обязательна: по ней система понимает, где бабушка лежит, а где пол. Дверь помогает отличать вошедших родственников.</p><div class="rows">
-      <div class="rowi">${ri("i-eye")}<div class="rowi-body"><div class="rowi-title">Показывать зоны поверх видео</div><div class="rowi-sub">Обычно выключено, чтобы не мешать смотреть</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
-      + zrow("bed", "i-bed", "Кровать", "Обведите матрас по углам", has(z.bed_polygon, 3), null)
-      + zrow("door", "i-door", "Дверь", "Кто вошёл через дверь — тот «свой»", has(z.door_polygon, 3), { door_polygon: [] })
-      + zrow("floor", "i-floor", "Пол у кровати", "4 точки — для оценки роста и расстояний", has(z.floor_polygon, 4), { floor_polygon: [] })
-      + `<div class="rowi">${ri("i-eyeoff")}<div class="rowi-body"><div class="rowi-title">Игнор-зоны ${ig ? `<span class="badge">${ig}</span>` : ""}</div><div class="rowi-sub">Вешалка, халат на стуле, зеркало — что система принимает за человека</div></div>
-        <div class="rowi-actions">${ig ? `<button class="btn sm ghost" onclick="clearIgnore()">Убрать все</button>` : ""}<button class="btn sm" onclick="startDraw('ignore')">Добавить</button></div></div></div></div>`;
-    if (has(z.floor_polygon, 4)) h += `<div class="group"><h3>Размеры в сантиметрах</h3><p>Реальные размеры размеченного прямоугольника пола и высота матраса.</p><div class="rows">
+    let h = `<div class="group"><h3>Зоны на видео</h3><div class="rows">
+      <div class="rowi">${ri("i-eye")}<div class="rowi-body"><div class="rowi-title">Показывать зоны на видео</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
+      + zrow("bed", "i-bed", "Кровать", "углы матраса", has(z.bed_polygon, 3), null)
+      + zrow("door", "i-door", "Дверь", "вошедший — свой", has(z.door_polygon, 3), { door_polygon: [] })
+      + zrow("floor", "i-floor", "Пол у кровати", "4 точки у кровати", has(z.floor_polygon, 4), { floor_polygon: [] })
+      + `<div class="rowi">${ri("i-eyeoff")}<div class="rowi-body"><div class="rowi-title">Игнор-зоны ${ig ? `<span class="badge">${ig}</span>` : ""}</div><div class="rowi-sub">вещи, похожие на людей</div></div>
+        <div class="rowi-actions"><button class="btn sm" onclick="startDraw('ignore')">Добавить</button>${ig ? moreBtn("ignoreMenu(this)", "Ещё") : '<span class="more-ph"></span>'}</div></div></div></div>`;
+    if (has(z.floor_polygon, 4)) h += `<div class="group"><h3>Размеры, см</h3><div class="rows">
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Ширина</div></div><input type="number" id="inFloorW" min="40" max="1000" value="${Math.round(z.floor_width_cm)}" /></div>
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Глубина</div></div><input type="number" id="inFloorD" min="40" max="1000" value="${Math.round(z.floor_depth_cm)}" /></div>
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Высота матраса</div></div><input type="number" id="inMatH" min="15" max="140" value="${Math.round(z.mattress_height_cm)}" /></div>
       </div><button class="btn block" style="margin-top:10px" onclick="saveDims()">Сохранить размеры</button></div>`;
     const rot = Number(cam.rotate) || 0;
     h += `<div class="group"><h3>Камера</h3><div class="rows">
-        <div class="rowi">${ri("i-rotate")}<div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
+        <div class="rowi wr">${ri("i-rotate")}<div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
         <div class="rowi">${ri("i-flip")}<div class="rowi-body"><div class="rowi-title">Зеркально</div></div>${sw(cam.flip_h, `setCam({flip_h:${!cam.flip_h}})`, "Зеркально")}</div>
-        <div class="rowi">${ri("i-sun")}<div class="rowi-body"><div class="rowi-title">Осветлять тёмный кадр</div><div class="rowi-sub">Помогает видеть ночью и в сумерках</div></div>${sw(cam.enhance, `setCam({enhance:${!cam.enhance}})`, "Осветление")}</div>
+        <div class="rowi">${ri("i-sun")}<div class="rowi-body"><div class="rowi-title">Осветлять тёмный кадр</div></div>${sw(cam.enhance, `setCam({enhance:${!cam.enhance}})`, "Осветление")}</div>
         <div class="rowi">${ri("i-chip")}<div class="rowi-body"><div class="rowi-title">Обработка</div><div class="rowi-sub num">${esc(techLine || "—")}</div></div></div>
       </div></div>`;
     return h;
@@ -2598,21 +2621,21 @@
         <div class="faces">${arr.map((fn) => `<span class="face"><img loading="lazy" alt="" src="${esc(withAuth("/api/faces/" + role + "/photo/" + encodeURIComponent(fn)))}" /><button onclick="removeFace('${role}','${esc(fn)}')" aria-label="Удалить фото">${ico("i-x")}</button></span>`).join("")}${`<span class="face ph">${ico("i-user")}</span>`.repeat(Math.max(0, ph - 1))}<label class="face add" title="Загрузить фото">${ico("i-plus")}<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div>
         <div class="row"><button class="btn" onclick="captureFace('${role}')">${ico("i-camera")}Снять с камеры сейчас</button><label class="btn">${ico("i-upload")}Загрузить фото<input type="file" accept="image/*" hidden onchange="uploadFace('${role}',this)" /></label></div></div>`;
     };
-    let h = `<div class="group"><h3>Кто сейчас в кадре</h3><p>Если система перепутала — поправьте: она запомнит одежду и лицо. То же можно сделать, нажав на человека прямо на видео.</p>`;
+    let h = `<div class="group"><h3>Кто сейчас в кадре</h3><p>Перепутала — поправьте здесь или нажав на человека на видео.</p>`;
     const real = tracks.filter((t) => Number(t.track_id) >= 0 && !t.virtual_presence && Array.isArray(t.bbox));
     h += real.length ? `<div class="rows">` + real.map((t) => {
       const id = Number(t.track_id);
-      return `<div class="rowi">${ri(t.role === "patient" ? "i-user" : t.role === "visitor" ? "i-users" : "i-user", t.role === "patient" ? "calm" : t.role === "visitor" ? "care" : "")}<div class="rowi-body"><div class="rowi-title">${t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Не определён"}</div><div class="rowi-sub">${esc(t.reason_ru || "")}</div></div>
+      return `<div class="rowi wr">${ri(t.role === "patient" ? "i-user" : t.role === "visitor" ? "i-users" : "i-user", t.role === "patient" ? "calm" : t.role === "visitor" ? "care" : "")}<div class="rowi-body"><div class="rowi-title">${t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Не определён"}</div><div class="rowi-sub">${esc(t.reason_ru || "")}</div></div>
         <div class="rowi-actions"><button class="btn sm" aria-pressed="${t.role === "patient"}" onclick="assign(${id},'patient')">Бабушка</button><button class="btn sm" aria-pressed="${t.role === "visitor"}" onclick="assign(${id},'visitor')">Свой</button><button class="btn sm ghost" onclick="ignoreThing(${id})">Вещь</button></div></div>`;
     }).join("") + `</div>` : emptyArt("room", "В кадре никого не видно", "");
     const flags = [];
-    if (S.door_visit_active) flags.push(`<div class="rowi">${ri("i-door-out", "care")}<div class="rowi-body"><div class="rowi-title">Отмечен визит родственника</div><div class="rowi-sub">Пока идёт визит, посадка и выход из кровати не сигналят</div></div><button class="btn sm" onclick="act('/api/door_visit/clear','Отмечено: родственник вышел')">Он вышел</button></div>`);
-    if (S.patient_in_bed_latched) flags.push(`<div class="rowi">${ri("i-bed", "calm")}<div class="rowi-body"><div class="rowi-title">Считается, что бабушка в кровати</div><div class="rowi-sub">Даже если под одеялом её не видно</div></div><button class="btn sm" onclick="act('/api/bed_presence/clear','Отмечено: в кровати никого нет')">Её там нет</button></div>`);
+    if (S.door_visit_active) flags.push(`<div class="rowi">${ri("i-door-out", "care")}<div class="rowi-body"><div class="rowi-title">Отмечен визит родственника</div><div class="rowi-sub">посадка и выход не сигналят</div></div><button class="btn sm" onclick="act('/api/door_visit/clear','Отмечено: родственник вышел')">Он вышел</button></div>`);
+    if (S.patient_in_bed_latched) flags.push(`<div class="rowi">${ri("i-bed", "calm")}<div class="rowi-body"><div class="rowi-title">Бабушка считается в кровати</div><div class="rowi-sub">даже если её не видно под одеялом</div></div><button class="btn sm" onclick="act('/api/bed_presence/clear','Отмечено: в кровати никого нет')">Её там нет</button></div>`);
     if (flags.length) h += `<div class="rows" style="margin-top:10px">${flags.join("")}</div>`;
     h += `</div>`
-      + gal("patient", "Фото бабушки", "2–4 фото лица анфас и вполоборота. Главный способ не путать её с родственниками.")
-      + gal("visitor", "Фото своих", "Родственники и сиделка. Когда они рядом, система не поднимает тревогу о подъёме.")
-      + `<div class="group"><h3>Если роли путаются постоянно</h3><p>Сброс заставит систему заново запомнить, как выглядит бабушка и в какой позе она спит.</p><div class="row"><button class="btn" onclick="act('/api/reset-anchor','Память о внешности сброшена')">${ico("i-user")}Забыть внешность</button><button class="btn" onclick="act('/api/recalibrate-baseline','Поза сна будет снята заново')">${ico("i-bed")}Переснять позу сна</button></div></div>`;
+      + gal("patient", "Фото бабушки", "2–4 фото лица — так она не спутается с родными")
+      + gal("visitor", "Фото своих", "родственники и сиделка")
+      + `<div class="group"><h3>Если роли путаются постоянно</h3><div class="row"><button class="btn" onclick="act('/api/reset-anchor','Память о внешности сброшена')">${ico("i-user")}Забыть внешность</button><button class="btn" onclick="act('/api/recalibrate-baseline','Поза сна будет снята заново')">${ico("i-bed")}Переснять позу сна</button></div></div>`;
     return h;
   }
   async function captureFace(role) { if (await call("/api/faces/" + role + "/from-camera", { json: {} }, "Лицо сохранено")) poll(); }
@@ -2628,16 +2651,16 @@
     const p = S.prefs || {}, diag = (S.care && S.care.diagnostics) || {};
     const preset = p.sensitivity_preset || "standard";
     const opt = (cur, list) => list.map(([v, l]) => `<option value="${v}" ${Number(cur) === v ? "selected" : ""}>${l}</option>`).join("");
-    return `<div class="group"><h3>Как быстро поднимать тревогу</h3><p>«Быстро» — раньше предупреждает, но чаще ошибается. «Спокойно» — реже беспокоит по пустякам.</p>
+    return `<div class="group"><h3>Как быстро поднимать тревогу</h3>
         <div class="seg wide">${[["high", "Быстро"], ["standard", "Обычно"], ["gentle", "Спокойно"]].map(([v, l]) => `<button aria-pressed="${preset === v}" onclick="setPrefs({sensitivity_preset:'${v}'})">${l}</button>`).join("")}</div>
         <div class="muted small" style="margin-top:8px">Падение подтверждается за ${esc(p.fall_confirm_seconds)} с, посадка — за ${esc(diag.effective_sit_confirm_sec ?? p.sit_confirm_seconds)} с${diag.night_active ? " (сейчас ночной режим)" : ""}</div></div>
       <div class="group"><h3>О чём сигналить</h3><div class="rows">
-        <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Любой человек на полу</div><div class="rowi-sub">Тревога, если кто-то неподвижно лежит на полу и рядом никого — даже если система не узнала бабушку</div></div>${sw(p.floor_safety_net !== false, `setPrefs({floor_safety_net:${p.floor_safety_net === false}})`, "Любой человек на полу")}</div>
-        <div class="rowi">${ri("i-hand", "warn")}<div class="rowi-body"><div class="rowi-title">Поднятая рука — зов на помощь</div><div class="rowi-sub">Если бабушка держит руку над головой ${esc(p.help_confirm_seconds)} с</div></div>${sw(p.enable_help_gesture, `setPrefs({enable_help_gesture:${!p.enable_help_gesture}})`, "Жест рукой")}</div>
+        <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Любой человек на полу</div><div class="rowi-sub">даже если бабушку не узнала</div></div>${sw(p.floor_safety_net !== false, `setPrefs({floor_safety_net:${p.floor_safety_net === false}})`, "Любой человек на полу")}</div>
+        <div class="rowi">${ri("i-hand", "warn")}<div class="rowi-body"><div class="rowi-title">Поднятая рука — зов на помощь</div><div class="rowi-sub">рука над головой ${esc(p.help_confirm_seconds)} с</div></div>${sw(p.enable_help_gesture, `setPrefs({enable_help_gesture:${!p.enable_help_gesture}})`, "Жест рукой")}</div>
         <div class="rowi">${ri("i-moon", "care")}<div class="rowi-body"><div class="rowi-title">Ночью реагировать быстрее</div><div class="rowi-sub">С ${pad(p.night_start_hour ?? 22)}:00 до ${pad(p.night_end_hour ?? 7)}:00</div></div>${sw(p.night_strict_mode, `setPrefs({night_strict_mode:${!p.night_strict_mode}})`, "Ночной режим")}</div>
-        <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div><div class="rowi-sub">Повторная тревога, если не вернулась</div></div><select onchange="setPrefs({prolonged_absence_minutes:Number(this.value)})">${opt(p.prolonged_absence_minutes, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]])}</select></div>
-        <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div><div class="rowi-sub">Профилактика пролежней</div></div><select onchange="setPrefs({immobility_reminder_minutes:Number(this.value)})">${opt(p.immobility_reminder_minutes, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]])}</select></div>
-      </div><p class="muted small" style="margin-top:8px">Режим «только падение и сползание» каждый получатель включает себе сам — на главном экране или во вкладке «Кому сигналить».</p></div>`
+        <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div></div><select onchange="setPrefs({prolonged_absence_minutes:Number(this.value)})">${opt(p.prolonged_absence_minutes, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]])}</select></div>
+        <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div></div><select onchange="setPrefs({immobility_reminder_minutes:Number(this.value)})">${opt(p.immobility_reminder_minutes, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]])}</select></div>
+      </div></div>`
       + (matchMedia("(pointer: fine)").matches ? `<div class="group"><button class="btn" onclick="showLayer($('keysScrim'))">${ico("i-key")}Горячие клавиши<span class="muted small" style="margin-left:4px">(?)</span></button></div>` : "");
   }
   async function setPrefs(patch) { const d = await call("/api/prefs", { json: patch }); if (d && S) { S.prefs = d.prefs; S.care = d.care || S.care; renderSheet(); } }
