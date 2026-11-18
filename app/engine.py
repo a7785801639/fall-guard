@@ -745,6 +745,7 @@ class FallGuardEngine:
         self.feedback = FalseAlertFeedbackStore(self.settings.data_dir / "feedback")
         self.devices = DeviceStore(self.settings.data_dir / "devices.json")
         self.camera_health = CameraHealthMonitor(self.settings.data_dir)
+        self._sync_camera_health_zones()
         self.alert_feed = AlertFeed()
         self.faces = FaceRegistry(
             faces_dir=self.settings.data_dir / "faces",
@@ -1191,8 +1192,13 @@ class FallGuardEngine:
             else:
                 self._telemetry_latch.pop(track_id, None)
 
+    def _sync_camera_health_zones(self) -> None:
+        if hasattr(self.camera_health, "set_zones"):
+            self.camera_health.set_zones(self.zones.get())
+
     def on_zones_updated(self) -> None:
-        # Разметку перерисовали — значит, текущий вид комнаты и есть правильный
+        # Разметку перерисовали — обновляем маску неподвижного фона и сбрасываем эталон
+        self._sync_camera_health_zones()
         self.camera_health.reset_reference()
         with self._lock:
             self._reset_telemetry_latch()
@@ -2186,6 +2192,7 @@ class FallGuardEngine:
             "stream_clients": stream_clients,
             "resolution": resolution,
             "camera_issue": self.camera_health.issue,
+            "camera_health": self.camera_health.snapshot(),
             "camera_rotate": int(cam.get("rotate", self.settings.frame_rotate)),  # type: ignore[arg-type]
             "camera_flip_h": bool(cam.get("flip_h", self.settings.frame_flip_h)),
             "tracks": tracks_snapshot,
@@ -2240,6 +2247,7 @@ class FallGuardEngine:
                 "camera_connected": bool(cam.get("connected", self.capture.is_connected)),
                 "camera_error": self.capture.last_error,
                 "camera_issue": self.camera_health.issue,
+                "camera_health": self.camera_health.snapshot(),
                 "camera": cam,
                 "decoder_backend": decoder_backend,
                 "encoder_backend": encoder_backend,
@@ -2888,6 +2896,7 @@ class FallGuardEngine:
 
     def _handle_camera_health(self, frame: np.ndarray, night_ir: bool) -> None:
         try:
+            self._sync_camera_health_zones()
             changes = self.camera_health.update(frame, time.time(), night_ir)
         except Exception as exc:
             logger.debug("Сбой контроля камеры: %s", exc)

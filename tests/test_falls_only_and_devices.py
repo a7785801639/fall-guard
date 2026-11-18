@@ -798,3 +798,134 @@ def test_phone_receives_events_by_mode_matrix(tmp_path: Path) -> None:
     for mode, active in (("all", True), ("standup", False), ("falls", False)):
         client.post("/api/me/mode", json={"mode": mode}, headers=auth)
         assert client.get("/api/alerts/poll?after=0&wait=0", headers=auth).json()["alarm_active"] is active, mode
+
+
+def test_camera_health_masks_dynamic_zones_lamp_transition_and_exposes_status_snapshot(
+    tmp_path: Path,
+) -> None:
+    """
+    Включение потолочной люстры (верхний засвет y < 0.08 + потемневшее окно), открытие двери
+    и смена одеяла/позы на кровати НЕ вызывают ложное «Камеру сдвинули» при неподвижных стенах,
+    а реальный сдвиг на 8 px (в 160x90) или перекрытие объектива по-прежнему поднимают issue='moved'.
+    """
+    import cv2
+    import numpy as np
+
+    from app.camera_health import CameraHealthMonitor
+
+    h, w = 1080, 1920
+    bed_poly = [
+        [0.59805, 0.79135],
+        [0.60234, 0.65649],
+        [0.66389, 0.64504],
+        [0.69395, 0.56997],
+        [0.66890, 0.41858],
+        [0.30964, 0.40458],
+        [0.25740, 0.57888],
+        [0.27815, 0.78880],
+    ]
+    door_poly = [
+        [0.20659, 0.19211],
+        [0.26885, 0.82188],
+        [0.21947, 0.99746],
+        [0.18297, 0.99746],
+        [0.06847, 0.26845],
+    ]
+
+    # Строим комнату с неподвижными деревянными планками стен и мебелью
+    wall_base = np.full((h, w, 3), 95, dtype=np.uint8)
+    for y_plank in range(90, h, 38):
+        cv2.line(wall_base, (0, y_plank), (w - 1, y_plank), (58, 72, 88), 3)
+    for x_post in (360, 760, 1180, 1520):
+        cv2.line(wall_base, (x_post, 90), (x_post, h - 1), (48, 60, 74), 4)
+    cv2.rectangle(wall_base, (620, 130), (960, 340), (140, 155, 168), -1)
+    cv2.rectangle(wall_base, (620, 130), (960, 340), (42, 48, 55), 5)
+
+    bed_pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in bed_poly], dtype=np.int32)
+    door_pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in door_poly], dtype=np.int32)
+
+    # 1. Сумеречный эталон (16:09): выключена люстра, яркое окно справа, закрытая дверь, тёмный плед на кровати
+    dusk_room = (wall_base.astype(np.float32) * 0.58).astype(np.uint8)
+    cv2.rectangle(dusk_room, (1580, 110), (1890, 560), (235, 240, 245), -1)  # светлое окно
+    cv2.fillPoly(dusk_room, [door_pts], (125, 132, 140))  # закрытое полотно двери
+    cv2.fillPoly(dusk_room, [bed_pts], (70, 82, 110))
+
+    # 2. Вечер с люстрой (17:57): яркий засвет потолка y < 0.08, чёрное окно, распахнутая дверь и новое пёстрое одеяло
+    lamp_room = np.clip(wall_base.astype(np.float32) * 1.28 + 18.0, 0, 255).astype(np.uint8)
+    lamp_room[: int(0.08 * h), :] = 250  # засвет потолочного плафона
+    cv2.rectangle(lamp_room, (1580, 110), (1890, 560), (18, 20, 24), -1)  # почерневшее ночное окно
+    cv2.fillPoly(lamp_room, [door_pts], (22, 26, 30))  # тёмный проём открытой двери
+    for stripe_x in range(140, 510, 24):
+        cv2.line(lamp_room, (stripe_x, 220), (stripe_x, 980), (200, 180, 150), 4)
+    cv2.fillPoly(lamp_room, [bed_pts], (190, 210, 225))
+    for bx in range(540, 1280, 32):
+        cv2.circle(lamp_room, (bx, 640), 14, (45, 65, 160), -1)
+
+    rng = np.random.default_rng(17)
+
+    def with_sensor_noise(img: np.ndarray) -> np.ndarray:
+        noise = rng.normal(0.0, 2.5, img.shape).astype(np.int16)
+        return np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+
+    mon = CameraHealthMonitor(tmp_path)
+    mon.set_dynamic_polygons(bed_polygon=bed_poly, door_polygon=door_poly)
+    assert 0.25 <= float(mon.snapshot()["static_ratio"]) < 0.80
+
+    t = 0.0
+    for _ in range(5):
+        t += 20.0
+        assert mon.update(with_sensor_noise(dusk_room), t, False) == []
+    assert mon.snapshot()["has_reference"] == ["day"]
+
+    # Переход «окно -> люстра + открытая дверь + смена одеяла» при неподвижных стенах НЕ поднимает тревогу!
+    lamp_changes = []
+    for _ in range(6):
+        t += 20.0
+        lamp_changes.extend(mon.update(with_sensor_noise(lamp_room), t, False))
+    snap_lamp = mon.snapshot()
+    assert lamp_changes == []
+    assert mon.issue == ""
+    assert float(snap_lamp["shift_px"]) < 1.0
+
+    # Безопасный фолбэк на полный кадр, если статическая площадь < 25% кадра
+    huge_bed = [[0.01, 0.01], [0.99, 0.01], [0.99, 0.99], [0.01, 0.99]]
+    mon_fallback = CameraHealthMonitor(None)
+    mon_fallback.set_dynamic_polygons(bed_polygon=huge_bed, door_polygon=[])
+    assert mon_fallback.snapshot()["static_ratio"] == 1.0
+
+    # Реальный физический сдвиг камеры на 96 px в 1080p (= 8 px в 160x90) -> issue == "moved"
+    shifted_room = np.roll(lamp_room, 96, axis=1)
+    shift_changes = []
+    for _ in range(4):
+        t += 20.0
+        shift_changes.extend(mon.update(with_sensor_noise(shifted_room), t, False))
+    assert ("moved", True) in [(c.kind, c.active) for c in shift_changes]
+    assert mon.issue == "moved"
+    assert float(mon.snapshot()["shift_px"]) >= 6.0
+
+    # Перекрытие объектива тряпкой (однородный серый фон с шумом матрицы, corr ~ 0 < 0.16) -> issue == "moved"
+    mon.reset_reference()
+    for _ in range(4):
+        t += 20.0
+        mon.update(with_sensor_noise(lamp_room), t, False)
+    assert mon.issue == ""
+    cloth_frame = np.full((h, w, 3), 42, dtype=np.uint8)
+    cloth_changes = []
+    for _ in range(4):
+        t += 20.0
+        cloth_changes.extend(mon.update(with_sensor_noise(cloth_frame), t, False))
+    assert ("moved", True) in [(c.kind, c.active) for c in cloth_changes]
+    assert mon.issue == "moved"
+
+    # Проверка экспозиции camera_health.snapshot() в engine.get_status() и /api/status
+    engine = FallGuardEngine(_build_test_settings(tmp_path / "eng"))
+    engine.zones.update(bed_polygon=bed_poly, door_polygon=door_poly)
+    engine.on_zones_updated()
+    st = engine.get_status()
+    assert isinstance(st.get("camera_health"), dict)
+    assert st["camera_health"]["issue"] == ""
+    assert "shift_px" in st["camera_health"] and "correlation" in st["camera_health"]
+    assert 0.25 <= float(st["camera_health"]["static_ratio"]) < 0.80
+
+
+
