@@ -49,9 +49,8 @@ class AlarmActivity : Activity() {
             val g = v as android.view.ViewGroup
             val need = (0 until g.childCount).sumOf { g.getChildAt(it).measuredHeight }
             val show = (bottom - top) >= need + v.resources.displayMetrics.density * 16
-            for (i in 0 until (v as android.view.ViewGroup).childCount) {
-                v.getChildAt(i).visibility = if (show) View.VISIBLE else View.INVISIBLE
-            }
+            // Места нет — убираем блок совсем, чтобы верх не прокручивался ради пустоты
+            if (!show) v.post { v.visibility = View.GONE }
         }
         bind()
         enter()

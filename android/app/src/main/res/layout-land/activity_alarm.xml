@@ -62,12 +62,14 @@
             </FrameLayout>
         </FrameLayout>
 
+        <!-- Прокрутка обрезает по своему краю; поля — внутри, чтобы кольца значка помещались -->
         <ScrollView
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_marginStart="16dp"
+            android:layout_marginTop="-16dp"
+            android:layout_marginEnd="-16dp"
+            android:layout_marginBottom="-16dp"
             android:layout_weight="1"
-            android:clipChildren="false"
             android:fillViewport="true"
             android:overScrollMode="never">
 
@@ -75,7 +77,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:clipChildren="false"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:padding="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -225,6 +228,10 @@
                     android:id="@+id/btnFalse"
                     style="@style/Btn"
                     android:background="@drawable/btn_glass"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
                     android:layout_width="0dp"
                     android:layout_marginEnd="5dp"
                     android:layout_weight="1"
@@ -234,6 +241,10 @@
                     android:id="@+id/btnOpen"
                     style="@style/Btn"
                     android:background="@drawable/btn_glass"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
                     android:layout_width="0dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
@@ -243,6 +254,10 @@
             <Button
                 android:id="@+id/btnSilence"
                 style="@style/Btn"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
                 android:background="@android:color/transparent"
                 android:text="Только выключить звук на этом телефоне"
                 android:textColor="@color/alarm_soft"
