@@ -273,7 +273,6 @@
       .viewport:hover .vp-btns, .vp-btns:focus-within { opacity: 1; }
     }
     .chip { font-variant-numeric: tabular-nums; }
-    #btnZoom[aria-pressed="true"] { background: #fff; color: #000; }
     .chip.fs-status { display: none; }
     .chip.fs-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--calm); }
     .viewport:fullscreen .chip.fs-status { display: inline-flex; height: 32px; font-size: 14px; padding: 0 12px; }
@@ -802,7 +801,6 @@
               <div class="vp-btns">
                 <button class="vp-btn" id="btnPip" hidden onclick="enterPip()" aria-label="Маленькое окно" title="Видео в маленьком окне поверх других приложений"><svg class="ico"><use href="#i-pip"/></svg></button>
                 <button class="vp-btn" id="btnShot" onclick="saveFrame()" aria-label="Сохранить кадр" title="Сохранить кадр (C)"><svg class="ico"><use href="#i-camera"/></svg></button>
-                <button class="vp-btn" id="btnZoom" aria-pressed="false" onclick="toggleBedZoom()" aria-label="Кровать крупно" title="Кровать крупно (Z, двойной щелчок)"><svg class="ico"><use href="#i-zoom"/></svg></button>
                 <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
                 <button class="vp-btn" onclick="toggleFullscreen()" aria-label="На весь экран" title="На весь экран (F)"><svg class="ico"><use href="#i-full"/></svg></button>
               </div>
@@ -2018,7 +2016,6 @@
   function applyZoom(animate) {
     inner.style.transition = animate ? "" : "none";
     inner.style.transform = zoom.s > 1.001 ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` : "";
-    $("btnZoom").setAttribute("aria-pressed", String(zoom.s > 1.01));
     if (typeof pipReport === "function") pipReport();
     viewport.classList.toggle("zoomed", zoom.s > 1.01);
     draw();
