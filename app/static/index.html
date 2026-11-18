@@ -389,6 +389,10 @@
     .switch[aria-checked="true"]::after { transform: translateX(18px); }
     select, input[type="number"], input[type="text"] { min-height: 38px; padding: 0 10px; border-radius: 9px; background: var(--fill); border: 0; max-width: 100%; }
     select option { background: var(--raise-2); }
+    .pick { display: inline-flex; align-items: center; gap: 4px; min-height: 38px; padding: 0 8px 0 14px; border-radius: 11px; background: var(--fill); font-weight: 600; font-size: 14px; flex: none; transition: background 0.15s; }
+    .pick svg { width: 16px; height: 16px; color: var(--muted); transform: rotate(90deg); }
+    @media (hover: hover) { .pick:hover { background: var(--fill-2); } }
+    .pick:active { transform: scale(0.97); }
     input[type="number"] { width: 88px; }
     .badge { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 650; background: var(--fill); color: var(--muted); white-space: nowrap; }
     .badge.alarm { background: var(--alarm-soft); color: var(--alarm); }
@@ -757,6 +761,7 @@
       <symbol id="i-pause-f" viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-play-f" viewBox="0 0 24 24"><path d="M7.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.7-6.8a.8.8 0 0 0 0-1.4L8.7 4.5a.8.8 0 0 0-1.2.7Z" fill="currentColor"/></symbol>
       <symbol id="i-pip" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11.5" width="7" height="5.5" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-blank" viewBox="0 0 24 24"></symbol>
       <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="m11.2 11.8 8.8-8.8M16.5 6.5l2.5 2.5M14 9l2 2"/></symbol>
     </defs>
   </svg>
@@ -1668,7 +1673,7 @@
     hideMenu();
     if (it && it.fn) it.fn();
   });
-  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest("#btnShot") && !e.target.closest("button.face")) hideMenu(); }, true);
+  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest(".pick") && !e.target.closest("#btnShot") && !e.target.closest("button.face")) hideMenu(); }, true);
   function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
     const id = Number(t.track_id);
@@ -2504,6 +2509,7 @@
   }
 
   swipeToClose($("sheetScrim"), closeSheet, $("sheetBody"));
+  $("sheetBody").addEventListener("scroll", () => { if (!$("menu").hidden) hideMenu(); }, { passive: true });
   swipeToClose($("clipScrim"), closeClip, null);
 
   /* ---------- Скользящий бегунок в переключателях ---------- */
@@ -2532,6 +2538,21 @@
   }
   window.addEventListener("resize", () => syncPills());
   if (matchMedia("(hover: none)").matches) document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".tool, .vp-btn, .icon-btn, .pcell"); if (b) setTimeout(() => b.blur(), 0); }, true);
+
+  /* ---------- Выбор из списка: кнопка + меню с галочкой (вместо системного select) ---------- */
+  const PICKS = {};
+  function pick(key, cur, list, onPick, title) {
+    PICKS[key] = { cur, list, onPick, title };
+    const item = list.find(([v]) => v === cur) || list[0];
+    return `<button class="pick" onclick="openPick(this,'${key}')" aria-haspopup="listbox" aria-label="${esc(title || "")}: ${esc(item[1])}"><span>${esc(item[1])}</span>${ico("i-chev-r")}</button>`;
+  }
+  function openPick(el, key) {
+    const p = PICKS[key]; if (!p) return;
+    const r = el.getBoundingClientRect();
+    showMenu(r.right - 220, r.bottom + 6, p.title || "", p.list.map(([v, l]) => ({ label: l, icon: v === p.cur ? "i-check" : "i-blank", cls: v === p.cur ? "on" : "", fn: () => { if (v !== p.cur) { p.cur = v; p.onPick(v); } } })));
+    const m = $("menu"); if (r.bottom + 6 + m.offsetHeight > window.innerHeight - 8) { m.style.top = Math.max(8, r.top - m.offsetHeight - 6) + "px"; m.style.transformOrigin = "100% 100%"; } else m.style.transformOrigin = "100% 0";
+    const on = m.querySelector("button.on"); if (on) on.focus({ preventScroll: true });
+  }
 
   /* ---------- Подтверждение ---------- */
   let askResolve = null;
@@ -2733,7 +2754,6 @@
   function tabCare() {
     const p = S.prefs || {}, diag = (S.care && S.care.diagnostics) || {};
     const preset = p.sensitivity_preset || "standard";
-    const opt = (cur, list) => list.map(([v, l]) => `<option value="${v}" ${Number(cur) === v ? "selected" : ""}>${l}</option>`).join("");
     return `<div class="group"><h3>Как быстро поднимать тревогу</h3>
         <div class="seg wide">${[["high", "Быстро"], ["standard", "Обычно"], ["gentle", "Спокойно"]].map(([v, l]) => `<button aria-pressed="${preset === v}" onclick="setPrefs({sensitivity_preset:'${v}'})">${l}</button>`).join("")}</div>
         <div class="muted small" style="margin-top:8px">Падение подтверждается за ${esc(p.fall_confirm_seconds)} с, посадка — за ${esc(diag.effective_sit_confirm_sec ?? p.sit_confirm_seconds)} с${diag.night_active ? " (сейчас ночной режим)" : ""}</div></div>
@@ -2741,8 +2761,8 @@
         <div class="rowi">${ri("i-fall", "alarm")}<div class="rowi-body"><div class="rowi-title">Любой человек на полу</div><div class="rowi-sub">даже если бабушку не узнала</div></div>${sw(p.floor_safety_net !== false, `setPrefs({floor_safety_net:${p.floor_safety_net === false}})`, "Любой человек на полу")}</div>
         <div class="rowi">${ri("i-hand", "warn")}<div class="rowi-body"><div class="rowi-title">Поднятая рука — зов на помощь</div><div class="rowi-sub">рука над головой ${esc(p.help_confirm_seconds)} с</div></div>${sw(p.enable_help_gesture, `setPrefs({enable_help_gesture:${!p.enable_help_gesture}})`, "Жест рукой")}</div>
         <div class="rowi">${ri("i-moon", "care")}<div class="rowi-body"><div class="rowi-title">Ночью реагировать быстрее</div><div class="rowi-sub">С ${pad(p.night_start_hour ?? 22)}:00 до ${pad(p.night_end_hour ?? 7)}:00</div></div>${sw(p.night_strict_mode, `setPrefs({night_strict_mode:${!p.night_strict_mode}})`, "Ночной режим")}</div>
-        <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div></div><select onchange="setPrefs({prolonged_absence_minutes:Number(this.value)})">${opt(p.prolonged_absence_minutes, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]])}</select></div>
-        <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div></div><select onchange="setPrefs({immobility_reminder_minutes:Number(this.value)})">${opt(p.immobility_reminder_minutes, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]])}</select></div>
+        <div class="rowi">${ri("i-clock")}<div class="rowi-body"><div class="rowi-title">Долго нет в кровати</div></div>${pick("absence", Number(p.prolonged_absence_minutes) || 0, [[0, "Выкл"], [10, "10 мин"], [15, "15 мин"], [20, "20 мин"], [30, "30 мин"], [45, "45 мин"], [60, "1 час"]], (v) => setPrefs({ prolonged_absence_minutes: v }), "Долго нет в кровати")}</div>
+        <div class="rowi">${ri("i-turn")}<div class="rowi-body"><div class="rowi-title">Напоминать сменить позу</div></div>${pick("immob", Number(p.immobility_reminder_minutes) || 0, [[0, "Выкл"], [120, "Каждые 2 ч"], [180, "Каждые 3 ч"], [240, "Каждые 4 ч"]], (v) => setPrefs({ immobility_reminder_minutes: v }), "Напоминать сменить позу")}</div>
       </div></div>`
       + (matchMedia("(pointer: fine)").matches ? `<div class="group"><button class="btn" onclick="showLayer($('keysScrim'))">${ico("i-key")}Горячие клавиши<span class="muted small" style="margin-left:4px">(?)</span></button></div>` : "");
   }
