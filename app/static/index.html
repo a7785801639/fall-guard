@@ -2578,7 +2578,7 @@
       const C = 2 * Math.PI * 19;
       h += `<div class="pair"><div class="qr">${pairInfo.qr_svg}</div>
         <div style="display:grid;gap:16px;min-width:0">
-          <ol class="steps"><li><span>Установите приложение <b>FallGuard</b> на Android</span></li><li><span>Наведите <b>камеру телефона</b> на QR-код — приложение откроется и подключится само</span></li><li><span>Или введите вручную адрес <b>${esc(pairInfo.server_url)}</b> и код:</span></li></ol>
+          <ol class="steps"><li><span>Установите приложение <b>FallGuard</b> на Android</span></li><li><span>В приложении нажмите <b>«Сканировать QR-код»</b> и наведите на этот код</span></li><li><span>Или введите вручную адрес <b>${esc(pairInfo.server_url)}</b> и код:</span></li></ol>
           <div class="code-row"><span class="code num">${esc(pairInfo.code)}</span><button class="btn sm" onclick="copyText('${esc(pairInfo.code)}')">${ico("i-check")}Копировать</button>
             <span class="ring-left" title="Код действует ограниченное время"><svg viewBox="0 0 44 44"><circle class="bg" cx="22" cy="22" r="19"/><circle class="fg" id="pairRing" cx="22" cy="22" r="19" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="0"/></svg><span class="num" id="pairLeft"></span></span></div>
         </div></div>`;

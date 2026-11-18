@@ -81,6 +81,7 @@ class MainActivity : Activity() {
             )
         }
         findViewById<Button>(R.id.btnRetry).setOnClickListener { connect() }
+        findViewById<View>(R.id.btnScan).setOnClickListener { scanQr() }
         findViewById<Button>(R.id.btnOfflineSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -254,6 +255,28 @@ class MainActivity : Activity() {
         findViewById<EditText>(R.id.inCode).setText(code)
         pair(servers, code)
         return true
+    }
+
+    /** Сканер QR-кода из пульта: «fallguard://pair?…» сразу привязывает телефон. */
+    private fun scanQr() {
+        val msg = findViewById<TextView>(R.id.setupMsg)
+        val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this, opts).startScan()
+            .addOnSuccessListener { code ->
+                val raw = code.rawValue ?: ""
+                val uri = try { Uri.parse(raw) } catch (_: Exception) { null }
+                if (uri == null || !handlePairLink(Intent(Intent.ACTION_VIEW, uri))) {
+                    msg.setTextColor(getColor(R.color.alarm))
+                    msg.text = "Это не QR-код FallGuard. Откройте в пульте «Подключить телефон»."
+                }
+            }
+            .addOnFailureListener {
+                msg.setTextColor(getColor(R.color.alarm))
+                msg.text = "Сканер недоступен на этом телефоне — введите адрес и код ниже."
+            }
     }
 
     private fun pair(servers: List<String>, code: String) {

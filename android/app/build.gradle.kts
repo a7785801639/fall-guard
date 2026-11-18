@@ -53,5 +53,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // Сканер QR из Google Play services: без разрешения камеры, свой экран сканирования
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     testImplementation("junit:junit:4.13.2")
 }

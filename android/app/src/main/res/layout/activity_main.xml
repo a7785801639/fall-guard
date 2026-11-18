@@ -56,7 +56,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="28dp"
-                android:background="@drawable/card"
+                android:id="@+id/btnScan"
+                android:background="@drawable/card_ripple"
+                android:clickable="true"
+                android:focusable="true"
                 android:baselineAligned="false"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
@@ -99,6 +102,13 @@
                         android:textColor="@color/muted"
                         android:textSize="14sp" />
                 </LinearLayout>
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chev" />
             </LinearLayout>
 
             <LinearLayout
