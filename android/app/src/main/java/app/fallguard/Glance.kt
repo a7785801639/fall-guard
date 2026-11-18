@@ -129,7 +129,13 @@ class StatusTile : TileService() {
             !s.online -> Tile.STATE_INACTIVE
             else -> Tile.STATE_ACTIVE
         }
-        t.icon = Icon.createWithResource(this, R.drawable.ic_stat)
+        // Значок по состоянию: щит — спокойно, человек — встаёт или ушла, знак — тревога
+        t.icon = Icon.createWithResource(this, when {
+            !s.online -> R.drawable.ic_k_link
+            s.tone == Glance.Tone.ALARM -> R.drawable.ic_k_alert
+            s.tone == Glance.Tone.WARN -> R.drawable.ic_k_walk
+            else -> R.drawable.ic_stat
+        })
         t.contentDescription = s.title
         t.updateTile()
     }
