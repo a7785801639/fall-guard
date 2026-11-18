@@ -1,7 +1,6 @@
 package app.fallguard
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -55,12 +54,10 @@ class SettingsActivity : Activity() {
             }
         }
         findViewById<Button>(R.id.btnUnpair).setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Отвязать телефон?")
-                .setMessage("Тревоги перестанут приходить на этот телефон.")
-                .setPositiveButton("Отвязать") { _, _ -> unpair() }
-                .setNegativeButton("Отмена", null)
-                .show()
+            AppDialog.show(this, "Отвязать телефон?", "Тревоги перестанут приходить на этот телефон.", actions = listOf(
+                AppDialog.Action("Отмена", R.style.Btn) {},
+                AppDialog.Action("Отвязать", R.style.Btn_Danger_Small) { unpair() },
+            ))
         }
     }
 
@@ -189,12 +186,7 @@ class SettingsActivity : Activity() {
                 AlertService.start(this@SettingsActivity, AlertService.ACTION_TEST_SIGNAL, kind.name)
             }
         })
-        AlertDialog.Builder(this)
-            .setTitle(kind.title)
-            .setView(body)
-            .setPositiveButton("Готово", null)
-            .setOnDismissListener { stopPreview() }
-            .show()
+        AppDialog.show(this, kind.title, body = body, actions = listOf(AppDialog.Action("Готово", R.style.Btn) {}), onDismiss = { stopPreview() })
     }
 
     @Deprecated("Activity API")
@@ -303,7 +295,7 @@ object SignalDialog {
 
         styleGroup.setOnCheckedChangeListener { _, checked -> styles.getOrNull(checked - 100)?.let { cb.onStyle(it) } }
         soundGroup.setOnCheckedChangeListener { _, checked -> options.getOrNull(checked - 200)?.first?.let { cb.onSound(it) } }
-        return ScrollView(ctx).apply { addView(box) }
+        return box
     }
 }
 

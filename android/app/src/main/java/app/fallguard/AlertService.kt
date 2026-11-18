@@ -151,7 +151,13 @@ class AlertService : Service() {
         val title = "Проверка: ${kind.title.lowercase()}"
         when (Signals.effectiveStyle(kind, "", Sounds.style(this, kind))) {
             Signals.Style.ALARM -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", System.currentTimeMillis(), "", "", kind, serverTracked = false))
-            Signals.Style.NOTIFY -> { notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление со звуком."); Sounds.playNotify(this, kind) }
+            Signals.Style.NOTIFY -> {
+                val am = getSystemService(AudioManager::class.java)
+                val quiet = am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL
+                notifyEvent(NOTIF_EVENT, title, if (quiet) "Телефон в беззвучном режиме — уведомление придёт без звука." else "Так придёт уведомление со звуком.")
+                Sounds.playNotify(this, kind)
+                if (quiet) ui.post { android.widget.Toast.makeText(this, "Телефон в беззвучном — уведомление придёт без звука", android.widget.Toast.LENGTH_LONG).show() }
+            }
             Signals.Style.SILENT -> notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление без звука.")
         }
     }
@@ -199,9 +205,11 @@ class AlertService : Service() {
         for (act in actions) when (act) {
             is Signals.Action.Notify -> {
                 val a = byId[act.alert.id] ?: continue
-                notifyEvent(NOTIF_EVENT, a.optString("title"), a.optString("description"))
+                // У каждого события своё уведомление: поздний кадр не перезапишет чужое
+                val nid = eventNotifId(act.alert.id)
+                notifyEvent(nid, a.optString("title"), a.optString("description"))
                 if (act.sound) Sounds.playNotify(this, act.kind)
-                attachSnapshot(NOTIF_EVENT, a.optString("title"), a.optString("description"), base, a.optString("image_url"))
+                attachSnapshot(nid, a.optString("title"), a.optString("description"), base, a.optString("image_url"))
             }
             is Signals.Action.Ring -> {
                 val a = byId[act.alert.id] ?: continue
@@ -392,6 +400,8 @@ class AlertService : Service() {
      * Снимок события в уведомлении: видно, что происходит, прямо из шторки.
      * Сначала уведомление уходит сразу, без картинки; кадр подставляется, когда сервер его сохранит.
      */
+    private fun eventNotifId(alertId: String): Int = 1000 + Math.floorMod(alertId.hashCode(), 5000)
+
     private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String) {
         if (base.isEmpty() || path.isEmpty()) return
         val token = prefs.token
@@ -399,7 +409,12 @@ class AlertService : Service() {
             for (attempt in 0 until 3) {
                 val data = Api.bytes(base, path, token)
                 val bmp = data?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
-                if (bmp != null) { notifyEvent(id, title, text, bmp, silentUpdate = true); return@Thread }
+                if (bmp != null) {
+                    // Смахнули уведомление — не возвращаем его ради картинки
+                    val still = try { nm.activeNotifications.any { it.id == id } } catch (_: Exception) { false }
+                    if (still) notifyEvent(id, title, text, bmp, silentUpdate = true)
+                    return@Thread
+                }
                 try { Thread.sleep(1500) } catch (_: InterruptedException) { return@Thread }
             }
         }.start()
