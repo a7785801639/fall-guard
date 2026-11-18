@@ -64,6 +64,29 @@
     }
     .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 4px 8px; }
     .caption b { font-weight: 600; color: var(--text); font-size: 14px; }
+    .link { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: 13px; font-weight: 600; padding: 6px 4px; margin: -6px -4px; border-radius: 8px; }
+    .link:hover { color: var(--text); }
+    .link svg { width: 15px; height: 15px; }
+    /* ---- Последние события: занимают место под видео, если оно есть ---- */
+    .recent { margin-top: 14px; padding: 12px 14px 14px; border-radius: var(--r); background: var(--panel); animation: rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .recent-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; row-gap: 0; column-gap: 10px; overflow: hidden; }
+    .rcard { display: grid; gap: 7px; min-width: 0; padding: 6px; margin: -6px; border-radius: 12px; text-align: left; transition: background 0.15s, transform 0.15s; }
+    .rcard:hover { background: var(--fill); }
+    .rcard:active { transform: scale(0.98); }
+    .rcard .thumb-wrap { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+    .rcard .thumb-wrap img, .rcard .thumb-wrap .thumb-ph { width: 100%; height: 100%; border-radius: 10px; object-fit: cover; display: block; background: linear-gradient(100deg, #15181D 30%, #1E2229 50%, #15181D 70%) 0 0 / 300% 100%; animation: shimmer 2s linear infinite; }
+    .rcard .ev-ico { left: 6px; bottom: 6px; box-shadow: none; }
+    .rcard b { font-size: 13.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .rcard b.fall { color: var(--alarm); }
+    .rcard span.t { font-size: 12px; color: var(--muted); margin-top: -4px; }
+    .recent.compact { padding: 10px 12px 12px; }
+    .recent.compact .caption { margin-bottom: 6px; }
+    .recent.compact .rcard { grid-template-columns: 92px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 2px; align-items: center; }
+    .recent.compact .rcard .thumb-wrap { grid-row: 1 / 3; }
+    .recent.compact .rcard b { -webkit-line-clamp: 1; align-self: end; }
+    .recent.compact .rcard span.t { margin-top: 0; align-self: start; }
+    .recent.compact .recent-row { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+    @media (max-width: 979px) { .main { display: contents; } .recent { order: 3; margin-top: 0; } .recent-row { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
 
     /* ================= Статус: человеческая фраза о бабушке ================= */
     /* Сетка фиксированной высоты: метка → заголовок + рисунок → пояснение. Ничего не прыгает */
@@ -206,6 +229,8 @@
     .seg svg { width: 17px; height: 17px; }
     #modeSeg button[data-v="all"][aria-pressed="true"] { background: var(--calm-soft); color: var(--calm); box-shadow: inset 0 0 0 1px rgba(91, 224, 161, 0.25); }
     #modeSeg button[data-v="falls"][aria-pressed="true"] { background: var(--alarm-soft); color: var(--alarm); box-shadow: inset 0 0 0 1px rgba(255, 90, 95, 0.3); }
+    .l-short { display: none; }
+    @media (max-width: 420px) { .rowi-actions .l-long { display: none; } .rowi-actions .l-short { display: inline; } }
     .hint { font-size: 12.5px; color: var(--muted); margin: 8px 4px 0; height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ================= Док: пауза, звук, журнал, настройки ================= */
@@ -336,7 +361,8 @@
     .sheet-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 6px 20px; }
     .sheet-head h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.02em; flex: 1; min-width: 0; }
     .icon-btn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--fill); flex: none; }
-    .tabs { display: flex; gap: 4px; padding: 8px 16px 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+    .tabs { display: flex; gap: 4px; padding: 8px 16px 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); scroll-padding: 0 32px; }
+    @media (max-width: 759px) { .tabs { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 28px), transparent); } }
     .tabs::-webkit-scrollbar { display: none; }
     .tab { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px 0 12px; border-radius: 999px; white-space: nowrap; font-weight: 600; font-size: 14px; color: var(--muted); transition: color 0.2s; }
     .tab svg { width: 17px; height: 17px; }
@@ -450,7 +476,8 @@
     .ev-ico svg { width: 15px; height: 15px; stroke-width: 2.2; }
     .ev-ico.alarm { background: var(--alarm-strong); color: #fff; } .ev-ico.muted { background: var(--raise-2); color: var(--muted); }
     .item-body { min-width: 0; flex: 1; }
-    .item-title, .item-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
     .item-title { font-weight: 600; }
     .item-title.fall { color: var(--alarm); }
     .item-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -520,7 +547,7 @@
       .pl.idle:not(.paused) .pl-ctrl { opacity: 1; transform: none; pointer-events: auto; }
     }
     .clip-foot { padding: 14px 18px calc(18px + var(--safe-b)); display: grid; gap: 12px; }
-    #clipTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #clipTitle { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
     .clip-meta { display: flex; gap: 6px; flex-wrap: wrap; }
     .clip-meta .badge { height: 26px; padding: 0 10px; font-size: 12.5px; gap: 6px; }
     .clip-meta .badge svg { width: 14px; height: 14px; }
@@ -623,6 +650,15 @@
     .ask p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
     .ask .row { width: 100%; }
     .clip-nav { display: flex; gap: 6px; }
+    /* Пальцем: невидимая зона касания больше самого элемента */
+    @media (pointer: coarse) {
+      .seg button { min-height: 36px; }
+      .seg button::after, .switch::before, .face button::after, .vp-btn::after, .icon-btn::after { content: ""; position: absolute; }
+      .seg button { position: relative; } .seg button::after { left: 0; right: 0; top: -5px; bottom: -5px; }
+      .switch::before { inset: -9px -6px; }
+      .face button::after { inset: -10px; }
+      .vp-btn, .icon-btn { position: relative; } .vp-btn::after, .icon-btn::after { inset: -6px; }
+    }
     #keysScrim { z-index: 45; place-items: center; padding: 20px; }
     .ask.keys { width: min(440px, 100%); justify-items: stretch; text-align: left; gap: 14px; }
     .keys-grid { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; align-items: center; font-size: 14px; color: var(--muted); }
@@ -761,6 +797,10 @@
             </div>
           </section>
         </div>
+        <section class="recent" id="recent" hidden aria-label="Последние события">
+          <div class="caption"><b>Последние события</b><button class="link" onclick="openJournal()">Весь журнал<svg class="ico"><use href="#i-chev-r"/></svg></button></div>
+          <div class="recent-row" id="recentRow"></div>
+        </section>
       </div>
 
       <aside class="rail">
@@ -1932,7 +1972,7 @@
     const on = me.mode === "falls";
     for (const b of $("modeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String((b.dataset.v === "falls") === on));
     $("modeWho").textContent = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
-    $("modeHint").textContent = on ? "Посадка и выход — без сигнала, только в журнал" : "Сигнал при посадке, выходе из кровати и падении";
+    $("modeHint").textContent = on ? "Посадка и выход — только в журнал" : "Сигнал при посадке, выходе и падении";
     syncPills($("modeSeg").parentNode);
   }
   async function setMyMode(next) {
@@ -1952,6 +1992,25 @@
   /* ---------- Хроника под видео ---------- */
   const TONE_LABEL = { calm: "спокойно", caregiver: "родственник", paused: "пауза", offline: "нет связи", alarm: "падение" };
   let thumbs = [];
+  // Под видео остаётся место (широкий короткий экран, планшет) — показываем последние записи
+  function renderRecent() {
+    const box = $("recent");
+    const list = clips.filter((c) => !c.false_alarm).slice(0, 4);
+    let room = true, compact = false;
+    if (window.innerWidth >= 980) {
+      const layoutEl = $("stage").parentElement, player = $("stage").querySelector(".player");
+      const free = layoutEl.clientHeight - player.offsetHeight;
+      room = free > 118; compact = free < 236;
+    }
+    box.classList.toggle("compact", compact);
+    box.hidden = !list.length || !room;
+    if (box.hidden) return;
+    setHtml($("recentRow"), list.map((c) => {
+      const img = c.jpg_url ? `<img loading="lazy" alt="" src="${esc(withAuth(c.jpg_url))}" />` : `<span class="thumb-ph"></span>`;
+      return `<button class="rcard" onclick="openClip('${esc(c.id)}')"><span class="thumb-wrap">${img}${evIcon(c)}</span><b class="${c.state === "fallen" ? "fall" : ""}">${esc(c.title || c.state)}</b><span class="t num">${esc((c.time || clock(c.ts)).slice(0, 5))} · ${ago(c.ts)}</span></button>`;
+    }).join(""));
+  }
+  window.addEventListener("resize", () => renderRecent());
   function setWindow(sec) {
     windowSec = sec; lsSet("fg_win", String(sec));
     [...$("winSeg").querySelectorAll("button")].forEach((b, i) => b.setAttribute("aria-pressed", String((i === 0) === (sec === 21600))));
@@ -2436,7 +2495,7 @@
     $("sheetBody").scrollTop = 0;
   }
   const sw = (on, onclick, label) => `<button class="switch" role="switch" aria-checked="${on ? "true" : "false"}" aria-label="${esc(label)}" onclick="${onclick}"></button>`;
-  const modeSeg = (mode, fn) => `<div class="seg"><button aria-pressed="${mode !== "falls"}" onclick="${fn}('all')">Все события</button><button aria-pressed="${mode === "falls"}" onclick="${fn}('falls')">Только падения</button></div>`;
+  const modeSeg = (mode, fn) => `<div class="seg"><button aria-pressed="${mode !== "falls"}" onclick="${fn}('all')" title="Все события"><span class="l-long">Все события</span><span class="l-short">Все</span></button><button aria-pressed="${mode === "falls"}" onclick="${fn}('falls')" title="Только падения"><span class="l-long">Только падения</span><span class="l-short">Падения</span></button></div>`;
 
   function tabRecipients() {
     const subs = S.telegram_subscribers || [], devs = S.devices || [];
@@ -2635,7 +2694,7 @@
       if (!live || !tws || tws.readyState !== 1) live = Object.assign({}, S);
       if (me.kind === "telegram") { const mine = (S.telegram_subscribers || []).find((s) => String(s.chat_id) === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
       if (me.kind === "device") { const mine = (S.devices || []).find((d) => d.id === me.id); if (mine) { me.mode = mine.mode; me.enabled = mine.enabled; } }
-      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); renderSetup(); draw();
+      renderMode(); renderFast(); renderTimeline(S.timeline); renderSheet(); renderSetup(); renderRecent(); draw();
       techLine = [S.runtime, (S.infer_fps || 0).toFixed(1) + " кадр/с", cam.resolution && cam.resolution[0] ? cam.resolution.join("×") : "", mjpeg ? "MJPEG" : "H.264"].filter(Boolean).join(" · ");
       if (pendingClip && clips.some((c) => c.id === pendingClip)) { const id = pendingClip; pendingClip = ""; openClip(id); }
     } catch (_) {} finally { pollBusy = false; }
