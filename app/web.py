@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import mimetypes
 import time
 import urllib.parse
+
+mimetypes.add_type("font/woff2", ".woff2")
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable

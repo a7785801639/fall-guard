@@ -2765,11 +2765,13 @@ class FallGuardEngine:
             if ch.active:
                 title = "Изображение с камеры застыло" if ch.kind == "frozen" else "Камеру сдвинули"
                 self._log_event("warning", f"{title}: {ch.detail}", category="system")
-                self.notifier.send_text(f"⚠️ FallGuard: {title.lower()}. {ch.detail}")
+                if self.settings.notify_camera_offline:
+                    self.notifier.send_text(f"⚠️ FallGuard: {title.lower()}. {ch.detail}")
             else:
                 title = "Изображение с камеры снова идёт" if ch.kind == "frozen" else "Вид с камеры снова совпадает с разметкой"
                 self._log_event("info", title, category="system")
-                self.notifier.send_text(f"✅ FallGuard: {title.lower()}.")
+                if self.settings.notify_camera_offline:
+                    self.notifier.send_text(f"✅ FallGuard: {title.lower()}.")
 
     def _dispatch_alert_async(self, event: AlertEvent, alert_jpeg: bytes) -> None:
         clip_id: str | None = None

@@ -483,3 +483,32 @@ def test_status_is_gzipped_and_lite_drops_heavy_parts_but_streams_are_not(tmp_pa
     assert plain.headers.get("content-encoding") is None and plain.json()["state"] == data["state"]
     snap = client.get("/api/snapshot.jpg", headers={"accept-encoding": "gzip"})
     assert snap.headers.get("content-encoding") is None
+
+
+def test_camera_health_telegram_push_respects_notify_camera_offline(tmp_path: Path, monkeypatch) -> None:
+    """Проблемы камеры всегда пишутся в журнал пульта, а пуши в Telegram идут только при NOTIFY_CAMERA_OFFLINE=true."""
+    import dataclasses
+    import numpy as np
+    from app.camera_health import CameraIssueChange
+
+    settings = _build_test_settings(tmp_path)
+    assert settings.notify_camera_offline is False
+    engine = FallGuardEngine(settings)
+
+    sent: list[str] = []
+    monkeypatch.setattr(engine.notifier, "send_text", lambda text: sent.append(text) or True)
+    monkeypatch.setattr(
+        engine.camera_health,
+        "update",
+        lambda frame, now, night_ir: [CameraIssueChange(kind="frozen", active=True, detail="95 с")],
+    )
+
+    dummy_frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    engine._handle_camera_health(dummy_frame, False)
+    assert sent == []
+    assert any("застыло" in ev["text"] for ev in engine.get_status()["events"])
+
+    engine.settings = dataclasses.replace(settings, notify_camera_offline=True)
+    engine._handle_camera_health(dummy_frame, False)
+    assert len(sent) == 1 and "застыло" in sent[0]
+
