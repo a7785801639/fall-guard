@@ -37,7 +37,7 @@
    ```bash
    docker compose --profile gpu up -d --build fall-guard-gpu
    ```
-4. **Проверка тестов:**
+4. **Проверка тестов** (`pip install -r requirements-dev.txt`):
    ```bash
    pytest tests -q
    ```

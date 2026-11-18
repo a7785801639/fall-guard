@@ -798,10 +798,11 @@ class FaceRegistry:
         safe_name = Path(filename).name
         with self._lock:
             target = self._faces_dir / parsed_role.value / safe_name
-            if target.exists():
+            existed = target.is_file()
+            if existed:
                 target.unlink()
             self._embeddings[parsed_role.value].pop(safe_name, None)
-            return True
+            return existed
 
     def list_photos(self) -> dict[str, list[str]]:
         with self._lock:

@@ -21,11 +21,17 @@ def configure_logging() -> None:
     )
 
 
-def build_app() -> FastAPI:
-    configure_logging()
+def load_settings() -> Settings:
     settings = Settings.from_env()
     if os.environ.get("STRICT_CONFIG", "0") == "1":
         settings.require_all_secrets()
+    return settings
+
+
+def build_app(settings: Settings | None = None) -> FastAPI:
+    if settings is None:
+        configure_logging()
+        settings = load_settings()
 
     engine = FallGuardEngine(settings)
 
@@ -37,18 +43,13 @@ def build_app() -> FastAPI:
         finally:
             engine.stop()
 
-    web_app = create_web_app(engine)
-    web_app.router.lifespan_context = lifespan
-    return web_app
+    return create_web_app(engine, lifespan=lifespan)
 
 
 def main() -> None:
     configure_logging()
-    settings = Settings.from_env()
-    if os.environ.get("STRICT_CONFIG", "0") == "1":
-        settings.require_all_secrets()
-
-    app = build_app()
+    settings = load_settings()
+    app = build_app(settings)
     uvicorn.run(
         app,
         host=settings.web_host,

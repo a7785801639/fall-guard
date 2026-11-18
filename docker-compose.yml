@@ -16,6 +16,10 @@ services:
       - TZ=${TZ:-UTC}
     ports:
       - "${WEB_PORT:-8090}:8090"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ./data:/app/data
 
@@ -40,6 +44,10 @@ services:
       - TZ=${TZ:-UTC}
     ports:
       - "${WEB_PORT:-8090}:8090"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ./data:/app/data
     deploy:
