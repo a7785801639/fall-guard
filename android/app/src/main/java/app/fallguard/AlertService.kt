@@ -201,6 +201,7 @@ class AlertService : Service() {
                 val a = byId[act.alert.id] ?: continue
                 notifyEvent(NOTIF_EVENT, a.optString("title"), a.optString("description"))
                 if (act.sound) Sounds.playNotify(this, act.kind)
+                attachSnapshot(NOTIF_EVENT, a.optString("title"), a.optString("description"), base, a.optString("image_url"))
             }
             is Signals.Action.Ring -> {
                 val a = byId[act.alert.id] ?: continue
@@ -387,12 +388,35 @@ class AlertService : Service() {
         try { nm.notify(NOTIF_LINK, linkNotification()) } catch (_: Exception) {}
     }
 
-    private fun notifyEvent(id: Int, title: String, text: String) {
+    /**
+     * Снимок события в уведомлении: видно, что происходит, прямо из шторки.
+     * Сначала уведомление уходит сразу, без картинки; кадр подставляется, когда сервер его сохранит.
+     */
+    private fun attachSnapshot(id: Int, title: String, text: String, base: String, path: String) {
+        if (base.isEmpty() || path.isEmpty()) return
+        val token = prefs.token
+        Thread {
+            for (attempt in 0 until 3) {
+                val data = Api.bytes(base, path, token)
+                val bmp = data?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+                if (bmp != null) { notifyEvent(id, title, text, bmp, silentUpdate = true); return@Thread }
+                try { Thread.sleep(1500) } catch (_: InterruptedException) { return@Thread }
+            }
+        }.start()
+    }
+
+    private fun notifyEvent(id: Int, title: String, text: String, picture: android.graphics.Bitmap? = null, silentUpdate: Boolean = false) {
+        val style: NotificationCompat.Style = if (picture != null)
+            NotificationCompat.BigPictureStyle().bigPicture(picture).setSummaryText(text).bigLargeIcon(null as android.graphics.Bitmap?)
+        else NotificationCompat.BigTextStyle().bigText(text)
         val n = NotificationCompat.Builder(this, CH_EVENTS)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setStyle(style)
+            .setLargeIcon(picture)
+            .setOnlyAlertOnce(silentUpdate)
+            .setColor(ContextCompat.getColor(this, R.color.calm))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(openAppPending())

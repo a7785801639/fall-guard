@@ -41,6 +41,7 @@ class SettingsActivity : Activity() {
         findViewById<Button>(R.id.btnTest).setOnClickListener { AlertService.start(this, AlertService.ACTION_TEST) }
         setupUpdates()
         findViewById<Button>(R.id.btnDone).setOnClickListener { finish() }
+        findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnSaveUrls).setOnClickListener {
             val lan = Api.normalizeUrl(findViewById<EditText>(R.id.setLan).text.toString())
             val pub = Api.normalizeUrl(findViewById<EditText>(R.id.setPublic).text.toString())
