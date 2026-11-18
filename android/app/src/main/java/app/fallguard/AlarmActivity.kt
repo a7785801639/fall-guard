@@ -38,15 +38,16 @@ class AlarmActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         getSystemService(KeyguardManager::class.java)?.requestDismissKeyguard(this, null)
         setContentView(R.layout.activity_alarm)
-        AlertService.onAlarmStopped = { runOnUiThread { finish() } }
-        // Таймер виден, только если для него есть место: кнопки важнее
+        // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
+        AlertService.onAlarmStopped = { runOnUiThread { if (!closing) finish() } }
+        // Секундомер виден, только если для него есть место: кнопки важнее
         val box = findViewById<View>(R.id.alarmTimerBox)
         box.addOnLayoutChangeListener { v, _, top, _, bottom, _, _, _, _ ->
             // В горизонтальной раскладке блок не растягивается и всегда виден
             if (v.layoutParams.height != 0) return@addOnLayoutChangeListener
-            val need = findViewById<View>(R.id.alarmElapsed).measuredHeight +
-                findViewById<View>(R.id.alarmElapsedLabel).measuredHeight
-            val show = (bottom - top) >= need + v.resources.displayMetrics.density * 24
+            val g = v as android.view.ViewGroup
+            val need = (0 until g.childCount).sumOf { g.getChildAt(it).measuredHeight }
+            val show = (bottom - top) >= need + v.resources.displayMetrics.density * 16
             for (i in 0 until (v as android.view.ViewGroup).childCount) {
                 v.getChildAt(i).visibility = if (show) View.VISIBLE else View.INVISIBLE
             }
@@ -57,7 +58,9 @@ class AlarmActivity : Activity() {
 
     /** Экран тревоги появляется не скачком: блоки по очереди поднимаются на место */
     private fun enter() {
-        val root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as? android.view.ViewGroup ?: return
+        val root = findViewById<android.view.ViewGroup>(R.id.alarmContent) ?: return
+        // Вспышка: свечение сначала ярче, потом переходит в «дыхание»
+        findViewById<View>(R.id.alarmGlow).apply { alpha = 0f; animate().alpha(1f).setDuration(260).start() }
         val dy = resources.displayMetrics.density * 22
         for (i in 0 until root.childCount) {
             val v = root.getChildAt(i)
@@ -73,6 +76,8 @@ class AlarmActivity : Activity() {
         ui.removeCallbacks(tick)
         ui.post(tick)
         startPulse()
+        startAmbient()
+        findViewById<View>(R.id.alarmRing).invalidate()
         if (alarmInfo != null) startLive()
     }
 
@@ -80,6 +85,7 @@ class AlarmActivity : Activity() {
         liveGen++
         ui.removeCallbacks(tick)
         stopPulse()
+        stopAmbient()
         stopUrgency()
         super.onPause()
     }
@@ -125,7 +131,7 @@ class AlarmActivity : Activity() {
         val elapsed = findViewById<TextView>(R.id.alarmElapsed)
         elapsed.text = text
         // Чем дольше без ответа, тем тревожнее: белый → янтарный через минуту → мигает через три
-        elapsed.setTextColor(if (sec >= 60) 0xFFFFD166.toInt() else 0xFFFFFFFF.toInt())
+        elapsed.setTextColor(findViewById<ElapsedRing>(R.id.alarmRing).colorFor(sec))
         if (sec >= 180) {
             if (urgency == null) urgency = ObjectAnimator.ofFloat(elapsed, View.ALPHA, 1f, 0.45f).apply {
                 duration = 700; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
@@ -152,19 +158,32 @@ class AlarmActivity : Activity() {
             return
         }
         alarmTs = info.ts
+        findViewById<ElapsedRing>(R.id.alarmRing).startTs = info.ts
+        findViewById<ImageView>(R.id.alarmIcon).setImageResource(
+            when (info.kind) {
+                Signals.Kind.FALL -> R.drawable.ic_k_fall
+                Signals.Kind.STANDUP -> R.drawable.ic_k_walk
+                Signals.Kind.SITTING -> R.drawable.ic_k_sit
+                Signals.Kind.HELP -> R.drawable.ic_k_hand
+                Signals.Kind.LINK -> R.drawable.ic_k_link
+                Signals.Kind.OTHER -> R.drawable.ic_k_alert
+            },
+        )
         updateElapsed()
         findViewById<TextView>(R.id.alarmTime).text =
             "ТРЕВОГА · " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
         findViewById<TextView>(R.id.alarmTitle).text = info.title
         findViewById<TextView>(R.id.alarmDesc).text = info.description
 
-        findViewById<Button>(R.id.btnAck).setOnClickListener {
+        findViewById<Button>(R.id.btnAck).setOnClickListener { v ->
+            if (closing) return@setOnClickListener
             AlertService.start(this, AlertService.ACTION_ACK, info.id)
-            finish()
+            confirm(v, true, "Принято", "Идите к ней — сирена выключена")
         }
-        findViewById<Button>(R.id.btnFalse).setOnClickListener {
+        findViewById<Button>(R.id.btnFalse).setOnClickListener { v ->
+            if (closing) return@setOnClickListener
             AlertService.start(this, AlertService.ACTION_FALSE, info.id)
-            finish()
+            confirm(v, false, "Ложная тревога", "Отметили — так система станет точнее")
         }
         findViewById<Button>(R.id.btnSilence).setOnClickListener {
             AlertService.start(this, AlertService.ACTION_SILENCE, info.id)
@@ -199,6 +218,88 @@ class AlarmActivity : Activity() {
             }.start()
         }
         startLive()
+    }
+
+    // ---------------------------------------------------------------- атмосфера: дыхание фона и блик на кнопке
+    private val ambient = mutableListOf<android.animation.Animator>()
+
+    private fun startAmbient() {
+        stopAmbient()
+        if (!ValueAnimator.areAnimatorsEnabled()) return
+        val glow = findViewById<View>(R.id.alarmGlow)
+        ambient += ObjectAnimator.ofFloat(glow, View.ALPHA, 1f, 0.45f).apply {
+            duration = 1300; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            startDelay = 300
+            start()
+        }
+        val wrap = findViewById<View>(R.id.ackWrap)
+        val shine = findViewById<View>(R.id.ackShine)
+        val r = resources.displayMetrics.density * 16
+        wrap.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) { outline.setRoundRect(0, 0, view.width, view.height, r) }
+        }
+        wrap.clipToOutline = true
+        wrap.post {
+            if (isFinishing) return@post
+            ambient += ObjectAnimator.ofFloat(shine, View.TRANSLATION_X, -shine.width.toFloat(), wrap.width.toFloat()).apply {
+                duration = 1100; startDelay = 900
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.RESTART
+                // Пауза между бликами — через задержку повтора
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationRepeat(a: android.animation.Animator) {
+                        (a as ObjectAnimator).pause(); ui.postDelayed({ if (a.isPaused) a.resume() }, 1800)
+                    }
+                })
+                start()
+            }
+        }
+    }
+
+    private fun stopAmbient() {
+        ambient.forEach { it.cancel() }
+        ambient.clear()
+        findViewById<View>(R.id.alarmGlow)?.alpha = 1f
+    }
+
+    // ---------------------------------------------------------------- подтверждение нажатия
+    @Volatile private var closing = false
+
+    /** Экран раскрывается кругом от нажатой кнопки: галочка, короткая подпись — и окно закрывается. */
+    private fun confirm(from: View, ok: Boolean, title: String, sub: String) {
+        closing = true
+        from.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM else android.view.HapticFeedbackConstants.LONG_PRESS)
+        stopAmbient(); stopPulse(); stopUrgency(); liveGen++
+        val done = findViewById<View>(R.id.alarmDone)
+        done.setBackgroundColor(if (ok) 0xFF0F2A1F.toInt() else 0xFF15181E.toInt())
+        findViewById<View>(R.id.doneCircle).setBackgroundResource(if (ok) R.drawable.done_circle_calm else R.drawable.done_circle_neutral)
+        findViewById<ImageView>(R.id.doneIcon).setImageResource(if (ok) R.drawable.ic_done_check else R.drawable.ic_done_flag)
+        findViewById<TextView>(R.id.doneTitle).text = title
+        findViewById<TextView>(R.id.doneSub).text = sub
+        val circle = findViewById<View>(R.id.doneCircle)
+        circle.scaleX = 0.4f; circle.scaleY = 0.4f; circle.alpha = 0f
+        val anim = ValueAnimator.areAnimatorsEnabled()
+        if (anim) done.visibility = View.INVISIBLE else { done.visibility = View.VISIBLE; circle.scaleX = 1f; circle.scaleY = 1f; circle.alpha = 1f }
+        // Размеры известны только после разметки — запускаем раскрытие следующим кадром
+        if (anim) done.post {
+            val loc = IntArray(2); from.getLocationInWindow(loc)
+            val rootLoc = IntArray(2); done.getLocationInWindow(rootLoc)
+            val cx = loc[0] - rootLoc[0] + from.width / 2
+            val cy = loc[1] - rootLoc[1] + from.height / 2
+            val radius = Math.hypot(done.width.toDouble(), done.height.toDouble()).toFloat()
+            done.visibility = View.VISIBLE
+            try {
+                android.view.ViewAnimationUtils.createCircularReveal(done, cx, cy, 0f, radius).setDuration(420).start()
+            } catch (_: Exception) {}
+            circle.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(160).setDuration(380)
+                .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
+        }
+        ui.postDelayed({
+            finish()
+            @Suppress("DEPRECATION") overridePendingTransition(0, android.R.anim.fade_out)
+        }, if (anim) 1300 else 700)
     }
 
     // ---------------------------------------------------------------- живое видео на экране тревоги
@@ -250,8 +351,9 @@ class AlarmActivity : Activity() {
 
     override fun onDestroy() {
         liveGen++
-        ui.removeCallbacks(tick)
+        ui.removeCallbacksAndMessages(null)
         stopPulse()
+        stopAmbient()
         AlertService.onAlarmStopped = null
         super.onDestroy()
     }

@@ -15,7 +15,6 @@
     <string name="setup_or">или вручную</string>
     <string name="setup_server">Адрес пульта</string>
     <string name="setup_code">Код из пульта</string>
-    <string name="alarm_elapsed_label">тревога без ответа</string>
     <string name="widget_desc">Состояние бабушки одной строкой</string>
     <string name="tile_label">FallGuard</string>
     <string name="sc_pause">Я рядом</string>
