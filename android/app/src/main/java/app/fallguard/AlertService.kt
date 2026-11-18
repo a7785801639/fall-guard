@@ -127,6 +127,11 @@ class AlertService : Service() {
                 }
             }
             ACTION_SILENCE -> { silencedUntilQuiet = true; stopAlarm() }
+            ACTION_ENABLE -> post("/api/me/enabled", JSONObject().put("enabled", true)) { ok ->
+                if (ok) { alertsEnabled = true; setLink(linkText) }
+                val msg = if (ok) "Тревоги на этот телефон включены" else "Нет связи с сервером — не получилось включить"
+                ui.post { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show() }
+            }
             ACTION_NEARBY -> {
                 // «Я рядом» из уведомления о событии или с иконки приложения: пауза на 15 минут
                 val id = intent.getStringExtra(EXTRA_ID) ?: ""
@@ -311,6 +316,7 @@ class AlertService : Service() {
             else -> "все события"
         }
         val enabled = j.optBoolean("enabled", true)
+        alertsEnabled = enabled
         val state = j.optString("state")
         val (title, _) = Glance.describe(state, alarmActive)
         linkTitle = title
@@ -441,14 +447,23 @@ class AlertService : Service() {
         nm.createNotificationChannels(listOf(alarm, events, link))
     }
 
+    /** Тревоги на этот телефон выключены в пульте: в постоянном уведомлении — напоминание и кнопка включения. */
+    @Volatile private var alertsEnabled = true
+
     private fun linkNotification(): Notification =
         NotificationCompat.Builder(this, CH_LINK)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(linkTitle)
+            .setSmallIcon(if (alertsEnabled) R.drawable.ic_stat else R.drawable.ic_bell_off)
+            .setContentTitle(if (alertsEnabled) linkTitle else "Тревоги на этот телефон выключены")
             .setContentText(linkText)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPending())
+            .apply {
+                if (!alertsEnabled) {
+                    setColor(ContextCompat.getColor(this@AlertService, R.color.warn))
+                    addAction(0, "Включить тревоги", servicePending(ACTION_ENABLE, "", 41))
+                }
+            }
             .build()
 
     private fun goForeground() {
@@ -459,10 +474,12 @@ class AlertService : Service() {
     }
 
     private var shownTitle = ""
+    private var shownEnabled = true
     private fun setLink(text: String) {
-        if (text == linkText && linkTitle == shownTitle) return
+        if (text == linkText && linkTitle == shownTitle && alertsEnabled == shownEnabled) return
         linkText = text
         shownTitle = linkTitle
+        shownEnabled = alertsEnabled
         try { nm.notify(NOTIF_LINK, linkNotification()) } catch (_: Exception) {}
     }
 
@@ -528,6 +545,7 @@ class AlertService : Service() {
         const val ACTION_FALSE = "app.fallguard.FALSE"
         const val ACTION_SILENCE = "app.fallguard.SILENCE"
         const val ACTION_NEARBY = "app.fallguard.NEARBY"
+        const val ACTION_ENABLE = "app.fallguard.ENABLE"
         private val NEARBY_KINDS = setOf(Signals.Kind.STANDUP, Signals.Kind.SITTING, Signals.Kind.HELP)
         const val ACTION_TEST = "app.fallguard.TEST"
         const val ACTION_TEST_SIGNAL = "app.fallguard.TEST_SIGNAL"
