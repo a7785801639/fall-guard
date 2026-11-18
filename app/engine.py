@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .archive import ClipArchiveStore
+from .care_history import CareHistory, care_trend_window, trend as care_trend
 from .capture import VideoStreamCapture
 from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
@@ -727,6 +728,9 @@ class FallGuardEngine:
             self.settings.data_dir / "timeline.json",
             window_sec=86400.0,
         )
+        # Сводки ночей и список падений — для графиков по неделям и отчёта врачу
+        self.care = CareHistory(self.settings.data_dir / "care_history.json")
+        self._care_rollup_mono = -1e9
         self.thumbs = _create_thumbnail_store(self.settings.data_dir / "thumbs")
         self.prefs = RuntimePrefsStore(
             self.settings.data_dir / "runtime_prefs.json",
@@ -2198,6 +2202,43 @@ class FallGuardEngine:
             "tracks": tracks_snapshot,
         }
 
+    def _night_hours(self) -> tuple[int, int]:
+        p = self.prefs.get()
+        return int(p["night_start_hour"]), int(p["night_end_hour"])
+
+    def _maybe_care_rollup(self) -> None:
+        """Раз в минуту: закончившаяся ночь сворачивается в запись истории (пока хроника её помнит)."""
+        mono = time.monotonic()
+        if mono - self._care_rollup_mono < 60.0:
+            return
+        self._care_rollup_mono = mono
+        try:
+            ns, ne = self._night_hours()
+            self.care.rollup(self.timeline, ns, ne)
+        except Exception as exc:
+            logger.warning("Не удалось обновить историю ночей: %s", exc)
+
+    def get_care_stats(self, days: int = 28) -> dict[str, Any]:
+        """Ночи за последние недели, идущая ночь, тренд и падения — для графиков и отчёта."""
+        self._care_rollup_mono = -1e9
+        self._maybe_care_rollup()
+        ns, ne = self._night_hours()
+        days = max(7, min(400, int(days)))
+        nights = self.care.nights(days=max(days, care_trend_window()))
+        false_ids = self.feedback.false_alert_ids()
+        since = time.time() - days * 86400.0
+        falls = [dict(f, false_alarm=f["id"] in false_ids) for f in self.care.falls(since_ts=since)]
+        now = time.time()
+        return {
+            "night_hours": [ns, ne],
+            "nights": [n for n in nights if n["start"] >= now - days * 86400.0 - 86400.0],
+            "current": self.care.current_night(self.timeline, ns, ne),
+            "trend": care_trend(nights),
+            "falls": falls,
+            "server_tz_offset_min": round(-time.altzone / 60 if time.localtime().tm_isdst > 0 else -time.timezone / 60),
+            "server_ts": round(now, 3),
+        }
+
     def get_status(self, timeline_window_sec: float = 21600.0) -> dict[str, Any]:
         now = time.monotonic()
         z = self.zones.get()
@@ -2207,6 +2248,7 @@ class FallGuardEngine:
         prefs_cur = self.prefs.get()
         diag = self.get_care_diagnostics(now_mono=now)
         summary_24h = self.timeline.summary_stats(window_sec=86400.0)
+        self._maybe_care_rollup()
         clips_stats = self.archive.storage_stats()
         feedback_stats = self.feedback.stats()
         recent_clips = self.archive.list_clips(limit=40)
@@ -2976,6 +3018,11 @@ class FallGuardEngine:
             clip_id=clip_id,
             state=ev_state,
         )
+        if ev_state == "fallen":
+            try:
+                self.care.record_fall(alert_id, time.time(), event.title, event.description, clip_id)
+            except Exception as exc:
+                logger.warning("Не удалось записать падение в историю: %s", exc)
 
         def _task() -> None:
             photo_params = inspect.signature(self.notifier.send_alert_photo).parameters

@@ -685,6 +685,11 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             "server_ts": round(time.time(), 3),
         }
 
+    @app.get("/api/stats/nights")
+    def care_stats(days: int = Query(default=28, ge=7, le=400)) -> dict:
+        """Ночи за последние недели, тренд и падения — для графиков в журнале."""
+        return {"ok": True, **engine.get_care_stats(days=days)}
+
     @app.get("/api/status")
     def status(
         request: Request,

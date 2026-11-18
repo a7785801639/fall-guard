@@ -504,6 +504,11 @@ class FalseAlertFeedbackStore:
         with self._lock:
             return [dict(e) for e in self._entries[:max_items]]
 
+    def false_alert_ids(self) -> set[str]:
+        """Идентификаторы тревог, отмеченных семьёй как ложные (для отчёта врачу)."""
+        with self._lock:
+            return {str(e.get("alert_id")) for e in self._entries if e.get("alert_id")}
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
             with_mp4 = sum(1 for e in self._entries if e.get("has_mp4"))
