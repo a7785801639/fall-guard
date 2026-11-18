@@ -302,6 +302,15 @@
     @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
     .draw-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 16px; border-radius: 14px; font-size: 13.5px; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(12px); z-index: 5; }
     .draw-bar span { flex: 1; min-width: 0; }
+    /* Панель рисования — на месте хроники, под видео: не закрывает точки контура */
+    .player.drawing-mode .timeline { visibility: hidden; }
+    .player > .draw-bar { bottom: 10px; }
+    @media (max-width: 600px) {
+      .player > .draw-bar { position: static; flex-wrap: wrap; margin: 8px; padding: 10px; gap: 6px; }
+      .player > .draw-bar #drawHint { flex: 1 1 100%; font-size: 12.5px; }
+      .player > .draw-bar .btn { flex: 1 1 0; }
+      .player.drawing-mode .timeline { display: none; }
+    }
     .draw-bar .pts { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
     .draw-bar .pts i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); transition: background 0.2s, transform 0.2s; }
     .draw-bar .pts i.on { background: var(--calm); transform: scale(1.15); }
@@ -804,13 +813,15 @@
               <button class="btn sm" onclick="falseAlarmCurrent()">Ложная</button>
               <button class="btn sm solid" id="vpAlarmAck" onclick="ackAlarm()">Принято</button>
             </div>
-            <div class="draw-bar" id="drawBar" hidden>
+
+          </div>
+          <div class="draw-bar" id="drawBar" hidden>
               <span id="drawHint"></span>
+              <button class="btn sm" id="btnRedraw" onclick="redrawZone()" hidden>Заново</button>
               <button class="btn sm" onclick="undoPoint()">Назад</button>
               <button class="btn sm" onclick="cancelDraw()">Отмена</button>
               <button class="btn sm primary" id="btnSaveZone" onclick="saveDraw()" disabled>Сохранить</button>
             </div>
-          </div>
           <section class="timeline" aria-label="Хроника">
             <div class="seg" id="winSeg">
               <button aria-pressed="true" onclick="setWindow(21600)">6 ч</button>
@@ -1380,13 +1391,19 @@
         if (drawMode !== "bed") poly(zones.bed_polygon, "rgba(61,214,140,0.75)", null, true);
         if (drawMode !== "door") poly(zones.door_polygon, "rgba(125,176,255,0.75)", null, true);
         if (drawMode !== "floor") poly(zones.floor_polygon, "rgba(255,255,255,0.35)", null, true);
-        if (drawMode === "ignore" || showZones) for (const ig of zones.ignore_polygons || []) poly(ig, "rgba(163,171,186,0.6)", "rgba(163,171,186,0.10)", false);
+        if (drawMode === "ignore" || showZones) (zones.ignore_polygons || []).forEach((ig, i) => { if (i !== editIgnore || drawMode !== "ignore") poly(ig, "rgba(163,171,186,0.6)", "rgba(163,171,186,0.10)", false); });
       }
       if (drawMode) {
         poly(draft, "#fff", "rgba(255,255,255,0.1)", false, draft.length > 2);
+        for (const [mx, my] of midpoints()) {
+          const [x, y] = px([mx, my]);
+          ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fill();
+          ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.5; ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x - 3.5, y); ctx.lineTo(x + 3.5, y); ctx.moveTo(x, y - 3.5); ctx.lineTo(x, y + 3.5); ctx.stroke();
+        }
         draft.forEach((p, i) => {
           const [x, y] = px(p);
-          ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill();
+          ctx.beginPath(); ctx.arc(x, y, i === dragPt ? 9 : 7, 0, Math.PI * 2); ctx.fillStyle = i === dragPt ? "#5BE0A1" : "#fff"; ctx.fill();
           ctx.fillStyle = "#10131A"; ctx.font = "700 9px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(i + 1), x, y + 0.5); ctx.textAlign = "left";
         });
         return;
@@ -1397,13 +1414,16 @@
         if (!Array.isArray(b) || b.length < 4 || Number(t.track_id) < 0 || t.virtual_presence) continue;
         const color = ROLE_COLOR[t.role] || ROLE_COLOR.unknown;
         const [x1, y1] = px([b[0], b[1]]), [x2, y2] = px([b[2], b[3]]);
-        const L = Math.max(8, Math.min(22, (x2 - x1) / 4, (y2 - y1) / 4));
-        ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
-        ctx.beginPath();
-        for (const [cx, cy, sx, sy] of [[x1, y1, 1, 1], [x2, y1, -1, 1], [x2, y2, -1, -1], [x1, y2, 1, -1]]) { ctx.moveTo(cx + sx * L, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * L); }
-        ctx.stroke();
-        if (!t.hide_skeleton && Array.isArray(t.keypoints)) {
-          ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6; ctx.beginPath();
+        const W = OV.width === "thin" ? 0.65 : OV.width === "bold" ? 1.6 : 1;
+        ctx.strokeStyle = color; ctx.lineWidth = 2.5 * W; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        if (OV.box === "corners") {
+          const L = Math.max(8, Math.min(22, (x2 - x1) / 4, (y2 - y1) / 4));
+          ctx.beginPath();
+          for (const [cx, cy, sx, sy] of [[x1, y1, 1, 1], [x2, y1, -1, 1], [x2, y2, -1, -1], [x1, y2, 1, -1]]) { ctx.moveTo(cx + sx * L, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * L); }
+          ctx.stroke();
+        } else if (OV.box === "frame") { ctx.beginPath(); ctx.roundRect(x1, y1, x2 - x1, y2 - y1, 8); ctx.stroke(); }
+        if (OV.skeleton && !t.hide_skeleton && Array.isArray(t.keypoints)) {
+          ctx.lineWidth = 1.5 * W; ctx.globalAlpha = 0.6; ctx.beginPath();
           for (const [a, c] of EDGES) {
             const p = t.keypoints[a], q = t.keypoints[c];
             if (!p || !q || p[2] <= 0 || q[2] <= 0) continue;
@@ -1412,9 +1432,21 @@
           }
           ctx.stroke(); ctx.globalAlpha = 1;
         }
-        label(x1, y1, t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Кто-то", color);
+        if (OV.labels) label(x1, y1, t.role === "patient" ? "Бабушка" : t.role === "visitor" ? "Свой" : "Кто-то", color);
       }
     });
+  }
+  // Вид обводки людей на видео — настройка этого устройства
+  const OV = {
+    box: lsGet("fg_ov_box", "corners"),
+    skeleton: lsGet("fg_ov_skel", "1") !== "0",
+    labels: lsGet("fg_ov_labels", "1") !== "0",
+    width: lsGet("fg_ov_width", "normal"),
+  };
+  function setOv(key, v) {
+    OV[key] = v;
+    lsSet({ box: "fg_ov_box", skeleton: "fg_ov_skel", labels: "fg_ov_labels", width: "fg_ov_width" }[key], typeof v === "boolean" ? (v ? "1" : "0") : v);
+    draw(); renderSheet();
   }
   function toggleZones() {
     showZones = !showZones;
@@ -1443,11 +1475,19 @@
     floor: ["Пол: 4 угла прямоугольника на полу у кровати", 4, "Разметка пола сохранена"],
     ignore: ["Игнор-зона: обведите предмет, похожий на человека", 3, "Зона игнорирования добавлена"],
   };
-  function startDraw(mode) {
+  // Правка контура: точки можно тянуть, «+» на сторонах добавляет точку, двойное нажатие удаляет
+  let editIgnore = -1, dragPt = -1;
+  function startDraw(mode, edit, ignoreIndex) {
     closeSheet();
     resetZoom(false);
-    drawMode = mode; draft = [];
+    drawMode = mode; draft = []; editIgnore = -1;
+    if (edit) {
+      const src = mode === "bed" ? zones.bed_polygon : mode === "door" ? zones.door_polygon : mode === "floor" ? zones.floor_polygon
+        : (zones.ignore_polygons || [])[ignoreIndex];
+      if (Array.isArray(src) && src.length) { draft = src.map((p) => [p[0], p[1]]); if (mode === "ignore") editIgnore = ignoreIndex; }
+    }
     viewport.classList.add("drawing");
+    viewport.parentElement.classList.add("drawing-mode");
     $("drawBar").hidden = false;
     syncDrawBar();
     viewport.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -1457,19 +1497,63 @@
     if (!drawMode) return;
     const [hint, need] = DRAW[drawMode];
     const n = Math.max(need, draft.length);
-    $("drawHint").innerHTML = esc(hint) + `<span class="pts">${Array.from({ length: n }, (_, i) => `<i class="${i < draft.length ? "on" : ""}"></i>`).join("")}</span>`;
+    const editing = draft.length >= DRAW[drawMode][1];
+    const tip = editing ? (drawMode === "floor" ? "Тяните углы" : "Тяните точки · «+» добавляет · двойное нажатие удаляет") : hint;
+    $("btnRedraw").hidden = !editing;
+
+    $("drawHint").innerHTML = esc(tip) + `<span class="pts">${Array.from({ length: n }, (_, i) => `<i class="${i < draft.length ? "on" : ""}"></i>`).join("")}</span>`;
     $("btnSaveZone").disabled = draft.length < need;
   }
   function undoPoint() { draft.pop(); syncDrawBar(); draw(); }
-  function cancelDraw() { drawMode = null; draft = []; viewport.classList.remove("drawing"); $("drawBar").hidden = true; draw(); }
+  function cancelDraw() { drawMode = null; draft = []; editIgnore = -1; dragPt = -1; viewport.classList.remove("drawing"); viewport.parentElement.classList.remove("drawing-mode"); $("drawBar").hidden = true; draw(); }
+  function redrawZone() { draft = []; syncDrawBar(); draw(); }
+  // Экранные координаты точек контура и середин сторон
+  function draftScreen() { return draft.map((p) => px(p)); }
+  function midpoints() {
+    if (draft.length < 3 || drawMode === "floor") return [];
+    // «+» только на сторонах, где ему хватает места
+    return draft.map((p, i) => { const q = draft[(i + 1) % draft.length]; const [ax, ay] = px(p), [bx, by] = px(q); return Math.hypot(ax - bx, ay - by) < 44 ? null : [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, i + 1]; }).filter(Boolean);
+  }
+  function hitPoint(e) {
+    const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const tol = e.pointerType === "mouse" ? 12 : 22;
+    // Ближайшая цель — точка или «+» на стороне
+    let best = null, bd = tol;
+    draftScreen().forEach(([sx, sy], i) => { const d = Math.hypot(sx - x, sy - y); if (d < bd) { bd = d; best = { kind: "pt", i }; } });
+    for (const [mx, my, at] of midpoints()) { const [sx, sy] = px([mx, my]); const d = Math.hypot(sx - x, sy - y); if (d < bd) { bd = d; best = { kind: "mid", at, p: [mx, my] }; } }
+    return best;
+  }
+  function normAt(e) {
+    const r = canvas.getBoundingClientRect();
+    const vx = (e.clientX - r.left - zoom.x) / zoom.s, vy = (e.clientY - r.top - zoom.y) / zoom.s;
+    return [Math.round(Math.max(0, Math.min(1, (vx - rect.x) / rect.w)) * 1e5) / 1e5, Math.round(Math.max(0, Math.min(1, (vy - rect.y) / rect.h)) * 1e5) / 1e5];
+  }
+  let lastTapPt = { i: -1, t: 0 };
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drawMode || dragPt < 0) return;
+    draft[dragPt] = normAt(e); draw();
+  });
+  const endDrag = () => { if (dragPt >= 0) { dragPt = -1; syncDrawBar(); draw(); } };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
   canvas.addEventListener("pointerdown", (e) => {
     if (!drawMode) return;
     e.preventDefault();
+    const hit = hitPoint(e);
+    if (hit && hit.kind === "pt") {
+      const now = Date.now();
+      // Двойное нажатие по точке — удалить её (если точек больше минимума)
+      if (lastTapPt.i === hit.i && now - lastTapPt.t < 350 && draft.length > DRAW[drawMode][1] && drawMode !== "floor") {
+        draft.splice(hit.i, 1); lastTapPt = { i: -1, t: 0 }; haptic(); syncDrawBar(); draw(); return;
+      }
+      lastTapPt = { i: hit.i, t: now };
+      dragPt = hit.i; canvas.setPointerCapture(e.pointerId); haptic(); return;
+    }
+    if (hit && hit.kind === "mid") {
+      draft.splice(hit.at, 0, hit.p); dragPt = hit.at; canvas.setPointerCapture(e.pointerId); haptic(); syncDrawBar(); draw(); return;
+    }
     if (drawMode === "floor" && draft.length >= 4) return;
-    const r = canvas.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (e.clientX - r.left - rect.x) / rect.w));
-    const y = Math.max(0, Math.min(1, (e.clientY - r.top - rect.y) / rect.h));
-    draft.push([Math.round(x * 1e5) / 1e5, Math.round(y * 1e5) / 1e5]);
+    draft.push(normAt(e));
     haptic();
     syncDrawBar(); draw();
   });
@@ -1484,7 +1568,7 @@
     const payload = mode === "bed" ? { bed_polygon: pts }
       : mode === "door" ? { door_polygon: pts }
       : mode === "floor" ? { floor_polygon: pts.slice(0, 4), floor_width_cm: zones.floor_width_cm, floor_depth_cm: zones.floor_depth_cm, mattress_height_cm: zones.mattress_height_cm }
-      : { ignore_polygons: [...(zones.ignore_polygons || []), pts] };
+      : { ignore_polygons: editIgnore >= 0 ? (zones.ignore_polygons || []).map((z, i) => (i === editIgnore ? pts : z)) : [...(zones.ignore_polygons || []), pts] };
     cancelDraw();
     await pushZones(payload, DRAW[mode][2]);
   }
@@ -2673,7 +2757,12 @@
   function subMenu(el, cid) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отключить чат", icon: "i-trash", cls: "danger", fn: () => removeSub(cid) }]); }
   function devMenu(el, id) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отвязать телефон", icon: "i-trash", cls: "danger", fn: () => removeDevice(id) }]); }
   function zoneMenu(el, payload) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Убрать зону", icon: "i-trash", cls: "danger", fn: () => clearZone(payload) }]); }
-  function ignoreMenu(el) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Убрать все игнор-зоны", icon: "i-trash", cls: "danger", fn: () => clearIgnore() }]); }
+  function ignoreMenu(el) {
+    const [x, y] = menuAt(el);
+    const items = (zones.ignore_polygons || []).map((_, i) => ({ label: "Изменить зону " + (i + 1), icon: "i-eyeoff", fn: () => startDraw("ignore", true, i) }));
+    items.push({ label: "Убрать все игнор-зоны", icon: "i-trash", cls: "danger", fn: () => clearIgnore() });
+    showMenu(x - 190, y, "", items);
+  }
   async function setSubMode(cid, mode) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/mode", { json: { mode } })) await refreshMe(); }
   async function toggleSub(cid) { if (await call("/api/subscribers/" + encodeURIComponent(cid) + "/toggle", { method: "POST" })) poll(); }
   async function removeSub(cid) { if (await ask("Отключить чат?", "Тревоги в этот чат Telegram приходить перестанут.", "Отключить") && await call("/api/subscribers/" + encodeURIComponent(cid), { method: "DELETE" }, "Чат отключён")) poll(); }
@@ -2701,7 +2790,7 @@
   function tabZones() {
     const z = zones, has = (p, n) => Array.isArray(p) && p.length >= n;
     const zrow = (mode, icon, title, sub, ok, clearPayload) => `<div class="rowi">${ri(icon, ok ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${title}${ok ? "" : ' <span class="badge warn">не задана</span>'}</div><div class="rowi-sub">${sub}</div></div>
-      <div class="rowi-actions"><button class="btn sm" onclick="startDraw('${mode}')">${ok ? "Изменить" : "Отметить"}</button>${ok && clearPayload ? moreBtn(`zoneMenu(this,${esc(JSON.stringify(clearPayload))})`, "Ещё") : '<span class="more-ph"></span>'}</div></div>`;
+      <div class="rowi-actions"><button class="btn sm" onclick="startDraw('${mode}', ${ok})">${ok ? "Изменить" : "Отметить"}</button>${ok && clearPayload ? moreBtn(`zoneMenu(this,${esc(JSON.stringify(clearPayload))})`, "Ещё") : '<span class="more-ph"></span>'}</div></div>`;
     const ig = (z.ignore_polygons || []).length;
     let h = `<div class="group"><h3>Зоны на видео</h3><div class="rows">
       <div class="rowi">${ri("i-eye")}<div class="rowi-body"><div class="rowi-title">Показывать зоны на видео</div></div>${sw(showZones, "toggleZones()", "Показывать зоны")}</div>`
@@ -2715,6 +2804,12 @@
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Глубина</div></div><input type="number" id="inFloorD" min="40" max="1000" value="${Math.round(z.floor_depth_cm)}" /></div>
         <div class="rowi"><div class="rowi-body"><div class="rowi-title">Высота матраса</div></div><input type="number" id="inMatH" min="15" max="140" value="${Math.round(z.mattress_height_cm)}" /></div>
       </div><button class="btn block" style="margin-top:10px" onclick="saveDims()">Сохранить размеры</button></div>`;
+    h += `<div class="group"><h3>Обводка людей</h3><div class="rows">
+        <div class="rowi">${ri("i-full")}<div class="rowi-body"><div class="rowi-title">Рамка</div></div>${pick("ovBox", OV.box, [["corners", "Уголки"], ["frame", "Полная"], ["none", "Без рамки"]], (v) => setOv("box", v), "Рамка вокруг человека")}</div>
+        <div class="rowi">${ri("i-user")}<div class="rowi-body"><div class="rowi-title">Скелет</div></div>${sw(OV.skeleton, "setOv('skeleton'," + !OV.skeleton + ")", "Скелет")}</div>
+        <div class="rowi">${ri("i-users")}<div class="rowi-body"><div class="rowi-title">Подписи «Бабушка», «Свой»</div></div>${sw(OV.labels, "setOv('labels'," + !OV.labels + ")", "Подписи")}</div>
+        <div class="rowi">${ri("i-sliders")}<div class="rowi-body"><div class="rowi-title">Толщина линий</div></div>${pick("ovW", OV.width, [["thin", "Тонкие"], ["normal", "Обычные"], ["bold", "Толстые"]], (v) => setOv("width", v), "Толщина линий")}</div>
+      </div></div>`;
     const rot = Number(cam.rotate) || 0;
     h += `<div class="group"><h3>Камера</h3><div class="rows">
         <div class="rowi wr">${ri("i-rotate")}<div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
