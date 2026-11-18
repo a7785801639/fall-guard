@@ -208,6 +208,12 @@ class MainActivity : Activity() {
 
     private fun show(target: View) {
         for (v in listOf(web, setup, offline)) v.visibility = if (v === target) View.VISIBLE else View.GONE
+        if (target !== web) {
+            // Красный фон тревоги от пульта не должен оставаться на экранах привязки и «нет связи»
+            val bg = getColor(R.color.bg)
+            window.statusBarColor = bg
+            findViewById<View>(R.id.root)?.setBackgroundColor(bg)
+        }
     }
 
     private fun route() {
