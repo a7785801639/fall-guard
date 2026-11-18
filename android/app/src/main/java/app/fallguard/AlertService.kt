@@ -109,13 +109,22 @@ class AlertService : Service() {
             return START_NOT_STICKY
         }
         when (intent?.action) {
-            ACTION_ACK -> { silencedUntilQuiet = true; stopAlarm(); post("/api/pause", JSONObject().put("seconds", 900)) }
+            ACTION_ACK -> {
+                // Проверочная тревога (без сервера) только замолкает — охрану на паузу не ставим
+                val test = current?.base?.isEmpty() == true
+                silencedUntilQuiet = true; stopAlarm()
+                if (!test) post("/api/pause", JSONObject().put("seconds", 900))
+            }
             ACTION_FALSE -> {
                 val id = intent.getStringExtra(EXTRA_ID) ?: ""
+                val test = current?.base?.isEmpty() == true
                 silencedUntilQuiet = true
                 stopAlarm()
-                if (id.isNotEmpty()) post("/api/feedback/$id/false_alarm", JSONObject().put("reporter", Build.MODEL))
-                else post("/api/pause", JSONObject().put("seconds", 900))
+                when {
+                    test -> {}
+                    id.isNotEmpty() -> post("/api/feedback/$id/false_alarm", JSONObject().put("reporter", Build.MODEL))
+                    else -> post("/api/pause", JSONObject().put("seconds", 900))
+                }
             }
             ACTION_SILENCE -> { silencedUntilQuiet = true; stopAlarm() }
             ACTION_NEARBY -> {
@@ -132,11 +141,15 @@ class AlertService : Service() {
                 AlarmInfo("", "Проверка тревоги", "Так прозвучит сигнал о падении. Это только проверка.", ServerClock.now(), "", ""),
             )
         }
+        ensureWorker()
+        return START_STICKY
+    }
+
+    private fun ensureWorker() {
         if (!running) {
             running = true
             worker = Thread({ pollLoop() }, "fallguard-poll").also { it.start() }
         }
-        return START_STICKY
     }
 
     override fun onDestroy() {
