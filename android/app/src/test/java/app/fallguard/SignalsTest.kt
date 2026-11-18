@@ -62,6 +62,13 @@ class SignalsTest {
         assertTrue(Signals.serverTracked(fall) && Signals.serverTracked(absence) && !Signals.serverTracked(stand))
     }
 
+    @Test fun phoneOnlyAlarmStopsWhenSituationResolves() {
+        for (st in listOf("in_bed", "caregiver", "paused")) {
+            assertEquals(st, listOf<Action>(Action.Stop), Signals.decide(emptyList(), false, true, false, currentServerTracked = false, serverState = st, styleOf = defaults))
+        }
+        assertTrue(Signals.decide(emptyList(), false, true, false, currentServerTracked = false, serverState = "left_bed", styleOf = defaults).isEmpty())
+    }
+
     @Test fun kindMapping() {
         assertEquals(Kind.HELP, Signals.kindOf("help_call", "warning", false))
         assertEquals(Kind.STANDUP, Signals.kindOf("missing", "warning", false))

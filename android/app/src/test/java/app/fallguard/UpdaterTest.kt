@@ -6,14 +6,14 @@ import org.junit.Test
 
 class UpdaterTest {
     private val json = """{"tag_name":"android-v1.7","assets":[
-        {"name":"FallGuard-1.7.apk","browser_download_url":"https://example/1.7.apk"},
+        {"name":"FallGuard-1.7.apk","url":"https://api.github.com/repos/x/y/releases/assets/7","browser_download_url":"https://example/1.7.apk"},
         {"name":"notes.txt","browser_download_url":"https://example/n"}]}"""
 
     @Test fun parsesNewerRelease() {
         val r = Updater.parseLatest(json, current = 4)!!
         assertEquals(7, r.code)
         assertEquals("1.7", r.name)
-        assertEquals("https://example/1.7.apk", r.url)
+        assertEquals("https://api.github.com/repos/x/y/releases/assets/7", r.url)
     }
 
     @Test fun ignoresSameOrOlder() {

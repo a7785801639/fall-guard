@@ -2,6 +2,10 @@ name: Android APK
 
 on:
   push:
+    # Без branches GitHub запускал сборку только для тегов: push в main сборку не запускал
+    branches:
+      - main
+      - "claude/**"
     paths:
       - "android/**"
       - ".github/workflows/android.yml"

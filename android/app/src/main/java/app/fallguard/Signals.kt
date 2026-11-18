@@ -52,6 +52,8 @@ object Signals {
      * alarmActive — сервер считает тревогу непринятой; ringing — телефон уже звонит;
      * silenced — звук на этом телефоне выключен до конца текущей тревоги.
      */
+    private val RESOLVED = setOf("in_bed", "caregiver", "paused")
+
     /** Сервер сам держит и снимает только падения и критические тревоги. */
     fun serverTracked(a: Alert): Boolean = a.isFall || a.state == "fallen" || a.severity == "critical"
 
@@ -61,6 +63,7 @@ object Signals {
         ringing: Boolean,
         silenced: Boolean,
         currentServerTracked: Boolean = true,
+        serverState: String = "",
         styleOf: (Kind) -> Style?,
     ): List<Action> {
         val out = mutableListOf<Action>()
@@ -77,7 +80,8 @@ object Signals {
             ring != null -> out += ring
             // Тревогу, поднятую телефоном по настройке (например, «встала» → тревога), сервер не знает:
             // её снимает только человек на телефоне (или предохранитель через 15 минут)
-            !alarmActive -> if (ringing && currentServerTracked) out += Action.Stop
+            // её снимаем, когда ситуация разрешилась: легла, рядом свой, кто-то нажал «Принято» (пауза)
+            !alarmActive -> if (ringing && (currentServerTracked || serverState in RESOLVED)) out += Action.Stop
             !ringing && !silenced -> out += Action.RingUnconfirmed
         }
         return out

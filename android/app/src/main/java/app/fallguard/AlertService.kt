@@ -81,6 +81,7 @@ class AlertService : Service() {
                 else post("/api/pause", JSONObject().put("seconds", 900))
             }
             ACTION_SILENCE -> { silencedUntilQuiet = true; stopAlarm() }
+            ACTION_TEST_SIGNAL -> testSignal(Signals.Kind.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_ID) } ?: Signals.Kind.FALL)
             ACTION_TEST -> startAlarm(
                 AlarmInfo("", "Проверка тревоги", "Так прозвучит сигнал о падении. Это только проверка.", System.currentTimeMillis(), "", ""),
             )
@@ -145,6 +146,16 @@ class AlertService : Service() {
         }
     }
 
+    /** Проверка одного типа сигнала ровно так, как он придёт: тревогой, уведомлением со звуком или без. */
+    private fun testSignal(kind: Signals.Kind) {
+        val title = "Проверка: ${kind.title.lowercase()}"
+        when (Signals.effectiveStyle(kind, "", Sounds.style(this, kind))) {
+            Signals.Style.ALARM -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", System.currentTimeMillis(), "", "", kind, serverTracked = false))
+            Signals.Style.NOTIFY -> { notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление со звуком."); Sounds.playNotify(this, kind) }
+            Signals.Style.SILENT -> notifyEvent(NOTIF_EVENT, title, "Так придёт уведомление без звука.")
+        }
+    }
+
     // ---------------------------------------------------------------- обновления
     @Volatile private var updateThread: Thread? = null
 
@@ -184,7 +195,7 @@ class AlertService : Service() {
         if (cursor > prefs.cursor) prefs.cursor = cursor
 
         val alarmActive = j.optBoolean("alarm_active")
-        val actions = Signals.decide(list, alarmActive, ringing, silencedUntilQuiet, current?.serverTracked ?: true) { Sounds.style(this, it) }
+        val actions = Signals.decide(list, alarmActive, ringing, silencedUntilQuiet, current?.serverTracked ?: true, j.optString("state")) { Sounds.style(this, it) }
         for (act in actions) when (act) {
             is Signals.Action.Notify -> {
                 val a = byId[act.alert.id] ?: continue
@@ -394,6 +405,7 @@ class AlertService : Service() {
         const val ACTION_FALSE = "app.fallguard.FALSE"
         const val ACTION_SILENCE = "app.fallguard.SILENCE"
         const val ACTION_TEST = "app.fallguard.TEST"
+        const val ACTION_TEST_SIGNAL = "app.fallguard.TEST_SIGNAL"
         const val EXTRA_ID = "alert_id"
         private const val CH_ALARM = "alarm_v1"
         private const val CH_EVENTS = "events_v2"

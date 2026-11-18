@@ -165,63 +165,32 @@ class SettingsActivity : Activity() {
         }
     }
 
-    /** Окно настройки одного типа: способ сигнала, звук (с прослушиванием) и свой файл. */
+    /** Окно настройки одного типа: способ сигнала, звук (с прослушиванием), свой файл и проверка. */
     private fun openSignal(kind: Signals.Kind) {
-        fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), dp(8)) }
-        fun header(t: String) = TextView(this).apply {
-            text = t; textSize = 13f; setTextColor(getColor(R.color.muted)); isAllCaps = true; letterSpacing = 0.06f
-            setPadding(0, dp(14), 0, dp(4))
-        }
-        val styles = when (kind) {
-            Signals.Kind.FALL -> listOf(Signals.Style.ALARM)
-            Signals.Kind.LINK -> listOf(Signals.Style.NOTIFY, Signals.Style.SILENT)
-            else -> Signals.Style.entries.toList()
-        }
-        box.addView(header("Как сигналить"))
-        val styleGroup = RadioGroup(this)
-        val cur = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
-        styles.forEachIndexed { i, st ->
-            styleGroup.addView(RadioButton(this).apply { id = 100 + i; text = st.title; textSize = 16f; isChecked = st == cur; minHeight = dp(44) })
-        }
-        if (kind == Signals.Kind.FALL) box.addView(TextView(this).apply { text = "Падение всегда поднимает громкую тревогу"; setTextColor(getColor(R.color.muted)); textSize = 13f })
-        box.addView(styleGroup)
-
-        box.addView(header("Звук"))
-        val soundGroup = RadioGroup(this)
-        val options = Sounds.BUILT_IN.map { it.id to it.title }.toMutableList()
-        if (Sounds.customFile(this, kind).exists()) options += Sounds.CUSTOM to Sounds.customName(this, kind)
-        val curSound = Sounds.sound(this, kind)
-        options.forEachIndexed { i, (id, title) ->
-            soundGroup.addView(RadioButton(this).apply { this.id = 200 + i; text = title; textSize = 16f; isChecked = id == curSound; minHeight = dp(44) })
-        }
-        box.addView(soundGroup)
-        box.addView(Button(this, null, 0, R.style.Btn).apply {
-            text = "Свой файл…"
-            setOnClickListener {
+        fun usage(st: Signals.Style) = if (st == Signals.Style.ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
+        val body = SignalDialog.build(this, kind, object : SignalDialog.Callbacks {
+            override fun onStyle(style: Signals.Style) { Sounds.setStyle(this@SettingsActivity, kind, style); renderSignals() }
+            override fun onSound(id: String) {
+                Sounds.setSound(this@SettingsActivity, kind, id)
+                stopPreview()
+                preview = Sounds.play(this@SettingsActivity, Sounds.uriOf(this@SettingsActivity, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this@SettingsActivity, kind))), loop = false)
+                renderSignals()
+            }
+            override fun onPickFile() {
                 stopPreview()
                 val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*")
                 try { startActivityForResult(pick, REQ_SOUND + kind.ordinal) } catch (_: Exception) {
                     Toast.makeText(this@SettingsActivity, "Нет приложения для выбора файла", Toast.LENGTH_SHORT).show()
                 }
             }
+            override fun onTest() {
+                stopPreview()
+                AlertService.start(this@SettingsActivity, AlertService.ACTION_TEST_SIGNAL, kind.name)
+            }
         })
-
-        fun usage(st: Signals.Style) = if (st == Signals.Style.ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
-        soundGroup.setOnCheckedChangeListener { _, checked ->
-            val id = options.getOrNull(checked - 200)?.first ?: return@setOnCheckedChangeListener
-            Sounds.setSound(this, kind, id)
-            stopPreview()
-            preview = Sounds.play(this, Sounds.uriOf(this, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this, kind))), loop = false)
-            renderSignals()
-        }
-        styleGroup.setOnCheckedChangeListener { _, checked ->
-            styles.getOrNull(checked - 100)?.let { Sounds.setStyle(this, kind, it) }
-            renderSignals()
-        }
         AlertDialog.Builder(this)
             .setTitle(kind.title)
-            .setView(ScrollView(this).apply { addView(box) })
+            .setView(body)
             .setPositiveButton("Готово", null)
             .setOnDismissListener { stopPreview() }
             .show()
@@ -275,6 +244,65 @@ class SettingsActivity : Activity() {
         const val EXTRA_ONBOARDING = "onboarding"
         const val EXTRA_UPDATE = "update"
         private const val REQ_SOUND = 300
+    }
+}
+
+/** Содержимое окна «Как сигналить» — отдельно от Activity, чтобы его можно было отрисовать в тестах. */
+object SignalDialog {
+    interface Callbacks {
+        fun onStyle(style: Signals.Style)
+        fun onSound(id: String)
+        fun onPickFile()
+        fun onTest()
+    }
+
+    fun build(ctx: Context, kind: Signals.Kind, cb: Callbacks): View {
+        fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).toInt()
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(4), dp(22), dp(12)) }
+        fun header(t: String) = TextView(ctx).apply {
+            text = t; textSize = 12f; setTextColor(ctx.getColor(R.color.muted)); isAllCaps = true; letterSpacing = 0.08f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(6))
+        }
+        fun radio(id: Int, title: String, checked: Boolean) = RadioButton(ctx).apply {
+            this.id = id; text = title; textSize = 16f; isChecked = checked; minHeight = dp(46)
+            setTextColor(ctx.getColor(R.color.text))
+            buttonTintList = android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(ctx.getColor(R.color.calm), ctx.getColor(R.color.muted)),
+            )
+            setPadding(dp(8), 0, 0, 0)
+        }
+        val styles = when (kind) {
+            Signals.Kind.FALL -> listOf(Signals.Style.ALARM)
+            Signals.Kind.LINK -> listOf(Signals.Style.NOTIFY, Signals.Style.SILENT)
+            else -> Signals.Style.entries.toList()
+        }
+        box.addView(header("Как сигналить"))
+        val cur = Signals.effectiveStyle(kind, "", Sounds.style(ctx, kind))
+        val styleGroup = RadioGroup(ctx)
+        styles.forEachIndexed { i, st -> styleGroup.addView(radio(100 + i, st.title, st == cur)) }
+        box.addView(styleGroup)
+        if (kind == Signals.Kind.FALL) box.addView(TextView(ctx).apply { text = "Падение всегда поднимает громкую тревогу"; setTextColor(ctx.getColor(R.color.muted)); textSize = 13f })
+
+        box.addView(header("Звук"))
+        val options = Sounds.BUILT_IN.map { it.id to it.title }.toMutableList()
+        if (Sounds.customFile(ctx, kind).exists()) options += Sounds.CUSTOM to Sounds.customName(ctx, kind)
+        val curSound = Sounds.sound(ctx, kind)
+        val soundGroup = RadioGroup(ctx)
+        options.forEachIndexed { i, (id, title) -> soundGroup.addView(radio(200 + i, title, id == curSound)) }
+        box.addView(soundGroup)
+        // Стиль не задаёт размеры у кнопок, созданных в коде — задаём явно
+        fun btn(style: Int, t: String, top: Int, click: () -> Unit) = Button(ctx, null, 0, style).apply {
+            text = t; isAllCaps = false; gravity = Gravity.CENTER; setOnClickListener { click() }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)).apply { topMargin = dp(top) }
+        }
+        box.addView(btn(R.style.Btn, "Свой файл…", 10) { cb.onPickFile() })
+        box.addView(btn(R.style.Btn_Primary, "Проверить", 10) { cb.onTest() })
+
+        styleGroup.setOnCheckedChangeListener { _, checked -> styles.getOrNull(checked - 100)?.let { cb.onStyle(it) } }
+        soundGroup.setOnCheckedChangeListener { _, checked -> options.getOrNull(checked - 200)?.first?.let { cb.onSound(it) } }
+        return ScrollView(ctx).apply { addView(box) }
     }
 }
 

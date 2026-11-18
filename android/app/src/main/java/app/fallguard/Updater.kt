@@ -33,7 +33,9 @@ object Updater {
         for (i in 0 until assets.length()) {
             val a = assets.getJSONObject(i)
             val code = codeFromAsset(a.optString("name")) ?: continue
-            if (code > current && (best == null || code > best.code)) best = Release(code, "1.$code", a.optString("browser_download_url"))
+            // API-адрес файла (с Accept: octet-stream) надёжнее прямой ссылки; прямая — запасная
+            val api = a.optString("url")
+            if (code > current && (best == null || code > best.code)) best = Release(code, "1.$code", api.ifEmpty { a.optString("browser_download_url") })
         }
         return best
     }
@@ -91,6 +93,7 @@ object Updater {
                     conn.instanceFollowRedirects = false
                     conn.connectTimeout = 10000; conn.readTimeout = 30000
                     conn.setRequestProperty("User-Agent", "FallGuardAndroid")
+                    if (url.host == "api.github.com") conn.setRequestProperty("Accept", "application/octet-stream")
                     val code = conn.responseCode
                     if (code in 300..399) { url = URL(url, conn.getHeaderField("Location")); conn.disconnect(); continue }
                     if (code != 200) throw IllegalStateException("HTTP $code")
