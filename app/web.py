@@ -551,7 +551,7 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
                 detail="Браузер в локальной сети не является получателем — звук включается в самом браузере",
             )
         name = me.get("name") or "получатель"
-        engine._log_event("info", f"{name}: тревоги {'включены' if enabled else 'выключены'}", category="system")
+        engine.log_event("info", f"{name}: тревоги {'включены' if enabled else 'выключены'}", category="system")
         return {"ok": True, "me": _resolve_identity(request)}
 
     @app.post("/api/subscribers/{chat_id}/mode")
