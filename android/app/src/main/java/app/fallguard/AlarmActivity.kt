@@ -38,6 +38,7 @@ class AlarmActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         getSystemService(KeyguardManager::class.java)?.requestDismissKeyguard(this, null)
         setContentView(R.layout.activity_alarm)
+        edgeToEdge()
         // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
         AlertService.onAlarmStopped = { runOnUiThread { if (!closing) finish() } }
         // Секундомер виден, только если для него есть место: кнопки важнее
@@ -54,6 +55,22 @@ class AlarmActivity : Activity() {
         }
         bind()
         enter()
+    }
+
+    /**
+     * Окно под прозрачными панелями. Отступы считаем сами: fitsSystemWindows заменил бы
+     * собственные поля экрана отступами панелей, и на Android 15 текст лёг бы вплотную к краям.
+     */
+    private fun edgeToEdge() {
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (android.os.Build.VERSION.SDK_INT >= 29) { window.isNavigationBarContrastEnforced = false; window.isStatusBarContrastEnforced = false }
+        val content = findViewById<View>(R.id.alarmContent)
+        val base = intArrayOf(content.paddingLeft, content.paddingTop, content.paddingRight, content.paddingBottom)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+            val b = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(base[0] + b.left, base[1] + b.top, base[2] + b.right, base[3] + b.bottom)
+            insets
+        }
     }
 
     /** Экран тревоги появляется не скачком: блоки по очереди поднимаются на место */
@@ -175,6 +192,10 @@ class AlarmActivity : Activity() {
         findViewById<TextView>(R.id.alarmTitle).text = info.title
         findViewById<TextView>(R.id.alarmDesc).text = info.description
 
+        iconLabel(findViewById(R.id.btnAck), R.drawable.ic_b_check, "Принято, иду")
+        iconLabel(findViewById(R.id.btnFalse), R.drawable.ic_b_x, "Ложная тревога")
+        iconLabel(findViewById(R.id.btnOpen), R.drawable.ic_b_eye, "Смотреть камеру")
+        iconLabel(findViewById(R.id.btnSilence), R.drawable.ic_b_mute, "Выключить звук на этом телефоне")
         findViewById<Button>(R.id.btnAck).setOnClickListener { v ->
             if (closing) return@setOnClickListener
             AlertService.start(this, AlertService.ACTION_ACK, info.id)
@@ -356,5 +377,17 @@ class AlarmActivity : Activity() {
         stopAmbient()
         AlertService.onAlarmStopped = null
         super.onDestroy()
+    }
+}
+
+/** Значок перед текстом кнопки — по центру вместе с подписью. */
+fun iconLabel(b: Button, icon: Int, text: String) {
+    val d = b.context.getDrawable(icon)?.mutate() ?: run { b.text = text; return }
+    val size = (b.textSize * 1.1f).toInt()
+    d.setBounds(0, 0, size, size)
+    d.setTint(b.currentTextColor)
+    val align = if (android.os.Build.VERSION.SDK_INT >= 29) android.text.style.ImageSpan.ALIGN_CENTER else android.text.style.ImageSpan.ALIGN_BASELINE
+    b.text = android.text.SpannableString("\u00A0 $text").apply {
+        setSpan(android.text.style.ImageSpan(d, align), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }

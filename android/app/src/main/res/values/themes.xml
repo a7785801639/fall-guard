@@ -15,8 +15,9 @@
 
     <style name="Theme.FallGuard.Alarm">
         <item name="android:windowBackground">@color/alarm_bg</item>
-        <item name="android:statusBarColor">@color/alarm_bg</item>
-        <item name="android:navigationBarColor">@color/alarm_bg</item>
+        <!-- Окно рисуется под прозрачными панелями: свечение доходит до самого верха -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
     <style name="Btn">

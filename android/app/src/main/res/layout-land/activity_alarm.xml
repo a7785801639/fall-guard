@@ -17,7 +17,6 @@
         android:layout_height="match_parent"
         android:clipChildren="false"
         android:clipToPadding="false"
-        android:fitsSystemWindows="true"
         android:orientation="horizontal"
         android:padding="16dp">
 
@@ -40,6 +39,7 @@
                     android:adjustViewBounds="true"
                     android:background="@drawable/frame_round"
                     android:contentDescription="Кадр с камеры"
+                    android:foreground="@drawable/frame_border"
                     android:maxHeight="360dp"
                     android:minHeight="160dp"
                     android:scaleType="fitCenter" />
@@ -224,6 +224,7 @@
                 <Button
                     android:id="@+id/btnFalse"
                     style="@style/Btn"
+                    android:background="@drawable/btn_glass"
                     android:layout_width="0dp"
                     android:layout_marginEnd="5dp"
                     android:layout_weight="1"
@@ -232,6 +233,7 @@
                 <Button
                     android:id="@+id/btnOpen"
                     style="@style/Btn"
+                    android:background="@drawable/btn_glass"
                     android:layout_width="0dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
