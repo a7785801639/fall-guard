@@ -713,6 +713,16 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             "server_ts": round(time.time(), 3),
         }
 
+    @app.get("/api/report.pdf")
+    def doctor_report(days: int = Query(default=30, ge=7, le=400)) -> Response:
+        """Отчёт для врача: падения и ночная активность за период. Собирается в потоке, не в цикле событий."""
+        from .doctor_report import build_report
+
+        pdf = build_report(engine.get_care_stats(days=days), days)
+        name = f"fallguard-report-{time.strftime('%Y-%m-%d')}.pdf"
+        engine.log_event("info", f"Сформирован отчёт для врача за {days} дн.", category="system")
+        return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     @app.get("/api/stats/nights")
     def care_stats(days: int = Query(default=28, ge=7, le=400)) -> dict:
         """Ночи за последние недели, тренд и падения — для графиков в журнале."""

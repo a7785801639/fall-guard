@@ -85,3 +85,22 @@ def test_stats_endpoint_returns_nights_trend_and_falls(tmp_path: Path) -> None:
     assert data["ok"] and data["night_hours"] == [22, 7]
     assert data["falls"][0]["id"] == "f1" and data["falls"][0]["false_alarm"] is False
     assert "trend" in data and "nights" in data
+
+
+def test_doctor_report_pdf_is_served_and_uses_a_full_font(tmp_path: Path) -> None:
+    from app.doctor_report import missing_glyphs
+
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    engine.care.record_fall("f1", __import__("time").time() - 3600, "Падение", "Сползла с края кровати на пол")
+    res = TestClient(create_web_app(engine)).get("/api/report.pdf?days=30")
+    assert res.status_code == 200 and res.headers["content-type"] == "application/pdf"
+    assert res.content.startswith(b"%PDF-") and "attachment" in res.headers["content-disposition"]
+    # Все символы отчёта есть в шрифте: кириллица, ё, кавычки, тире, цифры, знаки
+    sample = "Отчёт для врача: падения и ночная активность — «в кровати» ≥ 60% Ёё № 0123456789 ч,.:;()…"
+    assert missing_glyphs(sample) == set()
+
+
+def test_doctor_report_needs_login_from_outside(tmp_path: Path) -> None:
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    external = {"host": "nofall.example.com", "x-forwarded-proto": "https"}
+    assert TestClient(create_web_app(engine)).get("/api/report.pdf", headers=external).status_code == 401
