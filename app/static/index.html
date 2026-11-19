@@ -3433,7 +3433,6 @@
       const p = Math.round((s.volume - s.minVolume) / (100 - s.minVolume) * 100);
       b += `<div class="sig-line"><span class="sig-lbl">Звук</span>${pick("snd" + s.kind, s.sound, phoneSoundItems(s), (v) => phoneSound(s.kind, v), "Звук")}</div>`
         + `<div class="sig-line"><span class="sig-lbl">Громкость</span><input class="vol" type="range" min="${s.minVolume}" max="100" step="5" value="${s.volume}" style="--p:${p}%" aria-label="Громкость" oninput="phoneVolLive(this)" onchange="phoneVol('${s.kind}',this)"><span class="num vol-n">${s.volume}%</span></div>`;
-      if (s.style === "ALARM") b += `<div class="muted small">Тревога не тише ${s.minVolume}% — чтобы её нельзя было заглушить случайно</div>`;
     }
     return b + `<div class="row"><button class="btn sm" onclick="phoneTest('${s.kind}')">${ico("i-play")}Проверить</button><button class="btn sm" onclick="native.pickSignalFile('${s.kind}')">${ico("i-upload")}Свой файл…</button></div></div>`;
   }

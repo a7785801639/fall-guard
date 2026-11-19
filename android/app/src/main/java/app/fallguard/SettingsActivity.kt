@@ -325,7 +325,7 @@ object SignalDialog {
             text = t; isAllCaps = false; gravity = Gravity.CENTER; setOnClickListener { click() }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)).apply { topMargin = dp(top) }
         }
-        // Громкость: у тревоги — не ниже порога, чтобы её нельзя было заглушить случайно
+        // Громкость: от 5 % у любого сигнала
         box.addView(header("Громкость"))
         val minV = Signals.minVolume(cur)
         val volRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }

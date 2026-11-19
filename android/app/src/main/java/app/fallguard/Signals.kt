@@ -45,8 +45,8 @@ object Signals {
         return chosen ?: defaultStyle(kind, severity)
     }
 
-    /** Громкость в процентах: тревога не тише 30 % (падение нельзя «приглушить» до тишины), уведомление — от 5 %. */
-    const val ALARM_MIN_VOLUME = 30
+    /** Громкость в процентах: от 5 % у любого сигнала (ноль — это способ «Без звука», а не громкость). */
+    const val ALARM_MIN_VOLUME = 5
     const val NOTIFY_MIN_VOLUME = 5
 
     fun minVolume(style: Style): Int = if (style == Style.ALARM) ALARM_MIN_VOLUME else NOTIFY_MIN_VOLUME
