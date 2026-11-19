@@ -650,6 +650,13 @@ class MainActivity : Activity() {
             preview(k, Sounds.sound(this@MainActivity, k))
         }
 
+        /** Прослушать звук, не выбирая его: окно выбора звука в пульте. Конец проигрывания — phoneEvent('previewEnd'). */
+        @JavascriptInterface
+        fun previewSound(kind: String, id: String) {
+            val k = kind(kind) ?: return
+            preview(k, id)
+        }
+
         /** Прослушать звук выбранного типа ровно с той громкостью и по тому же пути, что и настоящий сигнал. */
         @JavascriptInterface
         fun previewSignal(kind: String) {
@@ -910,7 +917,13 @@ class MainActivity : Activity() {
         previewPlayer = Sounds.play(
             this, Sounds.uriOf(this, kind, id), usage, loop = false,
             fallback = Sounds.uriOf(this, kind, Sounds.defaultSound(kind)), gain = Sounds.gain(this, kind),
-        )
+        )?.also { mp ->
+            // Пульт показывает «играет» — сообщаем, когда звук закончился
+            mp.setOnCompletionListener {
+                try { it.release() } catch (_: Exception) {}
+                runOnUiThread { web.evaluateJavascript("window.phoneEvent && phoneEvent('previewEnd')", null) }
+            }
+        }
     }
 
     private fun restartApp() {
