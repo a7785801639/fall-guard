@@ -57,11 +57,13 @@ object Glance {
     fun update(ctx: Context, state: String?, alarm: Boolean, sub: String, online: Boolean) {
         val p = sp(ctx)
         val prev = load(ctx)
+        // Батарея: на диск пишем, только если что-то поменялось или «обновлено в …» устарело на 5 минут
+        val nowMs = System.currentTimeMillis()
+        val desc = state?.let { describe(it, alarm) }
+        val changed = online != prev.online || (desc != null && (desc.first != prev.title || desc.second != prev.tone || sub != prev.sub))
+        if (!changed && (desc == null || nowMs - prev.ts < 5 * 60_000L)) return
         val e = p.edit().putBoolean("online", online)
-        if (state != null) {
-            val (t, tone) = describe(state, alarm)
-            e.putString("title", t).putString("tone", tone.name).putString("sub", sub).putLong("ts", System.currentTimeMillis())
-        }
+        if (desc != null) e.putString("title", desc.first).putString("tone", desc.second.name).putString("sub", sub).putLong("ts", nowMs)
         e.apply()
         val now = load(ctx)
         // Перерисовываем, только если что-то видимое поменялось или прошла минута (обновить «в 12:04»)

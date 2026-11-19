@@ -6,9 +6,9 @@
     android:layout_height="wrap_content"
     android:clipChildren="false"
     android:clipToPadding="false"
-    android:paddingStart="10dp"
-    android:paddingEnd="10dp"
-    android:paddingBottom="18dp">
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="28dp">
 
     <LinearLayout
         android:id="@+id/ovCard"
@@ -79,13 +79,19 @@
                     android:textSize="11.5sp"
                     android:textStyle="bold" />
 
+                <!-- Заголовок целиком: до двух строк, длинный — чуть мельче -->
                 <TextView
                     android:id="@+id/ovTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
+                    android:autoSizeMaxTextSize="17sp"
+                    android:autoSizeMinTextSize="14sp"
+                    android:autoSizeStepGranularity="0.5sp"
+                    android:autoSizeTextType="uniform"
                     android:ellipsize="end"
-                    android:maxLines="1"
+                    android:lineSpacingMultiplier="0.95"
+                    android:maxLines="2"
                     android:textColor="#FFFFFF"
                     android:textSize="17sp"
                     android:textStyle="bold" />

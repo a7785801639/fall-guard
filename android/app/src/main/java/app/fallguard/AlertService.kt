@@ -97,6 +97,11 @@ class AlertService : Service() {
         try { cm.registerDefaultNetworkCallback(cb); netCallback = cb } catch (_: Exception) {}
     }
 
+    private fun onUnmetered(): Boolean = try {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        cm?.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    } catch (_: Exception) { false }
+
     private fun reconnectNow() {
         netChanged = true
         val c = activeConn
@@ -179,12 +184,15 @@ class AlertService : Service() {
         while (running) {
             if (netChanged) { netChanged = false; base = null; backoff = 2000L }
             if (base == null) base = Api.reachableBase(prefs)
+            // Батарея: на Wi-Fi сервер держит запрос 45 с (радио просыпается вдвое реже), в мобильной сети — 25 с,
+            // чтобы оператор не обрывал «молчащее» соединение; во время тревоги — коротко
+            val waitSec = when { ringing -> 3; onUnmetered() -> 45; else -> 25 }
             val res = if (base == null) HttpResult(-1, "") else Api.request(
                 base,
-                "/api/alerts/poll?after=${prefs.cursor}&wait=${if (ringing) 3 else 25}",
+                "/api/alerts/poll?after=${prefs.cursor}&wait=$waitSec",
                 token = prefs.token,
                 connectMs = 5000,
-                readMs = 40000,
+                readMs = (waitSec + 15) * 1000,
                 onOpen = { activeConn = it },
             )
             activeConn = null
@@ -215,7 +223,9 @@ class AlertService : Service() {
                     // Сеть сменилась — пробуем сразу, без нарастающей паузы
                     if (netChanged) continue
                     try { synchronized(wake) { if (!netChanged) wake.wait(backoff) } } catch (_: InterruptedException) { return }
-                    backoff = (backoff * 2).coerceAtMost(15000L)
+                    // Сервер недоступен долго — стучимся раз в минуту: при смене сети переподключаемся сразу и так
+                    val longOffline = System.currentTimeMillis() - lastOk > 5 * 60_000L
+                    backoff = (backoff * 2).coerceAtMost(if (longOffline) 60_000L else 15_000L)
                 }
             }
         }
@@ -304,7 +314,7 @@ class AlertService : Service() {
                 if (current?.base?.isNotEmpty() == true) {
                     // Тревогу сняли на сервере: подошёл свой или кто-то нажал «Принято»
                     val note = if (j.optString("state") == "caregiver") "Рядом свой — тревога снята" else "Тревога снята"
-                    ui.post { stopAlarm() }
+                    ui.post { stopAlarm(note) }
                     notifyEvent(NOTIF_EVENT, note, j.optString("status_line"))
                 }
             }
@@ -449,9 +459,9 @@ class AlertService : Service() {
         wakeLock = null
     }
 
-    private fun stopAlarm() {
+    private fun stopAlarm(reason: String = "Тревога снята") {
         // Мини-тревога: если её не закрыли кнопкой на ней самой — коротко «Тревога снята» и уезжает
-        if (overlay.showing && !overlay.finishing) overlay.finish(true, "Тревога снята", current?.title ?: "")
+        if (overlay.showing && !overlay.finishing) overlay.finish(true, reason, current?.title ?: "")
         stopSiren()
         ringing = false
         current = null

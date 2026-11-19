@@ -74,9 +74,16 @@ class AlarmOverlay(private val ctx: Context) {
                 gravity = Gravity.TOP
                 if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
-            // Под строкой состояния: отступ сверху — её высота
+            // Под строкой состояния и вырезом камеры: отступ — по настоящим системным отступам
             val sb = ctx.resources.getIdentifier("status_bar_height", "dimen", "android").let { if (it > 0) ctx.resources.getDimensionPixelSize(it) else (24 * d).toInt() }
-            v.setPadding(v.paddingLeft, sb + (6 * d).toInt(), v.paddingRight, v.paddingBottom)
+            val baseL = v.paddingLeft; val baseR = v.paddingRight
+            v.setPadding(baseL, sb + (8 * d).toInt(), baseR, v.paddingBottom)
+            v.setOnApplyWindowInsetsListener { view, ins ->
+                val c = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(ins, view)
+                    .getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+                view.setPadding(baseL + c.left, maxOf(sb, c.top) + (8 * d).toInt(), baseR + c.right, view.paddingBottom)
+                ins
+            }
             try { wm.addView(v, lp) } catch (_: Exception) { return false }
             root = v
             wire(v)
