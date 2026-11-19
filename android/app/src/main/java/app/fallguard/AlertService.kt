@@ -64,6 +64,9 @@ class AlertService : Service() {
         nm = getSystemService(NotificationManager::class.java)
         createChannels()
         watchNetwork()
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, screenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     // ---------------------------------------------------------------- смена сети
@@ -162,6 +165,8 @@ class AlertService : Service() {
         worker?.interrupt()
         stopAlarm()
         netCallback?.let { try { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(it) } catch (_: Exception) {} }
+        try { unregisterReceiver(screenOff) } catch (_: Exception) {}
+        overlay.remove()
         super.onDestroy()
     }
 
@@ -339,14 +344,46 @@ class AlertService : Service() {
     }
 
     // ---------------------------------------------------------------- тревога
+    // ---------------------------------------------------------------- мини-тревога поверх приложений
+    private val overlay by lazy { AlarmOverlay(this) }
+
+    /** Телефон в руках: экран включён и разблокирован — тревога выезжает карточкой сверху, а не на весь экран. */
+    private fun useOverlay(): Boolean {
+        if (!AlarmOverlay.allowed(this) || !prefs.overlayAlarm) return false
+        val pm = getSystemService(PowerManager::class.java)
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        return pm?.isInteractive == true && km?.isKeyguardLocked != true
+    }
+
+    /** Экран погас во время мини-тревоги: прячем карточку и включаем обычную полноэкранную — на экране блокировки. */
+    private val screenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            val info = current ?: return
+            if (ringing && overlay.showing) { overlay.remove(); postAlarmNotification(info, fullScreen = true) }
+        }
+    }
+
     private fun startAlarm(info: AlarmInfo) {
         current = info
         ringing = true
+        val mini = useOverlay() && overlay.show(info)
+        postAlarmNotification(info, fullScreen = !mini)
+        if (!silencedUntilQuiet) {
+            // Пока звучит «встала», пришло падение — переключаемся на звук падения
+            if (player != null && sirenKind != info.kind) stopSiren()
+            startSiren(info.kind)
+        }
+        // Если экран уже включён и мини-тревога недоступна — открываем окно сразу
+        if (!mini) try { startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+    }
+
+    private fun postAlarmNotification(info: AlarmInfo, fullScreen: Boolean) {
         val full = PendingIntent.getActivity(
             this, 1, Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val n = NotificationCompat.Builder(this, CH_ALARM)
+        // При мини-тревоге — тихий канал: иначе сверху выскочило бы ещё и системное уведомление
+        val n = NotificationCompat.Builder(this, if (fullScreen) CH_ALARM else CH_ALARM_QUIET)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(info.title)
             .setContentText(info.description)
@@ -357,18 +394,11 @@ class AlertService : Service() {
             .setOngoing(true)
             .setColor(ContextCompat.getColor(this, R.color.alarm))
             .setContentIntent(full)
-            .setFullScreenIntent(full, true)
+            .apply { if (fullScreen) setFullScreenIntent(full, true) }
             .addAction(0, "Я рядом", servicePending(ACTION_ACK, info.id, 2))
             .addAction(0, "Ложная", servicePending(ACTION_FALSE, info.id, 3))
             .build()
         nm.notify(NOTIF_ALARM, n)
-        if (!silencedUntilQuiet) {
-            // Пока звучит «встала», пришло падение — переключаемся на звук падения
-            if (player != null && sirenKind != info.kind) stopSiren()
-            startSiren(info.kind)
-        }
-        // Если экран уже включён и приложение на виду — открываем окно сразу
-        try { startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
     }
 
     private var sirenKind: Signals.Kind? = null
@@ -416,6 +446,8 @@ class AlertService : Service() {
     }
 
     private fun stopAlarm() {
+        // Мини-тревога: если её не закрыли кнопкой на ней самой — коротко «Тревога снята» и уезжает
+        if (overlay.showing && !overlay.finishing) overlay.finish(true, "Тревога снята", current?.title ?: "")
         stopSiren()
         ringing = false
         current = null
@@ -441,6 +473,12 @@ class AlertService : Service() {
             setBypassDnd(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
+        val alarmQuiet = NotificationChannel(CH_ALARM_QUIET, getString(R.string.ch_alarm), NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Пока тревога показана карточкой сверху экрана"
+            setSound(null, null)
+            enableVibration(false)
+        }
+        nm.createNotificationChannel(alarmQuiet)
         val events = NotificationChannel(CH_EVENTS, getString(R.string.ch_events), NotificationManager.IMPORTANCE_HIGH).apply {
             description = getString(R.string.ch_events_desc)
             setSound(null, null) // звук выбирается в настройках приложения и играется им самим
@@ -557,6 +595,7 @@ class AlertService : Service() {
         const val ACTION_TEST_SIGNAL = "app.fallguard.TEST_SIGNAL"
         const val EXTRA_ID = "alert_id"
         private const val CH_ALARM = "alarm_v1"
+        private const val CH_ALARM_QUIET = "alarm_quiet_v1"
         private const val CH_EVENTS = "events_v2"
         private const val CH_LINK = "link_v1"
         private const val NOTIF_LINK = 1

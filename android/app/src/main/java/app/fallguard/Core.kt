@@ -39,6 +39,11 @@ class Prefs(ctx: Context) {
     val paired: Boolean get() = token.isNotEmpty() && urls.isNotEmpty()
 
     /** Домашний адрес пробуем первым: дома он быстрее и работает без интернета. */
+    /** Мини-тревога сверху экрана, когда телефон в руках (если дано разрешение «поверх других приложений»). */
+    var overlayAlarm: Boolean
+        get() = sp.getBoolean("overlay_alarm", true)
+        set(v) = sp.edit().putBoolean("overlay_alarm", v).apply()
+
     val urls: List<String> get() = listOf(lanUrl, publicUrl).filter { it.isNotEmpty() }.distinct()
 
     fun clear() = sp.edit().clear().apply()
@@ -51,7 +56,8 @@ class HttpResult(val code: Int, val body: String) {
 
 /** Готов ли телефон к громкой тревоге: уведомления, фон, окно поверх блокировки. */
 object Readiness {
-    data class State(val notifications: Boolean, val battery: Boolean, val fullScreen: Boolean) {
+    /** overlay — по желанию: мини-тревога сверху экрана; в «готово» не входит. */
+    data class State(val notifications: Boolean, val battery: Boolean, val fullScreen: Boolean, val overlay: Boolean = false) {
         val allOk: Boolean get() = notifications && battery && fullScreen
     }
 
@@ -62,6 +68,7 @@ object Readiness {
             notifications = nm.areNotificationsEnabled(),
             battery = pm.isIgnoringBatteryOptimizations(ctx.packageName),
             fullScreen = android.os.Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent(),
+            overlay = AlarmOverlay.allowed(ctx),
         )
     }
 }

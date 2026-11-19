@@ -600,7 +600,8 @@ class MainActivity : Activity() {
             val o = JSONObject()
             o.put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" })
             val st = Readiness.check(ctx)
-            o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen))
+            o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen).put("overlay", st.overlay))
+            o.put("overlayAlarm", prefs.overlayAlarm)
             val pend = if (Updater.enabled) Updater.pending(ctx) else null
             o.put("update", JSONObject().put("enabled", Updater.enabled).put("pending", pend?.name ?: JSONObject.NULL))
             o.put("lan", prefs.lanUrl).put("public", prefs.publicUrl)
@@ -691,10 +692,15 @@ class MainActivity : Activity() {
                             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
                         } catch (_: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
                         "fullScreen" -> if (Build.VERSION.SDK_INT >= 34) startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                        "overlay" -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                     }
                 } catch (_: Exception) {}
             }
         }
+
+        /** Мини-тревога сверху экрана вкл/выкл (разрешение — отдельно, «Разрешить»). */
+        @JavascriptInterface
+        fun setOverlayAlarm(on: Boolean) { prefs.overlayAlarm = on }
 
         @JavascriptInterface
         fun checkUpdate() {
