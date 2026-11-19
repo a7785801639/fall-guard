@@ -83,8 +83,8 @@ class SettingsActivity : Activity() {
 
         val list = findViewById<LinearLayout>(R.id.checklist)
         list.removeAllViews()
-        addRow(list, st.notifications, "Уведомления", "обязательно") {
-            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        addRow(list, st.notifications, "Уведомления", if (Readiness.alarmChannelMuted(this)) "канал «Тревоги» приглушён" else "обязательно") {
+            Readiness.openNotificationSettings(this)
         }
         addRow(list, st.battery, "Работа в фоне", "чтобы связь не засыпала") {
             try {
@@ -184,13 +184,14 @@ class SettingsActivity : Activity() {
     /** Окно настройки одного типа: способ сигнала, звук (с прослушиванием), свой файл и проверка. */
     private fun openSignal(kind: Signals.Kind) {
         fun usage(st: Signals.Style) = if (st.rings) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
+        // Звук: касание только проигрывает и отмечает; сохраняется кнопкой «Готово» (закрыли иначе — не меняем)
+        var pendingSound: String? = null
         val body = SignalDialog.build(this, kind, object : SignalDialog.Callbacks {
             override fun onStyle(style: Signals.Style) { Sounds.setStyle(this@SettingsActivity, kind, style); renderSignals() }
             override fun onSound(id: String) {
-                Sounds.setSound(this@SettingsActivity, kind, id)
+                pendingSound = if (id == Sounds.sound(this@SettingsActivity, kind)) null else id
                 stopPreview()
                 preview = Sounds.play(this@SettingsActivity, Sounds.uriOf(this@SettingsActivity, kind, id), usage(Signals.effectiveStyle(kind, "", Sounds.style(this@SettingsActivity, kind))), loop = false, gain = Sounds.gain(this@SettingsActivity, kind))
-                renderSignals()
             }
             override fun onPickFile() {
                 stopPreview()
@@ -223,7 +224,16 @@ class SettingsActivity : Activity() {
                 AlertService.start(this@SettingsActivity, AlertService.ACTION_TEST_SIGNAL, kind.name)
             }
         })
-        AppDialog.show(this, kind.title, body = body, actions = listOf(AppDialog.Action("Готово", R.style.Btn) {}), onDismiss = { stopPreview() })
+        AppDialog.show(this, kind.title, body = body, actions = listOf(
+            AppDialog.Action("Отмена", R.style.Btn) {},
+            AppDialog.Action("Готово", R.style.Btn_Primary) {
+                pendingSound?.let { id ->
+                    val title = if (id.startsWith(Sounds.SYS)) Sounds.title(this, kind) else ""
+                    Sounds.setSound(this, kind, id, title)
+                }
+                renderSignals()
+            },
+        ), onDismiss = { stopPreview() })
     }
 
     @Deprecated("Activity API")

@@ -56,11 +56,27 @@ object Readiness {
         val allOk: Boolean get() = notifications && battery && fullScreen
     }
 
+    fun alarmChannelMuted(ctx: Context): Boolean = try {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        nm.areNotificationsEnabled() && (nm.getNotificationChannel("alarm_v1")?.importance ?: android.app.NotificationManager.IMPORTANCE_HIGH) < android.app.NotificationManager.IMPORTANCE_HIGH
+    } catch (_: Exception) { false }
+
+    /** Ведёт прямо туда, где проблема: в настройки канала «Тревоги» или всех уведомлений приложения. */
+    fun openNotificationSettings(ctx: Context) {
+        val i = if (alarmChannelMuted(ctx)) android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, "alarm_v1")
+        else android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+        try { ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+    }
+
     fun check(ctx: Context): State {
         val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
         val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+        // Канал «Тревоги» можно вручную приглушить в настройках Android — тогда тревога придёт тихим уведомлением
+        val alarmChannel = try { nm.getNotificationChannel("alarm_v1") } catch (_: Exception) { null }
+        val channelOk = alarmChannel == null || alarmChannel.importance >= android.app.NotificationManager.IMPORTANCE_HIGH
         return State(
-            notifications = nm.areNotificationsEnabled(),
+            notifications = nm.areNotificationsEnabled() && channelOk,
             battery = pm.isIgnoringBatteryOptimizations(ctx.packageName),
             fullScreen = android.os.Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent(),
             overlay = AlarmOverlay.allowed(ctx),

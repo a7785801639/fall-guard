@@ -600,6 +600,7 @@ class MainActivity : Activity() {
             val o = JSONObject()
             o.put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" })
             val st = Readiness.check(ctx)
+            o.put("alarmChannelMuted", Readiness.alarmChannelMuted(ctx))
             o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen).put("overlay", st.overlay))
             val pend = if (Updater.enabled) Updater.pending(ctx) else null
             o.put("update", JSONObject().put("enabled", Updater.enabled).put("pending", pend?.name ?: JSONObject.NULL))
@@ -693,7 +694,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 try {
                     when (which) {
-                        "notifications" -> startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                        "notifications" -> Readiness.openNotificationSettings(this@MainActivity)
                         "battery" -> try {
                             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
                         } catch (_: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
