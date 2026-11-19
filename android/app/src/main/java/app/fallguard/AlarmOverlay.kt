@@ -96,7 +96,6 @@ class AlarmOverlay(private val ctx: Context) {
     private fun bind(i: AlarmInfo) {
         val v = root ?: return
         v.findViewById<TextView>(R.id.ovTitle).text = i.title
-        v.findViewById<TextView>(R.id.ovSub).text = i.description
         v.findViewById<ImageView>(R.id.ovKind).setImageResource(
             when (i.kind) {
                 Signals.Kind.FALL -> R.drawable.ic_k_fall
@@ -241,7 +240,7 @@ class AlarmOverlay(private val ctx: Context) {
         v.findViewById<View>(R.id.ovDot).apply { alpha = 1f; backgroundTintList = android.content.res.ColorStateList.valueOf(ctx.getColor(R.color.calm)) }
         v.findViewById<TextView>(R.id.ovEyebrow).apply { text = if (ok) "ГОТОВО" else "ТРЕВОГА СНЯТА"; setTextColor(ctx.getColor(R.color.calm)) }
         v.findViewById<TextView>(R.id.ovTitle).text = title
-        v.findViewById<TextView>(R.id.ovSub).text = sub
+        v.findViewById<TextView>(R.id.ovSub).apply { text = sub; visibility = View.VISIBLE }
         v.findViewById<ImageView>(R.id.ovKind).apply { setImageResource(R.drawable.ic_b_check); setBackgroundResource(R.drawable.done_circle_calm); setColorFilter(ctx.getColor(R.color.on_calm)) }
         card.animate().scaleX(1.02f).scaleY(1.02f).setDuration(120).withEndAction {
             card.animate().scaleX(1f).scaleY(1f).setDuration(160).start()

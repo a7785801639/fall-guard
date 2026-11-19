@@ -19,6 +19,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Кадр ниже этой высоты (dp) — повод убрать большой значок над заголовком. */
+const val HERO_MIN_FRAME_DP = 150
+
 /** Окно тревоги поверх экрана блокировки. */
 class AlarmActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
@@ -45,8 +48,18 @@ class AlarmActivity : Activity() {
         edgeToEdge()
         // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
         AlertService.onAlarmStopped = { runOnUiThread { if (!closing) finish() } }
+        // Низкий экран: кадр важнее большого значка — убираем значок, кадр становится крупнее
+        findViewById<View>(R.id.alarmFrame).addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitHero() }
         bind()
         enter()
+    }
+
+    private fun fitHero() {
+        if (findViewById<FitBox>(R.id.alarmFrame).childCount < 2) return // горизонтальная раскладка: значок в шапке
+        val badge = findViewById<View>(R.id.alarmBadgeWrap)
+        val card = findViewById<View>(R.id.alarmFrameCard)
+        if (badge.visibility == View.VISIBLE && card.height in 1 until (HERO_MIN_FRAME_DP * resources.displayMetrics.density).toInt())
+            card.post { badge.visibility = View.GONE }
     }
 
     /**
@@ -180,9 +193,8 @@ class AlarmActivity : Activity() {
         )
         updateElapsed()
         findViewById<TextView>(R.id.alarmTime).text =
-            (if (info.base.isEmpty()) "ПРОВЕРКА\n" else "ТРЕВОГА\n") + "в " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
+            (if (info.base.isEmpty()) "ПРОВЕРКА · " else "ТРЕВОГА · ") + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
         findViewById<TextView>(R.id.alarmTitle).text = info.title
-        findViewById<TextView>(R.id.alarmDesc).text = info.description
 
         iconLabel(findViewById(R.id.btnAck), R.drawable.ic_b_check, "Принято, иду")
         iconLabel(findViewById(R.id.btnFalse), R.drawable.ic_b_x, "Ложная тревога")

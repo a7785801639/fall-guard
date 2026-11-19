@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -17,148 +16,20 @@
         android:layout_height="match_parent"
         android:clipToPadding="false"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp">
 
-        <!-- Без прокрутки: шапка и текст сверху, кадр занимает всё свободное место, кнопки внизу видны всегда -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:clipChildren="false"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <FrameLayout
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:clipChildren="false">
-
-                <View
-                    android:id="@+id/alarmRing1"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:alpha="0"
-                    android:background="@drawable/alarm_ring" />
-
-                <View
-                    android:id="@+id/alarmRing2"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:alpha="0"
-                    android:background="@drawable/alarm_ring" />
-
-                <!-- Значок типа события: падение, встала, зовёт рукой… -->
-                <FrameLayout
-                    android:id="@+id/alarmBadge"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/alarm_badge">
-
-                    <ImageView
-                        android:id="@+id/alarmIcon"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:contentDescription="@null"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_k_fall" />
-                </FrameLayout>
-            </FrameLayout>
-
-            <TextView
-                android:id="@+id/alarmTime"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:layout_marginEnd="10dp"
-                android:layout_weight="1"
-                android:fontFeatureSettings="tnum"
-                android:letterSpacing="0.06"
-                android:lineSpacingMultiplier="1.05"
-                android:maxLines="2"
-                android:textColor="@color/alarm_eyebrow"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <!-- Секундомер «без ответа»: цифры и кольцо, которое обегает круг за минуту -->
-            <LinearLayout
-                android:id="@+id/alarmTimer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/timer_chip"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="6dp"
-                android:paddingTop="4dp"
-                android:paddingEnd="14dp"
-                android:paddingBottom="4dp">
-
-                <app.fallguard.ElapsedRing
-                    android:id="@+id/alarmRing"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp" />
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/alarmElapsed"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFeatureSettings="tnum"
-                        android:includeFontPadding="false"
-                        android:text="0:00"
-                        android:textColor="@color/text"
-                        android:textSize="20sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/alarmElapsedLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="1dp"
-                        android:includeFontPadding="false"
-                        android:text="без ответа"
-                        android:textColor="@color/alarm_soft"
-                        android:textSize="11sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/alarmTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:ellipsize="end"
-            android:letterSpacing="-0.01"
-            android:lineSpacingMultiplier="0.95"
-            android:maxLines="3"
-            android:textColor="@color/text"
-            android:textSize="@dimen/alarm_title"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/alarmDesc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:ellipsize="end"
-            android:lineSpacingMultiplier="1.1"
-            android:maxLines="3"
-            android:textColor="@color/alarm_soft"
-            android:textSize="@dimen/alarm_desc" />
-
-        <!-- Кадр вписан в свободное место целиком, в пропорциях камеры; плашка «Эфир» — на самом кадре -->
+        <!-- Без прокрутки. Сверху крупно кадр с камеры (целиком, в пропорциях камеры),
+             под ним по центру свободного места — пульсирующий значок события и заголовок,
+             внизу кнопки. На низком экране кадр уменьшается, значок прячется. -->
         <app.fallguard.FitBox
             android:id="@+id/alarmFrame"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="6dp"
             android:layout_weight="1"
-            app:alignTop="true">
+            android:clipChildren="false">
 
             <FrameLayout
                 android:id="@+id/alarmFrameCard"
@@ -178,18 +49,126 @@
                 <TextView
                     android:id="@+id/alarmLive"
                     android:layout_width="wrap_content"
-                    android:layout_height="26dp"
+                    android:layout_height="30dp"
                     android:layout_gravity="top|start"
                     android:layout_margin="10dp"
                     android:background="@drawable/chip_live"
                     android:gravity="center_vertical"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
                     android:text="● Снимок"
                     android:textColor="#FFFFFF"
-                    android:textSize="12sp"
+                    android:textSize="12.5sp"
                     android:textStyle="bold" />
+
+                <!-- Сколько без ответа: кольцо обегает круг за минуту -->
+                <LinearLayout
+                    android:id="@+id/alarmTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:layout_gravity="top|end"
+                    android:layout_margin="10dp"
+                    android:background="@drawable/chip_live"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="12dp">
+
+                    <app.fallguard.ElapsedRing
+                        android:id="@+id/alarmRing"
+                        android:layout_width="26dp"
+                        android:layout_height="26dp" />
+
+                    <TextView
+                        android:id="@+id/alarmElapsed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:fontFeatureSettings="tnum"
+                        android:includeFontPadding="false"
+                        android:text="0:00"
+                        android:textColor="@color/text"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
             </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/alarmHero"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingTop="18dp"
+                android:paddingBottom="6dp">
+
+                <FrameLayout
+                    android:id="@+id/alarmBadgeWrap"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:layout_marginBottom="18dp"
+                    android:clipChildren="false">
+
+                    <View
+                        android:id="@+id/alarmRing1"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:alpha="0"
+                        android:background="@drawable/alarm_ring" />
+
+                    <View
+                        android:id="@+id/alarmRing2"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:alpha="0"
+                        android:background="@drawable/alarm_ring" />
+
+                    <!-- Значок типа события: падение, встала, зовёт рукой… -->
+                    <FrameLayout
+                        android:id="@+id/alarmBadge"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/alarm_badge"
+                        android:elevation="6dp">
+
+                        <ImageView
+                            android:id="@+id/alarmIcon"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:contentDescription="@null"
+                            android:padding="15dp"
+                            android:src="@drawable/ic_k_fall" />
+                    </FrameLayout>
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/alarmTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFeatureSettings="tnum"
+                    android:gravity="center"
+                    android:letterSpacing="0.12"
+                    android:textColor="@color/alarm_eyebrow"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/alarmTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:breakStrategy="balanced"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:letterSpacing="-0.01"
+                    android:lineSpacingMultiplier="0.95"
+                    android:maxLines="3"
+                    android:textColor="@color/text"
+                    android:textSize="@dimen/alarm_title"
+                    android:textStyle="bold" />
+            </LinearLayout>
         </app.fallguard.FitBox>
 
             <!-- Главная кнопка: по ней раз в несколько секунд пробегает блик -->

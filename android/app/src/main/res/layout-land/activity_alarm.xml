@@ -83,6 +83,7 @@
                 android:orientation="horizontal">
 
                 <FrameLayout
+                    android:id="@+id/alarmBadgeWrap"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:clipChildren="false">
@@ -140,14 +141,6 @@
                 android:textSize="24sp"
                 android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/alarmDesc"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:lineSpacingMultiplier="1.1"
-                android:textColor="@color/alarm_soft"
-                android:textSize="15sp" />
 
             <!-- Низкий экран: маленькое кольцо и время в одну строку -->
             <LinearLayout

@@ -105,7 +105,8 @@ class SignalsTest {
         assertEquals(320 to 180, FitBox.fit(320, 400, 16f / 9f))   // высокий экран — по ширине
         assertEquals(213 to 120, FitBox.fit(320, 120, 16f / 9f))   // низкий — по высоте, ничего не обрезано
         assertEquals(320 to 240, FitBox.fit(320, 300, 4f / 3f))    // камера 4:3 — свои пропорции
-        assertEquals(320 to 180, FitBox.fit(320, 0, 16f / 9f))     // высота не ограничена
+        assertEquals(320 to 180, FitBox.fit(320, -1, 16f / 9f))    // высота не ограничена
+        assertEquals(0 to 0, FitBox.fit(320, 0, 16f / 9f))         // места нет — кадр не вылезает
     }
 
     @Test fun miniAlarmRingsLikeAnAlarmAndIsAllowedForFalls() {
