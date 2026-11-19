@@ -183,7 +183,7 @@ class SettingsActivity : Activity() {
 
     /** Окно настройки одного типа: способ сигнала, звук (с прослушиванием), свой файл и проверка. */
     private fun openSignal(kind: Signals.Kind) {
-        fun usage(st: Signals.Style) = if (st == Signals.Style.ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
+        fun usage(st: Signals.Style) = if (st.rings) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_EVENT
         val body = SignalDialog.build(this, kind, object : SignalDialog.Callbacks {
             override fun onStyle(style: Signals.Style) { Sounds.setStyle(this@SettingsActivity, kind, style); renderSignals() }
             override fun onSound(id: String) {
@@ -310,7 +310,11 @@ object SignalDialog {
         val styleGroup = RadioGroup(ctx)
         styles.forEachIndexed { i, st -> styleGroup.addView(radio(100 + i, st.title, st == cur)) }
         box.addView(styleGroup)
-        if (kind == Signals.Kind.FALL) box.addView(TextView(ctx).apply { text = "Падение всегда поднимает громкую тревогу"; setTextColor(ctx.getColor(R.color.muted)); textSize = 13f })
+        if (kind == Signals.Kind.FALL) box.addView(TextView(ctx).apply { text = "Падение всегда звучит сиреной: на весь экран или карточкой сверху"; setTextColor(ctx.getColor(R.color.muted)); textSize = 13f })
+        if (Signals.Style.MINI in styles && !AlarmOverlay.allowed(ctx)) box.addView(TextView(ctx).apply {
+            text = "Для мини-тревоги нужно разрешение «поверх других приложений» (в списке готовности выше)"
+            setTextColor(ctx.getColor(R.color.warn)); textSize = 13f; setPadding(0, dp(4), 0, 0)
+        })
 
         box.addView(header("Звук"))
         val options = Sounds.BUILT_IN.map { it.id to it.title }.toMutableList()
@@ -381,7 +385,7 @@ object SignalRow {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
         }
         val dot = View(ctx).apply {
-            setBackgroundResource(when (style) { Signals.Style.ALARM -> R.drawable.dot_alarm; Signals.Style.NOTIFY -> R.drawable.dot_warn_solid; else -> R.drawable.dot_muted })
+            setBackgroundResource(when (style) { Signals.Style.ALARM, Signals.Style.MINI -> R.drawable.dot_alarm; Signals.Style.NOTIFY -> R.drawable.dot_warn_solid; else -> R.drawable.dot_muted })
             layoutParams = LinearLayout.LayoutParams(dp(10), dp(10))
         }
         row.addView(dot)

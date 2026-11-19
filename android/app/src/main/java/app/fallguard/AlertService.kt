@@ -225,7 +225,7 @@ class AlertService : Service() {
     private fun testSignal(kind: Signals.Kind) {
         val title = "Проверка: ${kind.title.lowercase()}"
         when (Signals.effectiveStyle(kind, "", Sounds.style(this, kind))) {
-            Signals.Style.ALARM -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", ServerClock.now(), "", "", kind, serverTracked = false))
+            Signals.Style.ALARM, Signals.Style.MINI -> startAlarm(AlarmInfo("", title, "Так придёт этот сигнал. Это только проверка.", ServerClock.now(), "", "", kind, serverTracked = false))
             Signals.Style.NOTIFY -> {
                 val am = getSystemService(AudioManager::class.java)
                 val quiet = am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL
@@ -347,9 +347,13 @@ class AlertService : Service() {
     // ---------------------------------------------------------------- мини-тревога поверх приложений
     private val overlay by lazy { AlarmOverlay(this) }
 
-    /** Телефон в руках: экран включён и разблокирован — тревога выезжает карточкой сверху, а не на весь экран. */
-    private fun useOverlay(): Boolean {
-        if (!AlarmOverlay.allowed(this) || !prefs.overlayAlarm) return false
+    /**
+     * Мини-тревога: для этого типа события выбрана «Мини-тревога сверху», и телефон в руках —
+     * экран включён и разблокирован. Иначе (или без разрешения) — обычная тревога на весь экран.
+     */
+    private fun useOverlay(kind: Signals.Kind): Boolean {
+        if (!AlarmOverlay.allowed(this)) return false
+        if (Signals.effectiveStyle(kind, "", Sounds.style(this, kind)) != Signals.Style.MINI) return false
         val pm = getSystemService(PowerManager::class.java)
         val km = getSystemService(android.app.KeyguardManager::class.java)
         return pm?.isInteractive == true && km?.isKeyguardLocked != true
@@ -366,7 +370,7 @@ class AlertService : Service() {
     private fun startAlarm(info: AlarmInfo) {
         current = info
         ringing = true
-        val mini = useOverlay() && overlay.show(info)
+        val mini = useOverlay(info.kind) && overlay.show(info)
         postAlarmNotification(info, fullScreen = !mini)
         if (!silencedUntilQuiet) {
             // Пока звучит «встала», пришло падение — переключаемся на звук падения

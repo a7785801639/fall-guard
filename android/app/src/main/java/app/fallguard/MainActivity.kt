@@ -601,7 +601,6 @@ class MainActivity : Activity() {
             o.put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" })
             val st = Readiness.check(ctx)
             o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen).put("overlay", st.overlay))
-            o.put("overlayAlarm", prefs.overlayAlarm)
             val pend = if (Updater.enabled) Updater.pending(ctx) else null
             o.put("update", JSONObject().put("enabled", Updater.enabled).put("pending", pend?.name ?: JSONObject.NULL))
             o.put("lan", prefs.lanUrl).put("public", prefs.publicUrl)
@@ -697,10 +696,6 @@ class MainActivity : Activity() {
                 } catch (_: Exception) {}
             }
         }
-
-        /** Мини-тревога сверху экрана вкл/выкл (разрешение — отдельно, «Разрешить»). */
-        @JavascriptInterface
-        fun setOverlayAlarm(on: Boolean) { prefs.overlayAlarm = on }
 
         @JavascriptInterface
         fun checkUpdate() {
@@ -911,7 +906,7 @@ class MainActivity : Activity() {
     private fun preview(kind: Signals.Kind, id: String) {
         stopPreviewPlayer()
         val style = Signals.effectiveStyle(kind, "", Sounds.style(this, kind))
-        val usage = if (style == Signals.Style.ALARM) android.media.AudioAttributes.USAGE_ALARM else android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT
+        val usage = if (style.rings) android.media.AudioAttributes.USAGE_ALARM else android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT
         previewPlayer = Sounds.play(
             this, Sounds.uriOf(this, kind, id), usage, loop = false,
             fallback = Sounds.uriOf(this, kind, Sounds.defaultSound(kind)), gain = Sounds.gain(this, kind),

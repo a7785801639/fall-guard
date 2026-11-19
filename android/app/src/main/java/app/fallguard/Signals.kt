@@ -14,12 +14,20 @@ object Signals {
         LINK("Нет связи с сервером", "телефон не получает тревоги"),
     }
 
-    /** Способ: громкая тревога на весь экран, уведомление со звуком, уведомление без звука. */
-    enum class Style(val title: String) { ALARM("Тревога на весь экран"), NOTIFY("Уведомление со звуком"), SILENT("Без звука") }
+    /**
+     * Способ: громкая тревога на весь экран; мини-тревога (та же сирена, но карточкой сверху экрана,
+     * если телефон в руках; на заблокированном — на весь экран); уведомление со звуком; без звука.
+     */
+    enum class Style(val title: String) {
+        ALARM("Тревога на весь экран"), MINI("Мини-тревога сверху"), NOTIFY("Уведомление со звуком"), SILENT("Без звука");
 
-    /** Какие способы можно выбрать: падение — всегда тревога, обрыв связи — только уведомление. */
+        /** Звенит сиреной и ждёт «Принято». */
+        val rings: Boolean get() = this == ALARM || this == MINI
+    }
+
+    /** Какие способы можно выбрать: падение — только тревога (полная или мини), обрыв связи — только уведомление. */
     fun allowedStyles(kind: Kind): List<Style> = when (kind) {
-        Kind.FALL -> listOf(Style.ALARM)
+        Kind.FALL -> listOf(Style.ALARM, Style.MINI)
         Kind.LINK -> listOf(Style.NOTIFY, Style.SILENT)
         else -> Style.entries.toList()
     }
@@ -39,9 +47,9 @@ object Signals {
         else -> Style.NOTIFY
     }
 
-    /** Падение и любые критические события нельзя приглушить ниже полноэкранной тревоги. */
+    /** Падение и любые критические события — всегда тревога с сиреной: полная или мини, тише нельзя. */
     fun effectiveStyle(kind: Kind, severity: String, chosen: Style?): Style {
-        if (kind == Kind.FALL || severity == "critical") return Style.ALARM
+        if (kind == Kind.FALL || severity == "critical") return if (chosen == Style.MINI) Style.MINI else Style.ALARM
         return chosen ?: defaultStyle(kind, severity)
     }
 
@@ -49,7 +57,7 @@ object Signals {
     const val ALARM_MIN_VOLUME = 5
     const val NOTIFY_MIN_VOLUME = 5
 
-    fun minVolume(style: Style): Int = if (style == Style.ALARM) ALARM_MIN_VOLUME else NOTIFY_MIN_VOLUME
+    fun minVolume(style: Style): Int = if (style.rings) ALARM_MIN_VOLUME else NOTIFY_MIN_VOLUME
 
     fun clampVolume(style: Style, percent: Int): Int = percent.coerceIn(minVolume(style), 100)
 
@@ -95,7 +103,7 @@ object Signals {
         for (a in alerts) {
             val kind = kindOf(a.state, a.severity, a.isFall)
             when (effectiveStyle(kind, a.severity, styleOf(kind))) {
-                Style.ALARM -> ring = Action.Ring(a, kind) // последняя тревожная — та, что на экране
+                Style.ALARM, Style.MINI -> ring = Action.Ring(a, kind) // последняя тревожная — та, что на экране
                 Style.NOTIFY -> out += Action.Notify(a, kind, sound = true)
                 Style.SILENT -> out += Action.Notify(a, kind, sound = false)
             }

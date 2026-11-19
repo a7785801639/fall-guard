@@ -562,6 +562,8 @@
     .ring-left span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; }
     /* Сводка за сутки — плитки */
     /* Ночи по неделям */
+    .sig-warn { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 12.5px; }
+    .sig-warn svg { width: 16px; height: 16px; flex: none; } .sig-warn span { flex: 1; min-width: 0; } .sig-warn .btn { flex: none; }
     .duty-note { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--raise-2); color: var(--muted); font-size: 13px; line-height: 1.4; }
     .duty-note svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
     .duty-note b { color: var(--warn); font-weight: 650; }
@@ -3405,7 +3407,7 @@
 
   /* ---------- Вкладка «Телефон»: настройки приложения Android прямо в настройках пульта ---------- */
   const hasPhone = () => Boolean(native && typeof native.phoneInfo === "function");
-  let phoneSoundList = null, phoneOpen = "", phoneBusy = "";
+  let phoneSoundList = null, phoneOpen = "", phoneBusy = "", phoneOverlayOk = null;
   const phoneJson = (fn, ...a) => { try { return JSON.parse(native[fn](...a)); } catch (_) { return null; } };
   const phoneSounds = () => phoneSoundList || (phoneSoundList = phoneJson("phoneSounds") || []);
   function openPhone() {
@@ -3413,7 +3415,14 @@
     if (hasPhone()) openSheet("phone"); else try { native.openAppSettings(); } catch (_) {}
   }
   const SIG_ICON = { FALL: ["i-fall", "alarm"], STANDUP: ["i-walk", "warn"], SITTING: ["i-sit", "warn"], HELP: ["i-hand", "warn"], OTHER: ["i-clock", "care"], LINK: ["i-wifi-off", ""] };
-  const SIG_STYLE = { ALARM: "Тревога", NOTIFY: "Со звуком", SILENT: "Тихо" };
+  const SIG_STYLE = { ALARM: "Экран", MINI: "Сверху", NOTIFY: "Со звуком", SILENT: "Тихо" };
+  const SIG_STYLE_SUB = { ALARM: "Тревога", MINI: "Мини-тревога", NOTIFY: "Со звуком", SILENT: "Без звука" };
+  const SIG_STYLE_HINT = {
+    ALARM: "Сирена и тревога на весь экран",
+    MINI: "Сирена и карточка сверху экрана, если телефон в руках; на заблокированном — на весь экран",
+    NOTIFY: "Уведомление со звуком",
+    SILENT: "Уведомление без звука",
+  };
   function phoneSoundItems(s) {
     const list = phoneSounds(), items = [];
     let group = "";
@@ -3427,8 +3436,9 @@
   }
   function phoneKindBody(s) {
     let b = `<div class="sig-body">`;
-    if (s.styles.length > 1) b += `<div class="seg wide">${s.styles.map((st) => `<button aria-pressed="${st === s.style}" onclick="phoneStyle('${s.kind}','${st}')">${SIG_STYLE[st]}</button>`).join("")}</div>`;
-    else if (s.kind === "FALL") b += `<div class="muted small">Падение всегда поднимает громкую тревогу</div>`;
+    if (s.styles.length > 1) b += `<div class="seg wide">${s.styles.map((st) => `<button aria-pressed="${st === s.style}" onclick="phoneStyle('${s.kind}','${st}')">${SIG_STYLE[st] || st}</button>`).join("")}</div>`;
+    b += `<div class="muted small">${SIG_STYLE_HINT[s.style] || ""}${s.kind === "FALL" ? " · падение всегда звучит сиреной" : ""}</div>`;
+    if (s.style === "MINI" && phoneOverlayOk === false) b += `<div class="sig-warn">${ico("i-alert")}<span>Нужно разрешение показывать поверх приложений — пока будет на весь экран</span><button class="btn sm" onclick="native.fixPermission('overlay')">Разрешить</button></div>`;
     if (s.style !== "SILENT") {
       const p = Math.round((s.volume - s.minVolume) / (100 - s.minVolume) * 100);
       b += `<div class="sig-line"><span class="sig-lbl">Звук</span>${pick("snd" + s.kind, s.sound, phoneSoundItems(s), (v) => phoneSound(s.kind, v), "Звук")}</div>`
@@ -3441,19 +3451,17 @@
     if (!P) return `<div class="empty">Не удалось прочитать настройки телефона</div>`;
     let h = `<div class="group"><h3>Сигналы</h3><div class="rows">` + P.signals.map((s) => {
       const open = phoneOpen === s.kind, [ic, tone] = SIG_ICON[s.kind] || ["i-bell", ""];
-      const sub = s.style === "SILENT" ? "Без звука" : `${SIG_STYLE[s.style]} · ${esc(s.soundTitle)} · ${s.volume}%`;
+      const sub = s.style === "SILENT" ? "Без звука" : `${SIG_STYLE_SUB[s.style] || s.style} · ${esc(s.soundTitle)} · ${s.volume}%`;
       return `<div class="sigrow${open ? " open" : ""}"><button class="rowi sig-head" aria-expanded="${open}" onclick="phoneToggle('${s.kind}')">${ri(ic, tone)}<div class="rowi-body"><div class="rowi-title">${esc(s.title)}</div><div class="rowi-sub">${sub}</div></div>${ico("i-chev-r")}</button>${open ? phoneKindBody(s) : ""}</div>`;
     }).join("") + `</div></div>`;
 
     const R = P.ready;
+    phoneOverlayOk = "overlay" in R ? Boolean(R.overlay) : null;
     h += `<div class="group"><h3>Готовность к тревоге</h3><div class="rows">` + [["notifications", "Уведомления", "i-bell"], ["battery", "Работа в фоне", "i-power"], ["fullScreen", "Окно поверх блокировки", "i-screen"]].map(([k, l, ic]) =>
       `<div class="rowi">${ri(ic, R[k] ? "calm" : "warn")}<div class="rowi-body"><div class="rowi-title">${l}</div><div class="rowi-sub">${R[k] ? "Разрешено" : "Нужно разрешить, иначе Android может заглушить тревогу"}</div></div>${R[k] ? "" : `<button class="btn sm primary" onclick="native.fixPermission('${k}')">Разрешить</button>`}</div>`).join("") + `</div></div>`;
-    // Мини-тревога: по желанию. Когда телефон в руках — карточка сверху экрана вместо полноэкранной
-    if ("overlay" in R) {
-      const on = P.overlayAlarm !== false;
-      h += `<div class="group"><h3>Когда телефон в руках</h3><div class="rows"><div class="rowi">${ri("i-bell", R.overlay && on ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Мини-тревога сверху экрана</div><div class="rowi-sub">${R.overlay ? "карточка поверх приложений, без полного экрана" : "нужно разрешение «поверх других приложений»"}</div></div>`
-        + (R.overlay ? sw(on, "phoneOverlay(" + !on + ")", "Мини-тревога") : `<button class="btn sm" onclick="native.fixPermission('overlay')">Разрешить</button>`) + `</div></div></div>`;
-    }
+    // Мини-тревога выбрана, а разрешения нет — напоминаем здесь же, рядом с остальной готовностью
+    if ("overlay" in R && !R.overlay && P.signals.some((x) => x.style === "MINI"))
+      h += `<div class="group"><div class="rows"><div class="rowi">${ri("i-bell", "warn")}<div class="rowi-body"><div class="rowi-title">Мини-тревога сверху экрана</div><div class="rowi-sub">нужно разрешение «поверх других приложений»</div></div><button class="btn sm primary" onclick="native.fixPermission('overlay')">Разрешить</button></div></div></div>`;
 
     const u = P.update;
     const ub = !u.enabled ? "" : u.pending
@@ -3469,7 +3477,6 @@
     h += `<div class="group" style="margin-top:28px"><button class="btn block red-text" onclick="phoneUnpair()">${ico("i-trash")}Отвязать этот телефон</button></div>`;
     return h;
   }
-  function phoneOverlay(on) { try { native.setOverlayAlarm(on); } catch (_) {} renderSheet(); toast(on ? "Тревога выедет карточкой сверху, когда телефон в руках" : "Тревога — всегда на весь экран"); }
   function phoneToggle(k) { phoneOpen = phoneOpen === k ? "" : k; try { native.stopPreview(); } catch (_) {} renderSheet(); }
   function phoneStyle(k, st) { try { native.setSignalStyle(k, st); } catch (_) {} renderSheet(); }
   function phoneSound(k, id) { const it = phoneSounds().find((x) => x.id === id); try { native.setSignalSound(k, id, it ? it.title : ""); } catch (_) {} renderSheet(); }

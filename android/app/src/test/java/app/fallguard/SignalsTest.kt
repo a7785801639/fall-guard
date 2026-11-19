@@ -109,4 +109,15 @@ class SignalsTest {
         assertEquals(1f, AlarmLayout.textScale(180f), 0.01f)
         assertTrue(AlarmLayout.textScale(97f) > 0.55f)            // цифры остаются читаемыми
     }
+
+    @Test fun miniAlarmRingsLikeAnAlarmAndIsAllowedForFalls() {
+        // Мини-тревога звенит так же, как полная
+        assertEquals(listOf<Action>(Action.Ring(stand, Kind.STANDUP)), Signals.decide(listOf(stand), false, false, false) { if (it == Kind.STANDUP) Style.MINI else null })
+        // Падение можно сделать мини-тревогой, но не уведомлением
+        assertEquals(Style.MINI, Signals.effectiveStyle(Kind.FALL, "critical", Style.MINI))
+        assertEquals(Style.ALARM, Signals.effectiveStyle(Kind.FALL, "critical", Style.NOTIFY))
+        assertTrue(Style.MINI in Signals.allowedStyles(Kind.FALL) && Style.NOTIFY !in Signals.allowedStyles(Kind.FALL))
+        assertTrue(Style.MINI !in Signals.allowedStyles(Kind.LINK))
+        assertEquals(5, Signals.minVolume(Style.MINI))
+    }
 }

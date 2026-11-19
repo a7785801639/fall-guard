@@ -39,11 +39,6 @@ class Prefs(ctx: Context) {
     val paired: Boolean get() = token.isNotEmpty() && urls.isNotEmpty()
 
     /** Домашний адрес пробуем первым: дома он быстрее и работает без интернета. */
-    /** Мини-тревога сверху экрана, когда телефон в руках (если дано разрешение «поверх других приложений»). */
-    var overlayAlarm: Boolean
-        get() = sp.getBoolean("overlay_alarm", true)
-        set(v) = sp.edit().putBoolean("overlay_alarm", v).apply()
-
     val urls: List<String> get() = listOf(lanUrl, publicUrl).filter { it.isNotEmpty() }.distinct()
 
     fun clear() = sp.edit().clear().apply()
