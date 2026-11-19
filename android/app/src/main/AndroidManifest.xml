@@ -78,19 +78,7 @@
                 android:value="Постоянная связь с домашним сервером присмотра для немедленной тревоги о падении человека" />
         </service>
 
-        <!-- Виджет на главный экран и плитка в шторке: состояние бабушки «одним взглядом» -->
-        <receiver
-            android:name=".FallGuardWidget"
-            android:exported="false"
-            android:label="FallGuard">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_status_info" />
-        </receiver>
-
+        <!-- Плитка в шторке: состояние бабушки «одним взглядом» -->
         <service
             android:name=".StatusTile"
             android:exported="true"
