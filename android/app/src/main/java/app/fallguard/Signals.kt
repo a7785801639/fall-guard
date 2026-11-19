@@ -141,22 +141,3 @@ object ServerClock {
 
     fun now(): Long = System.currentTimeMillis() + offsetMs
 }
-
-/** Размер кольца секундомера на экране тревоги: сколько места осталось под ним. */
-object AlarmLayout {
-    const val RING_MAX_DP = 180f
-    const val RING_MIN_DP = 84f
-    const val RING_MARGIN_DP = 8f
-
-    /** Диаметр кольца в dp или null, если места слишком мало и кольцо лучше убрать. */
-    /** Подпись «без ответа» — только в кольце, где ей хватает места. */
-    const val LABEL_MIN_DP = 130f
-
-    /** Цифры уменьшаются медленнее кольца, чтобы оставаться читаемыми. */
-    fun textScale(ringDp: Float): Float = (ringDp / RING_MAX_DP * 1.1f).coerceAtMost(1f)
-
-    fun ringSize(spareDp: Float): Float? {
-        val size = (spareDp - RING_MARGIN_DP).coerceAtMost(RING_MAX_DP)
-        return if (size < RING_MIN_DP) null else size
-    }
-}

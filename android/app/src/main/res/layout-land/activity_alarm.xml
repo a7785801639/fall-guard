@@ -19,31 +19,27 @@
         android:orientation="horizontal"
         android:padding="16dp">
 
-        <FrameLayout
+        <!-- Кадр вписан в левую половину целиком, в пропорциях камеры; плашка «Эфир» — на самом кадре -->
+        <app.fallguard.FitBox
+            android:id="@+id/alarmFrame"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1.1">
 
-            <!-- Кадр по центру по высоте; плашка «Эфир» — на самом кадре -->
             <FrameLayout
+                android:id="@+id/alarmFrameCard"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical">
+                android:layout_height="match_parent"
+                android:background="@drawable/frame_round"
+                android:foreground="@drawable/frame_border">
 
                 <ImageView
                     android:id="@+id/alarmImage"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:adjustViewBounds="true"
-                    android:background="@drawable/frame_round"
+                    android:layout_height="match_parent"
                     android:contentDescription="Кадр с камеры"
-                    android:foreground="@drawable/frame_border"
-                    android:maxHeight="360dp"
-                    android:minHeight="160dp"
-                    android:scaleType="fitCenter" />
+                    android:scaleType="centerCrop" />
 
-                <!-- «Эфир» — живое видео; касание переключает на снимок момента тревоги -->
                 <TextView
                     android:id="@+id/alarmLive"
                     android:layout_width="wrap_content"
@@ -59,7 +55,7 @@
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </FrameLayout>
-        </FrameLayout>
+        </app.fallguard.FitBox>
 
         <!-- Прокрутка обрезает по своему краю; поля — внутри, чтобы кольца значка помещались -->
         <ScrollView

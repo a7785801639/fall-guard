@@ -45,40 +45,8 @@ class AlarmActivity : Activity() {
         edgeToEdge()
         // Пока идёт подтверждение, сервер может уже снять тревогу — не обрываем анимацию
         AlertService.onAlarmStopped = { runOnUiThread { if (!closing) finish() } }
-        // Секундомер подстраивается под свободное место: кнопки и кадр важнее
-        findViewById<View>(R.id.alarmTimerBox).addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> fitTimer(v) }
         bind()
         enter()
-    }
-
-    /**
-     * Кольцо секундомера занимает свободное место под кадром: большое на высоких экранах,
-     * поменьше — где места меньше, и убирается, если верх и так не помещается (кадр важнее).
-     * Пересчитывается при каждой разметке: кадр с камеры приходит позже и меняет высоту.
-     */
-    private fun fitTimer(box: View) {
-        if (box.layoutParams.height != 0 || box.visibility == View.GONE) return // горизонтальная раскладка
-        val ring = findViewById<View>(R.id.alarmRingBox)
-        val scroll = box.parent?.parent as? android.widget.ScrollView
-        val content = scroll?.getChildAt(0)
-        if (scroll != null && content != null && content.height > scroll.height + 1) {
-            box.post { box.visibility = View.GONE }
-            return
-        }
-        val d = resources.displayMetrics.density
-        val size = AlarmLayout.ringSize(box.height / d)
-        if (size == null) { if (ring.visibility != View.INVISIBLE) ring.visibility = View.INVISIBLE; return }
-        val px = (size * d).toInt()
-        if (ring.layoutParams.width != px) {
-            box.post {
-                ring.layoutParams = ring.layoutParams.apply { width = px; height = px }
-                // Цифры внутри кольца уменьшаются вместе с ним
-                val ts = AlarmLayout.textScale(size)
-                findViewById<View>(R.id.alarmRingText)?.let { it.scaleX = ts; it.scaleY = ts }
-                findViewById<View>(R.id.alarmElapsedLabel)?.visibility = if (size >= AlarmLayout.LABEL_MIN_DP) View.VISIBLE else View.GONE
-                ring.visibility = View.VISIBLE
-            }
-        } else if (ring.visibility != View.VISIBLE) ring.visibility = View.VISIBLE
     }
 
     /**
@@ -212,7 +180,7 @@ class AlarmActivity : Activity() {
         )
         updateElapsed()
         findViewById<TextView>(R.id.alarmTime).text =
-            "ТРЕВОГА · " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
+            (if (info.base.isEmpty()) "ПРОВЕРКА\n" else "ТРЕВОГА\n") + "в " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(info.ts))
         findViewById<TextView>(R.id.alarmTitle).text = info.title
         findViewById<TextView>(R.id.alarmDesc).text = info.description
 
@@ -242,7 +210,7 @@ class AlarmActivity : Activity() {
         }
 
         val image = findViewById<ImageView>(R.id.alarmImage)
-        image.clipToOutline = true // скругление кадра (XML-атрибут работает только с API 31)
+        findViewById<View>(R.id.alarmFrameCard).clipToOutline = true // скругление кадра (XML-атрибут работает только с API 31)
         image.setOnClickListener { liveWanted = !liveWanted; renderChip(); if (liveWanted) startLive() else showEventShot() }
         alarmInfo = info
         eventShot = null
@@ -256,7 +224,7 @@ class AlarmActivity : Activity() {
                     if (data != null) {
                         val bmp = BitmapFactory.decodeByteArray(data, 0, data.size)
                         eventShot = bmp
-                        runOnUiThread { if (!isFinishing && !liveShowing) image.setImageBitmap(bmp) }
+                        runOnUiThread { if (!isFinishing && !liveShowing) setFrame(bmp) }
                         return@Thread
                     }
                     try { Thread.sleep(1200) } catch (_: InterruptedException) { return@Thread }
@@ -362,9 +330,15 @@ class AlarmActivity : Activity() {
         chip.setTextColor(if (liveWanted && liveShowing) 0xFFFF6B70.toInt() else 0xFFFFFFFF.toInt())
     }
 
+    /** Кадр показываем целиком: рамка принимает пропорции камеры. */
+    private fun setFrame(bmp: android.graphics.Bitmap) {
+        findViewById<ImageView>(R.id.alarmImage).setImageBitmap(bmp)
+        if (bmp.height > 0) findViewById<FitBox>(R.id.alarmFrame)?.aspect = bmp.width.toFloat() / bmp.height
+    }
+
     private fun showEventShot() {
         liveShowing = false
-        eventShot?.let { findViewById<ImageView>(R.id.alarmImage).setImageBitmap(it) }
+        eventShot?.let { setFrame(it) }
         renderChip()
     }
 
@@ -383,7 +357,7 @@ class AlarmActivity : Activity() {
                     fails = 0
                     runOnUiThread {
                         if (gen == liveGen && liveWanted && !isFinishing) {
-                            findViewById<ImageView>(R.id.alarmImage).setImageBitmap(bmp)
+                            setFrame(bmp)
                             if (!liveShowing) { liveShowing = true; renderChip() }
                         }
                     }

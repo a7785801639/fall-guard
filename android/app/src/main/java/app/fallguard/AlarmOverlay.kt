@@ -18,7 +18,6 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import kotlin.math.abs
@@ -108,8 +107,7 @@ class AlarmOverlay(private val ctx: Context) {
                 Signals.Kind.OTHER -> R.drawable.ic_k_alert
             },
         )
-        iconLabel(v.findViewById(R.id.ovAck), R.drawable.ic_b_check, "Принято, иду")
-        iconLabel(v.findViewById(R.id.ovOpen), R.drawable.ic_b_eye, "Смотреть")
+        v.findViewById<View>(R.id.ovAck).contentDescription = if (i.base.isEmpty()) "Выключить проверку" else "Принято, иду"
         val thumb = v.findViewById<ImageView>(R.id.ovThumb)
         thumb.clipToOutline = true
         if (i.imageUrl.isNotEmpty() && i.base.isNotEmpty()) {
@@ -129,12 +127,12 @@ class AlarmOverlay(private val ctx: Context) {
     private fun wire(v: View) {
         val card = v.findViewById<View>(R.id.ovCard)
         val pill = v.findViewById<View>(R.id.ovPill)
-        v.findViewById<Button>(R.id.ovAck).setOnClickListener {
+        v.findViewById<View>(R.id.ovAck).setOnClickListener {
             val i = info ?: return@setOnClickListener
             AlertService.start(ctx, if (i.base.isEmpty()) AlertService.ACTION_SILENCE else AlertService.ACTION_ACK, i.id)
             finish(true, "Принято", if (i.base.isEmpty()) "Это была проверка" else "Идите к ней — сирена выключена")
         }
-        v.findViewById<Button>(R.id.ovOpen).setOnClickListener { openFull() }
+        v.findViewById<View>(R.id.ovOpen).setOnClickListener { openFull() }
         pill.setOnClickListener { expand() }
         // Смахивание вверх — свернуть; касание — открыть на весь экран
         var y0 = 0f; var moved = false
@@ -182,9 +180,19 @@ class AlarmOverlay(private val ctx: Context) {
             )
             duration = 1300; start()
         }
-        val dot = v.findViewById<View>(R.id.ovPillDot)
-        anims += ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.25f).apply {
-            duration = 650; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
+        // Кнопка «Принято» мягко «дышит», как «ответить» на входящем вызове
+        val ack = v.findViewById<View>(R.id.ovAck)
+        anims += android.animation.AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(ack, View.SCALE_X, 1f, 1.08f).apply { repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE },
+                ObjectAnimator.ofFloat(ack, View.SCALE_Y, 1f, 1.08f).apply { repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE },
+            )
+            duration = 650; start()
+        }
+        for (id in intArrayOf(R.id.ovPillDot, R.id.ovDot)) {
+            anims += ObjectAnimator.ofFloat(v.findViewById<View>(id), View.ALPHA, 1f, 0.25f).apply {
+                duration = 650; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
+            }
         }
     }
 
@@ -229,8 +237,8 @@ class AlarmOverlay(private val ctx: Context) {
         val card = v.findViewById<View>(R.id.ovCard)
         if (ok) card.setBackgroundResource(R.drawable.overlay_card_ok)
         v.findViewById<View>(R.id.ovActions).visibility = View.GONE
-        v.findViewById<View>(R.id.ovGrip).visibility = View.GONE
         v.findViewById<View>(R.id.ovRing).alpha = 0f
+        v.findViewById<View>(R.id.ovDot).apply { alpha = 1f; backgroundTintList = android.content.res.ColorStateList.valueOf(ctx.getColor(R.color.calm)) }
         v.findViewById<TextView>(R.id.ovEyebrow).apply { text = if (ok) "ГОТОВО" else "ТРЕВОГА СНЯТА"; setTextColor(ctx.getColor(R.color.calm)) }
         v.findViewById<TextView>(R.id.ovTitle).text = title
         v.findViewById<TextView>(R.id.ovSub).text = sub
