@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,28 @@ def _normalize_video_encoder(val: str) -> str:
     return "auto"
 
 
+_HIKVISION_MAIN_CHANNEL_RE = re.compile(
+    r"(/Streaming/Channels/)101(?=$|[/?&])",
+    re.IGNORECASE,
+)
+
+
+def derive_rtsp_sub_url(rtsp_url: str, explicit_sub_url: str = "") -> str:
+    """
+    Возвращает URL субпотока камеры (360p):
+    если задан RTSP_SUB_URL (и не заглушка) — берёт его;
+    иначе для Hikvision /Streaming/Channels/101 заменяет канал на 102 с сохранением query-параметров.
+    """
+    exp = str(explicit_sub_url or "").strip()
+    if exp and not _is_placeholder(exp):
+        return exp
+    main_url = str(rtsp_url or "").strip()
+    if not main_url or _is_placeholder(main_url):
+        return ""
+    sub_url, count = _HIKVISION_MAIN_CHANNEL_RE.subn(r"\g<1>102", main_url, count=1)
+    return sub_url if count > 0 else ""
+
+
 @dataclass(frozen=True)
 class Settings:
     rtsp_url: str
@@ -99,6 +122,22 @@ class Settings:
     video_encoder: str = "auto"
     door_visit_idle_timeout_sec: float = 14400.0
     notify_camera_offline: bool = False
+    rtsp_sub_url: str = ""
+    dvr_enabled: bool = True
+    dvr_dir: Path | None = None
+    dvr_segment_seconds: int = 300
+    dvr_retention_days: float = 7.0
+    dvr_max_gb: float = 120.0
+    dvr_min_free_gb: float = 5.0
+    dvr_motion_hold_seconds: float = 15.0
+
+    def __post_init__(self) -> None:
+        if self.dvr_dir is None:
+            object.__setattr__(self, "dvr_dir", self.data_dir / "dvr")
+        if not self.rtsp_sub_url and self.camera_configured:
+            sub_derived = derive_rtsp_sub_url(self.rtsp_url)
+            if sub_derived:
+                object.__setattr__(self, "rtsp_sub_url", sub_derived)
 
     @property
     def camera_configured(self) -> bool:
@@ -179,9 +218,19 @@ class Settings:
 
         data_dir = Path(get_raw("DATA_DIR") or str(base_dir / "data"))
         models_dir = Path(get_raw("MODELS_DIR") or str(data_dir / "models"))
+        rtsp_url = get_raw("RTSP_URL")
+        rtsp_sub_url = derive_rtsp_sub_url(rtsp_url, get_raw("RTSP_SUB_URL"))
+        raw_dvr_dir = get_raw("DVR_DIR")
+        dvr_dir = Path(raw_dvr_dir) if raw_dvr_dir else (data_dir / "dvr")
+        dvr_enabled = get_bool("DVR_ENABLED", True)
+        dvr_segment_seconds = max(60, min(900, get_int("DVR_SEGMENT_SECONDS", 300)))
+        dvr_retention_days = max(0.5, min(30.0, get_float("DVR_RETENTION_DAYS", 7.0)))
+        dvr_max_gb = max(1.0, get_float("DVR_MAX_GB", 120.0))
+        dvr_min_free_gb = max(0.5, get_float("DVR_MIN_FREE_GB", 5.0))
+        dvr_motion_hold_seconds = max(3.0, get_float("DVR_MOTION_HOLD_SECONDS", 15.0))
 
         return cls(
-            rtsp_url=get_raw("RTSP_URL"),
+            rtsp_url=rtsp_url,
             tg_bot_token=get_raw("TG_BOT_TOKEN"),
             tg_chat_ids=chat_ids,
             data_dir=data_dir,
@@ -216,4 +265,12 @@ class Settings:
             video_encoder=video_encoder,
             door_visit_idle_timeout_sec=door_visit_idle_timeout_sec,
             notify_camera_offline=notify_camera_offline,
+            rtsp_sub_url=rtsp_sub_url,
+            dvr_enabled=dvr_enabled,
+            dvr_dir=dvr_dir,
+            dvr_segment_seconds=dvr_segment_seconds,
+            dvr_retention_days=dvr_retention_days,
+            dvr_max_gb=dvr_max_gb,
+            dvr_min_free_gb=dvr_min_free_gb,
+            dvr_motion_hold_seconds=dvr_motion_hold_seconds,
         )

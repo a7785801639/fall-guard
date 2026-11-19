@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -71,7 +72,7 @@ class FalseAlertFeedbackStore:
         tmp_path.write_bytes(content)
         os.replace(tmp_path, target_path)
 
-    def _write_json_atomic(self, target_path: Path, payload: dict[str, Any]) -> None:
+    def _write_json_atomic(self, target_path: Path, payload: Any) -> None:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = target_path.with_name(
             f"{target_path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
@@ -120,6 +121,7 @@ class FalseAlertFeedbackStore:
                 has_raw = (pkg_dir / "raw.jpg").is_file()
                 has_ann = (pkg_dir / "annotated.jpg").is_file()
                 has_mp4 = (pkg_dir / "clip.mp4").is_file()
+                has_motion = (pkg_dir / "motion_slice.json").is_file()
                 try:
                     rep_ts = float(item.get("reported_ts") or 0.0)
                 except (TypeError, ValueError):
@@ -131,6 +133,7 @@ class FalseAlertFeedbackStore:
                 loaded.append(
                     {
                         "alert_id": aid,
+                        "kind": str(item.get("kind") or "false_alert"),
                         "event_ts": item.get("event_ts"),
                         "reported_ts": round(rep_ts, 3),
                         "reported_time": str(item.get("reported_time") or dt.strftime("%H:%M:%S")),
@@ -145,6 +148,7 @@ class FalseAlertFeedbackStore:
                         "has_raw_jpg": has_raw,
                         "has_annotated_jpg": has_ann,
                         "has_mp4": has_mp4,
+                        "has_motion_log": has_motion,
                     }
                 )
             loaded.sort(key=lambda e: float(e.get("reported_ts") or 0.0), reverse=True)
@@ -409,9 +413,14 @@ class FalseAlertFeedbackStore:
                 "was_bed_latched",
                 existing_ctx.get("was_bed_latched", live_ctx.get("was_bed_latched")),
             )
+            motion_hist = rec_ctx.get("motion_history") or live_ctx.get("motion_history")
+            if isinstance(motion_hist, list) and motion_hist:
+                self._write_json_atomic(pkg_dir / "motion_slice.json", motion_hist)
+            has_motion_log = (pkg_dir / "motion_slice.json").is_file()
 
             context_payload: dict[str, Any] = {
                 "alert_id": alert_id,
+                "kind": str(existing_ctx.get("kind") or "false_alert"),
                 "event_ts": round(float(event_ts), 3) if isinstance(event_ts, (int, float)) else now_ts,
                 "reported_ts": round(reported_ts, 3),
                 "reported_time": reported_time,
@@ -430,11 +439,13 @@ class FalseAlertFeedbackStore:
                 "has_raw_jpg": has_raw_jpg,
                 "has_annotated_jpg": has_annotated_jpg,
                 "has_mp4": has_mp4,
+                "has_motion_log": has_motion_log,
             }
             self._write_json_atomic(ctx_path, context_payload)
 
             entry: dict[str, Any] = {
                 "alert_id": alert_id,
+                "kind": context_payload["kind"],
                 "event_ts": context_payload["event_ts"],
                 "reported_ts": context_payload["reported_ts"],
                 "reported_time": reported_time,
@@ -449,6 +460,7 @@ class FalseAlertFeedbackStore:
                 "has_raw_jpg": has_raw_jpg,
                 "has_annotated_jpg": has_annotated_jpg,
                 "has_mp4": has_mp4,
+                "has_motion_log": has_motion_log,
             }
             if existing_idx is not None:
                 self._entries[existing_idx] = entry
@@ -498,6 +510,120 @@ class FalseAlertFeedbackStore:
 
             self._save_index_locked()
             return True
+
+    def save_dvr_flag(
+        self,
+        event_ts: float,
+        kind: str = "phantom_visitor",
+        note: str = "",
+        reporter_name: str = "Веб-пульт",
+        zones_dict: dict[str, Any] | None = None,
+        camera_dict: dict[str, Any] | None = None,
+        motion_slice: list[dict[str, Any]] | None = None,
+        segment_ref: dict[str, Any] | None = None,
+        snapshot_jpg: bytes | None = None,
+    ) -> dict[str, Any]:
+        """Сохраняет диагностический пакет момента 7-дневного архива (DVR + срез логов движения)."""
+        kind_titles = {
+            "phantom_visitor": "Ложный «Свой» / фантом",
+            "false_standup": "Ложное вставание / посадка",
+            "wrong_role": "Перепутана роль человека",
+            "missed_alert": "Пропущенная тревога",
+            "other": "Замечание по архиву",
+        }
+        clean_kind = str(kind or "other").strip().lower()
+        if clean_kind not in kind_titles:
+            clean_kind = "other"
+
+        ts_ev = float(event_ts)
+        dt_ev = datetime.fromtimestamp(ts_ev)
+        flag_id = f"dvr_{dt_ev.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(2)}"
+        now_ts = round(time.time(), 3)
+        now_dt = datetime.fromtimestamp(now_ts)
+        clean_note = str(note or "").strip()[:500]
+        clean_rep = str(reporter_name or "").strip() or "Веб-пульт"
+        slice_list = list(motion_slice or [])
+
+        with self._lock:
+            pkg_dir = self._resolve_pkg_dir_locked(flag_id)
+            if pkg_dir is None:
+                raise ValueError("Не удалось создать каталог пакета")
+            pkg_dir.mkdir(parents=True, exist_ok=True)
+
+            if snapshot_jpg:
+                self._write_bytes_atomic(pkg_dir / "annotated.jpg", bytes(snapshot_jpg))
+            self._write_json_atomic(pkg_dir / "motion_slice.json", slice_list)
+
+            nearest_state = "event"
+            if slice_list:
+                nearest = min(
+                    slice_list,
+                    key=lambda r: abs(float(r.get("ts") or 0.0) - ts_ev),
+                )
+                nearest_state = str(nearest.get("st") or "event")
+
+            has_ann = (pkg_dir / "annotated.jpg").is_file()
+            ctx_payload: dict[str, Any] = {
+                "alert_id": flag_id,
+                "kind": clean_kind,
+                "event_ts": round(ts_ev, 3),
+                "event_time": dt_ev.strftime("%H:%M:%S"),
+                "event_date": dt_ev.strftime("%Y-%m-%d"),
+                "reported_ts": now_ts,
+                "reported_time": now_dt.strftime("%H:%M:%S"),
+                "reported_date": now_dt.strftime("%Y-%m-%d"),
+                "reporter_name": clean_rep,
+                "state": nearest_state,
+                "severity": "warning",
+                "title": kind_titles[clean_kind],
+                "description": clean_note,
+                "zones": dict(zones_dict or {}),
+                "camera": dict(camera_dict or {}),
+                "segment_ref": dict(segment_ref or {}) if segment_ref else None,
+                "motion_samples": len(slice_list),
+                "has_raw_jpg": False,
+                "has_annotated_jpg": has_ann,
+                "has_mp4": False,
+                "has_motion_log": True,
+            }
+            self._write_json_atomic(pkg_dir / "context.json", ctx_payload)
+
+            entry: dict[str, Any] = {
+                "alert_id": flag_id,
+                "kind": clean_kind,
+                "event_ts": ctx_payload["event_ts"],
+                "reported_ts": now_ts,
+                "reported_time": ctx_payload["reported_time"],
+                "reported_date": ctx_payload["reported_date"],
+                "reporter_chat_id": "",
+                "reporter_name": clean_rep,
+                "state": nearest_state,
+                "severity": "warning",
+                "title": kind_titles[clean_kind],
+                "description": clean_note,
+                "patient_track_id": None,
+                "has_raw_jpg": False,
+                "has_annotated_jpg": has_ann,
+                "has_mp4": False,
+                "has_motion_log": True,
+            }
+            self._entries.insert(0, entry)
+            self._enforce_quota_locked()
+            self._save_index_locked()
+            return dict(entry)
+
+    def list_flags_in_range(self, start_ts: float, end_ts: float) -> list[dict[str, Any]]:
+        st = float(start_ts)
+        en = float(end_ts)
+        with self._lock:
+            out: list[dict[str, Any]] = []
+            for e in self._entries:
+                ev_t = e.get("event_ts")
+                if not isinstance(ev_t, (int, float)):
+                    ev_t = e.get("reported_ts") or 0.0
+                if st <= float(ev_t) <= en:
+                    out.append(dict(e))
+            return out
 
     def list_feedback(self, limit: int = 50) -> list[dict[str, Any]]:
         max_items = max(1, int(limit))

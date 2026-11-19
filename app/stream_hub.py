@@ -8,7 +8,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import IO, Any, AsyncIterator
+from typing import IO, Any, AsyncIterator, Callable
 
 from .capture import CREATE_NO_WINDOW, _is_rtsp_url, _redact_url, find_ffmpeg_bin
 
@@ -50,6 +50,129 @@ def build_passthrough_fmp4_cmd(
         str(max(40_000, int(frag_duration_us))),
         "pipe:1",
     ]
+
+
+def build_transcode_fmp4_cmd(
+    ffmpeg_bin: str,
+    rtsp_url: str,
+    target_size: tuple[int, int],
+    fps_limit: int = 12,
+    bitrate_kbps: int = 1200,
+    use_nvenc: bool = True,
+    frag_duration_us: int = 200_000,
+) -> list[str]:
+    """Формирует команду FFmpeg для масштабирования RTSP-потока в лёгкий fMP4 (NVENC / libx264)."""
+    w = max(2, int(target_size[0]) & ~1)
+    h = max(2, int(target_size[1]) & ~1)
+    cmd: list[str] = [
+        ffmpeg_bin,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-rtsp_transport",
+        "tcp",
+        "-timeout",
+        "5000000",
+        "-i",
+        rtsp_url,
+        "-an",
+        "-sn",
+        "-vf",
+        f"scale={w}:{h}",
+    ]
+    if fps_limit > 0:
+        cmd.extend(["-r", str(int(fps_limit))])
+    if use_nvenc:
+        cmd.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "27"])
+    else:
+        cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-crf", "26"])
+    if bitrate_kbps > 0:
+        kb = int(bitrate_kbps)
+        cmd.extend(["-maxrate", f"{kb}k", "-bufsize", f"{kb * 2}k"])
+    cmd.extend(
+        [
+            "-g",
+            "15",
+            "-bf",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+            "-f",
+            "mp4",
+            "-movflags",
+            "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
+            "-frag_duration",
+            str(max(40_000, int(frag_duration_us))),
+            "pipe:1",
+        ]
+    )
+    return cmd
+
+
+def _iter_box_spans(buf: bytes | bytearray, start: int, end: int) -> list[tuple[bytes, int, int, int]]:
+    """Возвращает (box_type, box_start, body_start, box_end) для прямых дочерних боксов в диапазоне."""
+    out: list[tuple[bytes, int, int, int]] = []
+    pos = start
+    while pos + 8 <= end:
+        size32 = struct.unpack_from(">I", buf, pos)[0]
+        btype = bytes(buf[pos + 4 : pos + 8])
+        if size32 == 1:
+            if pos + 16 > end:
+                break
+            bsize = struct.unpack_from(">Q", buf, pos + 8)[0]
+            hdr = 16
+        elif size32 == 0:
+            bsize = end - pos
+            hdr = 8
+        else:
+            bsize = size32
+            hdr = 8
+        if bsize < hdr or pos + bsize > end:
+            break
+        out.append((btype, pos, pos + hdr, pos + bsize))
+        pos += bsize
+    return out
+
+
+def rebase_moof_tfdt(frag_bytes: bytes, base_tfdt: int | None) -> tuple[bytes, int]:
+    """
+    Вычитает base_tfdt из baseMediaDecodeTime (tfdt) во всех traf-боксах фрагмента moof.
+    Длина бокса не меняется (offset в trun сохраняется), а незакрытый fMP4-сегмент начинается с 0:00.
+    """
+    if not frag_bytes:
+        return frag_bytes, 0 if base_tfdt is None else int(base_tfdt)
+    buf = bytearray(frag_bytes)
+    eff_base: int | None = int(base_tfdt) if base_tfdt is not None else None
+    changed = False
+
+    for top_type, _, top_body, top_end in _iter_box_spans(buf, 0, len(buf)):
+        if top_type != b"moof":
+            continue
+        for m_type, _, m_body, m_end in _iter_box_spans(buf, top_body, top_end):
+            if m_type != b"traf":
+                continue
+            for t_type, _, t_body, t_end in _iter_box_spans(buf, m_body, m_end):
+                if t_type != b"tfdt" or t_body + 8 > t_end:
+                    continue
+                version = buf[t_body]
+                if version == 0:
+                    orig = struct.unpack_from(">I", buf, t_body + 4)[0]
+                    if eff_base is None:
+                        eff_base = orig
+                    new_val = max(0, orig - eff_base)
+                    struct.pack_into(">I", buf, t_body + 4, new_val & 0xFFFFFFFF)
+                    changed = True
+                elif version == 1 and t_body + 12 <= t_end:
+                    orig = struct.unpack_from(">Q", buf, t_body + 4)[0]
+                    if eff_base is None:
+                        eff_base = orig
+                    new_val = max(0, orig - eff_base)
+                    struct.pack_into(">Q", buf, t_body + 4, new_val)
+                    changed = True
+
+    final_base = 0 if eff_base is None else eff_base
+    return (bytes(buf) if changed else frag_bytes), final_base
 
 
 def _iter_direct_child_boxes(payload: bytes) -> list[tuple[bytes, int, bytes]]:
@@ -391,12 +514,29 @@ class H264StreamHub:
         queue_maxsize: int = 24,
         ffmpeg_bin: str | None = None,
         read_timeout_sec: float = 12.0,
+        fallback_rtsp_url: str = "",
+        target_size: tuple[int, int] | None = None,
+        fps_limit: int = 0,
+        bitrate_kbps: int = 0,
+        hwaccel: str = "auto",
+        on_demand: bool = False,
+        idle_stop_sec: float = 15.0,
+        quality_label: str = "1080p",
     ) -> None:
         self._rtsp_url = rtsp_url.strip()
+        self._fallback_rtsp_url = fallback_rtsp_url.strip()
         self._frag_duration_us = max(40_000, int(frag_duration_us))
         self._queue_maxsize = max(6, int(queue_maxsize))
         self._explicit_ffmpeg = ffmpeg_bin
         self._read_timeout_sec = max(3.0, float(read_timeout_sec))
+        self._target_size = target_size
+        self._fps_limit = max(0, int(fps_limit))
+        self._bitrate_kbps = max(0, int(bitrate_kbps))
+        mode = str(hwaccel or "auto").strip().lower()
+        self._hwaccel = mode if mode in ("auto", "nvenc", "nvdec", "off") else "auto"
+        self._on_demand = bool(on_demand)
+        self._idle_stop_sec = max(2.0, float(idle_stop_sec))
+        self._quality_label = str(quality_label or "1080p")
 
         self._lock = threading.RLock()
         self._proc_lock = threading.Lock()
@@ -415,6 +555,12 @@ class H264StreamHub:
         self._last_frag_mono: float = 0.0
         self._last_error: str = ""
         self._ready_event = threading.Event()
+        self._wake_event = threading.Event()
+
+        self._using_fallback = False
+        self._nvenc_failed = self._hwaccel == "off"
+        self._active_requested = False
+        self._last_consumer_mono: float = 0.0
 
         # Временное состояние сборщика боксов
         self._parser = IsoBmffStreamParser()
@@ -423,6 +569,7 @@ class H264StreamHub:
         self._pending_raw_moof: bytes | None = None
 
         self._subscribers: set[StreamSubscription] = set()
+        self._sinks: set[Callable[[bytes | None, StreamFragment, list[StreamFragment]], None]] = set()
         self._started = False
         self._stop_event = threading.Event()
         self._reload_event = threading.Event()
@@ -501,7 +648,43 @@ class H264StreamHub:
                 "codecs": self._codec_string,
                 "width": self._width,
                 "height": self._height,
+                "quality": self._quality_label,
             }
+
+    def add_fragment_sink(
+        self,
+        cb: Callable[[bytes | None, StreamFragment, list[StreamFragment]], None],
+    ) -> None:
+        with self._lock:
+            self._sinks.add(cb)
+            self._active_requested = True
+            self._last_consumer_mono = time.monotonic()
+            self._wake_event.set()
+
+    def remove_fragment_sink(
+        self,
+        cb: Callable[[bytes | None, StreamFragment, list[StreamFragment]], None],
+    ) -> None:
+        with self._lock:
+            self._sinks.discard(cb)
+            if not self._subscribers and not self._sinks:
+                self._active_requested = False
+                self._last_consumer_mono = time.monotonic()
+
+    def ensure_active(self) -> None:
+        """Будит on_demand-поток при обращении клиента или приёмника фрагментов."""
+        with self._lock:
+            self._active_requested = True
+            self._last_consumer_mono = time.monotonic()
+            self._wake_event.set()
+            should_start = (
+                self._started
+                and not self._stop_event.is_set()
+                and (_is_rtsp_url(self._rtsp_url) or _is_rtsp_url(self._fallback_rtsp_url))
+                and (self._thread is None or not self._thread.is_alive())
+            )
+        if should_start:
+            self.start()
 
     def reset_stream_state(self) -> None:
         with self._lock:
@@ -513,7 +696,7 @@ class H264StreamHub:
     def feed_bytes(self, chunk: bytes | bytearray | memoryview) -> list[StreamFragment]:
         """
         Разбирает очередной кусок fMP4-потока, обновляет init_segment / GOP-кэш
-        и рассылает готовые фрагменты moof+mdat активным подписчикам.
+        и рассылает готовые фрагменты moof+mdat активным подписчикам и DVR-приёмникам.
         """
         emitted: list[StreamFragment] = []
         boxes = self._parser.feed(chunk)
@@ -569,9 +752,17 @@ class H264StreamHub:
                         self._gop_bytes += len(frag_bytes)
 
                     subs_snapshot = list(self._subscribers)
+                    sinks_snapshot = list(self._sinks)
+                    init_snapshot = self._init_segment
+                    gop_snapshot = list(self._gop_cache)
 
                 for sub in subs_snapshot:
                     sub.push_threadsafe(frag)
+                for sink in sinks_snapshot:
+                    try:
+                        sink(init_snapshot, frag, gop_snapshot)
+                    except Exception:
+                        pass
                 emitted.append(frag)
 
         return emitted
@@ -596,14 +787,21 @@ class H264StreamHub:
                 except asyncio.QueueFull:
                     break
             self._subscribers.add(sub)
+            self._active_requested = True
+            self._last_consumer_mono = time.monotonic()
+            self._wake_event.set()
         return sub
 
     def _unsubscribe(self, sub: StreamSubscription) -> None:
         with self._lock:
             self._subscribers.discard(sub)
+            if not self._subscribers and not self._sinks:
+                self._active_requested = False
+                self._last_consumer_mono = time.monotonic()
 
     async def wait_ready(self, timeout: float = 5.0) -> bool:
         """Асинхронно ожидает готовности init_segment (ftyp + moov) до timeout секунд."""
+        self.ensure_active()
         if self.is_ready:
             return True
         deadline = time.monotonic() + max(0.05, float(timeout))
@@ -646,18 +844,22 @@ class H264StreamHub:
         except Exception:
             pass
 
-    def reload_url(self, new_rtsp_url: str) -> None:
+    def reload_url(self, new_rtsp_url: str, fallback_rtsp_url: str | None = None) -> None:
         cleaned = new_rtsp_url.strip()
         with self._lock:
             self._rtsp_url = cleaned
+            if fallback_rtsp_url is not None:
+                self._fallback_rtsp_url = fallback_rtsp_url.strip()
+            self._using_fallback = False
             self._init_segment = None
             self._gop_cache.clear()
             self._gop_bytes = 0
             self._ready_event.clear()
             self._reload_event.set()
+            self._wake_event.set()
             should_spawn = (
                 self._started
-                and _is_rtsp_url(cleaned)
+                and (_is_rtsp_url(cleaned) or _is_rtsp_url(self._fallback_rtsp_url))
                 and not self._stop_event.is_set()
                 and (self._thread is None or not self._thread.is_alive())
             )
@@ -668,7 +870,8 @@ class H264StreamHub:
     def start(self) -> None:
         with self._lock:
             self._started = True
-            if not _is_rtsp_url(self._rtsp_url):
+            has_any_url = _is_rtsp_url(self._rtsp_url) or _is_rtsp_url(self._fallback_rtsp_url)
+            if not has_any_url:
                 self._last_error = "RTSP_URL не задан для прямого H.264 потока"
                 return
             if self._thread and self._thread.is_alive():
@@ -677,7 +880,7 @@ class H264StreamHub:
             self._reload_event.clear()
             self._thread = threading.Thread(
                 target=self._run_loop,
-                name="h264-stream-hub",
+                name=f"h264-stream-hub-{self._quality_label}",
                 daemon=True,
             )
             self._thread.start()
@@ -685,6 +888,7 @@ class H264StreamHub:
     def stop(self) -> None:
         self._stop_event.set()
         self._reload_event.set()
+        self._wake_event.set()
         self._kill_active_proc()
         thread = self._thread
         if thread and thread.is_alive():
@@ -700,18 +904,64 @@ class H264StreamHub:
             return self._explicit_ffmpeg
         return find_ffmpeg_bin()
 
+    def _should_sleep_on_demand_locked(self) -> bool:
+        if not self._on_demand:
+            return False
+        if self._subscribers or self._sinks:
+            return False
+        if self._active_requested and (time.monotonic() - self._last_consumer_mono) <= self._idle_stop_sec:
+            return False
+        return True
+
     def _run_loop(self) -> None:
         backoff = 1.5
         read_buf = bytearray(65536)
+        consecutive_no_frag = 0
 
         try:
             while not self._stop_event.is_set():
                 if self._reload_event.is_set():
                     self._reload_event.clear()
                     backoff = 1.5
+                    consecutive_no_frag = 0
 
                 with self._lock:
-                    url = self._rtsp_url
+                    if self._should_sleep_on_demand_locked():
+                        if self._init_segment is not None:
+                            self._init_segment = None
+                            self._gop_cache.clear()
+                            self._gop_bytes = 0
+                            self._ready_event.clear()
+                        self._active_requested = False
+                        self._wake_event.clear()
+                        need_sleep = True
+                    else:
+                        need_sleep = False
+                if need_sleep:
+                    self._wake_event.wait(0.5)
+                    continue
+
+                with self._lock:
+                    if self._using_fallback and _is_rtsp_url(self._fallback_rtsp_url):
+                        url = self._fallback_rtsp_url
+                        eff_target = self._target_size or (640, 360)
+                        eff_fps = self._fps_limit or 10
+                        eff_bitrate = self._bitrate_kbps or 400
+                    elif _is_rtsp_url(self._rtsp_url):
+                        url = self._rtsp_url
+                        eff_target = self._target_size
+                        eff_fps = self._fps_limit
+                        eff_bitrate = self._bitrate_kbps
+                    elif _is_rtsp_url(self._fallback_rtsp_url):
+                        url = self._fallback_rtsp_url
+                        eff_target = self._target_size or (640, 360)
+                        eff_fps = self._fps_limit or 10
+                        eff_bitrate = self._bitrate_kbps or 400
+                    else:
+                        url = ""
+                        eff_target = self._target_size
+                        eff_fps = self._fps_limit
+                        eff_bitrate = self._bitrate_kbps
 
                 if not _is_rtsp_url(url):
                     self._stop_event.wait(1.0)
@@ -725,11 +975,23 @@ class H264StreamHub:
                     continue
 
                 self.reset_stream_state()
-                cmd = build_passthrough_fmp4_cmd(
-                    ffmpeg_bin=ffmpeg_bin,
-                    rtsp_url=url,
-                    frag_duration_us=self._frag_duration_us,
-                )
+                tried_nvenc = bool(eff_target is not None and not self._nvenc_failed)
+                if eff_target is None:
+                    cmd = build_passthrough_fmp4_cmd(
+                        ffmpeg_bin=ffmpeg_bin,
+                        rtsp_url=url,
+                        frag_duration_us=self._frag_duration_us,
+                    )
+                else:
+                    cmd = build_transcode_fmp4_cmd(
+                        ffmpeg_bin=ffmpeg_bin,
+                        rtsp_url=url,
+                        target_size=eff_target,
+                        fps_limit=eff_fps,
+                        bitrate_kbps=eff_bitrate,
+                        use_nvenc=tried_nvenc,
+                        frag_duration_us=self._frag_duration_us,
+                    )
 
                 try:
                     proc = subprocess.Popen(
@@ -742,7 +1004,7 @@ class H264StreamHub:
                     )
                 except Exception as exc:
                     with self._lock:
-                        self._last_error = f"Ошибка старта FFmpeg passthrough: {_redact_url(str(exc))}"
+                        self._last_error = f"Ошибка старта FFmpeg ({self._quality_label}): {_redact_url(str(exc))}"
                     self._stop_event.wait(backoff)
                     backoff = min(10.0, backoff * 1.5)
                     continue
@@ -753,6 +1015,7 @@ class H264StreamHub:
 
                 stderr_tail: deque[str] = deque(maxlen=15)
                 closed_flag = threading.Event()
+                idle_killed = threading.Event()
 
                 def _drain_err(err_io: IO[bytes] | None) -> None:
                     if err_io is None:
@@ -772,8 +1035,18 @@ class H264StreamHub:
                     while not closed_flag.wait(1.0):
                         if target_proc.poll() is not None:
                             return
+                        with self._lock:
+                            sleep_idle = self._should_sleep_on_demand_locked()
+                        if sleep_idle:
+                            idle_killed.set()
+                            self._kill_active_proc()
+                            return
                         if (time.monotonic() - self._last_io_mono) > self._read_timeout_sec:
-                            logger.warning("Таймаут H264StreamHub (>%.1f с без пакетов), реконнект", self._read_timeout_sec)
+                            logger.warning(
+                                "Таймаут H264StreamHub [%s] (>%.1f с без пакетов), реконнект",
+                                self._quality_label,
+                                self._read_timeout_sec,
+                            )
                             self._kill_active_proc()
                             return
 
@@ -799,6 +1072,7 @@ class H264StreamHub:
                         frags = self.feed_bytes(mv[: int(n)])
                         if frags:
                             got_any_fragment = True
+                            consecutive_no_frag = 0
                             backoff = 1.5
                 except Exception as exc:
                     with self._lock:
@@ -807,13 +1081,35 @@ class H264StreamHub:
                     closed_flag.set()
                     self._kill_active_proc()
 
-                if self._stop_event.is_set() or self._reload_event.is_set():
+                if self._stop_event.is_set() or self._reload_event.is_set() or idle_killed.is_set():
                     continue
 
                 if stderr_tail:
                     with self._lock:
                         self._last_error = stderr_tail[-1]
                 if not got_any_fragment:
+                    if tried_nvenc:
+                        self._nvenc_failed = True
+                        logger.warning(
+                            "h264_nvenc недоступен для профиля %s, переключение на CPU libx264",
+                            self._quality_label,
+                        )
+                        self._stop_event.wait(0.2)
+                        continue
+                    consecutive_no_frag += 1
+                    if (
+                        consecutive_no_frag >= 3
+                        and self._fallback_rtsp_url
+                        and _is_rtsp_url(self._fallback_rtsp_url)
+                        and not self._using_fallback
+                    ):
+                        self._using_fallback = True
+                        consecutive_no_frag = 0
+                        logger.warning(
+                            "Субпоток %s недоступен, переключение на масштабирование основного потока",
+                            self._quality_label,
+                        )
+                        continue
                     self._stop_event.wait(backoff)
                     backoff = min(10.0, backoff * 1.5)
                 else:

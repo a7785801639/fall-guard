@@ -1,4 +1,4 @@
-const CACHE_NAME = "fallguard-shell-v51";
+const CACHE_NAME = "fallguard-shell-v52";
 const SHELL_ASSETS = [
   "/",
   "/manifest.webmanifest",
@@ -32,11 +32,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Живые потоки MJPEG, снимки и видеоклипы с HTTP Range не перехватываем
+  // Живые потоки MJPEG, снимки, DVR и видеоклипы с HTTP Range не перехватываем
   if (
     url.pathname.startsWith("/api/stream") ||
+    url.pathname.startsWith("/api/mjpeg") ||
     url.pathname.startsWith("/api/snapshot") ||
     url.pathname.startsWith("/api/clips/") ||
+    url.pathname.startsWith("/api/dvr/") ||
     req.headers.has("range")
   ) {
     return;

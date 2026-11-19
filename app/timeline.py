@@ -423,15 +423,47 @@ class TimelineStore:
                 out.append(item)
         return out
 
-    def summary_stats(
+    def slice_range(
         self,
-        now_ts: float | None = None,
-        window_sec: float = 86400.0,
+        start_ts: float,
+        end_ts: float,
     ) -> dict[str, Any]:
-        ts = float(time.time() if now_ts is None else now_ts)
-        win = max(60.0, float(window_sec))
-        cutoff = ts - win
+        """Возвращает интервалы хроники строго в заданном диапазоне [start_ts, end_ts]."""
+        st_bound = float(start_ts)
+        en_bound = max(st_bound, float(end_ts))
+        with self._lock:
+            visible: list[dict[str, Any]] = []
+            for sp in self._spans:
+                en = float(sp["end"])
+                st = float(sp["start"])
+                if en < st_bound or st > en_bound:
+                    continue
+                if en == st_bound and st < st_bound:
+                    continue
+                clamped_st = max(st_bound, st)
+                clamped_en = min(en_bound, max(clamped_st, en))
+                visible.append(
+                    {
+                        "start": clamped_st,
+                        "end": clamped_en,
+                        "state": sp["state"],
+                        "tone": sp["tone"],
+                        "label": sp["label"],
+                    }
+                )
+            return {
+                "window_sec": en_bound - st_bound,
+                "start_ts": st_bound,
+                "now_ts": en_bound,
+                "spans": visible,
+            }
 
+    def _summarize_interval_locked(
+        self,
+        cutoff: float,
+        ts: float,
+        win: float,
+    ) -> dict[str, Any]:
         in_bed_sec = 0.0
         calm_sec = 0.0
         caregiver_sec = 0.0
@@ -449,54 +481,53 @@ class TimelineStore:
 
         prev_out_end: float | None = None
 
-        with self._lock:
-            for sp in self._spans:
-                en = float(sp["end"])
-                st = float(sp["start"])
-                if en < cutoff or (en == cutoff and st < cutoff):
-                    continue
-                clamped_st = max(cutoff, st)
-                clamped_en = min(ts, max(clamped_st, en))
-                dur = max(0.0, clamped_en - clamped_st)
-                state = str(sp.get("state") or "idle")
+        for sp in self._spans:
+            en = float(sp["end"])
+            st = float(sp["start"])
+            if en < cutoff or (en == cutoff and st < cutoff) or st > ts:
+                continue
+            clamped_st = max(cutoff, st)
+            clamped_en = min(ts, max(clamped_st, en))
+            dur = max(0.0, clamped_en - clamped_st)
+            state = str(sp.get("state") or "idle")
 
-                if state == "in_bed":
-                    in_bed_sec += dur
-                    calm_sec += dur
-                    tracked_sec += dur
-                    prev_out_end = None
-                elif state == "idle":
-                    calm_sec += dur
-                    tracked_sec += dur
-                elif state == "caregiver":
-                    caregiver_sec += dur
-                    tracked_sec += dur
-                    caregiver_visits_count += 1
-                    prev_out_end = None
-                elif state == "paused":
-                    paused_sec += dur
-                    tracked_sec += dur
-                    prev_out_end = None
-                elif state == "offline":
-                    offline_sec += dur
-                else:
-                    tracked_sec += dur
-                    if state == "sitting_up":
-                        sit_up_count += 1
-                    elif state == "left_bed":
-                        raw_left_bed_count += 1
-                        if prev_out_end is None or (clamped_st - prev_out_end) > 60.0:
-                            out_of_bed_episodes += 1
-                        prev_out_end = clamped_en
-                    elif state == "missing":
-                        missing_count += 1
-                        if prev_out_end is None or (clamped_st - prev_out_end) > 60.0:
-                            out_of_bed_episodes += 1
-                        prev_out_end = clamped_en
-                    elif state == "fallen":
-                        fall_count += 1
-                    elif state == "help_call":
-                        help_call_count += 1
+            if state == "in_bed":
+                in_bed_sec += dur
+                calm_sec += dur
+                tracked_sec += dur
+                prev_out_end = None
+            elif state == "idle":
+                calm_sec += dur
+                tracked_sec += dur
+            elif state == "caregiver":
+                caregiver_sec += dur
+                tracked_sec += dur
+                caregiver_visits_count += 1
+                prev_out_end = None
+            elif state == "paused":
+                paused_sec += dur
+                tracked_sec += dur
+                prev_out_end = None
+            elif state == "offline":
+                offline_sec += dur
+            else:
+                tracked_sec += dur
+                if state == "sitting_up":
+                    sit_up_count += 1
+                elif state == "left_bed":
+                    raw_left_bed_count += 1
+                    if prev_out_end is None or (clamped_st - prev_out_end) > 60.0:
+                        out_of_bed_episodes += 1
+                    prev_out_end = clamped_en
+                elif state == "missing":
+                    missing_count += 1
+                    if prev_out_end is None or (clamped_st - prev_out_end) > 60.0:
+                        out_of_bed_episodes += 1
+                    prev_out_end = clamped_en
+                elif state == "fallen":
+                    fall_count += 1
+                elif state == "help_call":
+                    help_call_count += 1
 
         return {
             "window_sec": win,
@@ -514,3 +545,24 @@ class TimelineStore:
             "help_call_count": help_call_count,
             "caregiver_visits_count": caregiver_visits_count,
         }
+
+    def summary_range(
+        self,
+        start_ts: float,
+        end_ts: float,
+    ) -> dict[str, Any]:
+        st = float(start_ts)
+        en = max(st + 1.0, float(end_ts))
+        with self._lock:
+            return self._summarize_interval_locked(st, en, en - st)
+
+    def summary_stats(
+        self,
+        now_ts: float | None = None,
+        window_sec: float = 86400.0,
+    ) -> dict[str, Any]:
+        ts = float(time.time() if now_ts is None else now_ts)
+        win = max(60.0, float(window_sec))
+        cutoff = ts - win
+        with self._lock:
+            return self._summarize_interval_locked(cutoff, ts, win)

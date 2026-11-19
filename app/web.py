@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import gzip
 import json
 import mimetypes
 import time
 import urllib.parse
+from datetime import datetime
 
 mimetypes.add_type("font/woff2", ".woff2")
 from collections.abc import Mapping
@@ -110,6 +112,14 @@ class DutyPayload(BaseModel):
 
 class TelegramAuthPayload(BaseModel):
     init_data: str = ""
+
+
+class DvrFlagPayload(BaseModel):
+    ts: float
+    kind: str = "phantom_visitor"
+    note: str = ""
+    reporter: str = "Веб-пульт"
+    snapshot_b64: str = ""
 
 
 _PUBLIC_SHELL_GET_PATHS: frozenset[str] = frozenset(
@@ -283,6 +293,29 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
                 "on_duty": engine.duty_now(_sub_duty(cid)),
             }
         return {"kind": "lan", "id": "", "name": "Этот браузер", "mode": "all", "enabled": True}
+
+    def _resolve_stream_quality(
+        raw_quality: str,
+        user_agent: str = "",
+        auth_kind: str = "lan",
+    ) -> str:
+        q = str(raw_quality or "auto").strip().lower()
+        if q in ("360p", "720p", "1080p"):
+            return q
+        ua = str(user_agent or "").lower()
+        is_mobile = (auth_kind == "device") or any(
+            kw in ua for kw in ("android", "iphone", "ipad", "ipod", "mobile")
+        )
+        return "360p" if is_mobile else "1080p"
+
+    def _auth_kind_from_parts(
+        headers: Mapping[str, str],
+        cookies: Mapping[str, str],
+        query_params: Mapping[str, str],
+    ) -> str:
+        if _authenticate_device(headers, cookies, query_params) is not None:
+            return "device"
+        return "lan"
 
     def _is_public_shell_route(method: str, path: str) -> bool:
         m = method.upper()
@@ -735,7 +768,7 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
     @app.get("/api/status")
     def status(
         request: Request,
-        window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0),
+        window_sec: float = Query(default=21600.0, ge=60.0, le=604800.0),
         lite: int = Query(default=0),
     ) -> Response:
         data = engine.get_status(timeline_window_sec=window_sec)
@@ -780,7 +813,7 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
         return {"ok": True, **res}
 
     @app.get("/api/timeline")
-    def get_timeline(window_sec: float = Query(default=21600.0, ge=60.0, le=86400.0)) -> dict:
+    def get_timeline(window_sec: float = Query(default=21600.0, ge=60.0, le=604800.0)) -> dict:
         tl = engine.timeline.to_dict(view_window_sec=window_sec)
         clips = [
             c
@@ -1185,15 +1218,149 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
         engine.log_event("info", f"Удалён эталон лица ({filename})", category="system")
         return {"ok": True, "faces": engine.faces.list_photos()}
 
+    @app.get("/api/dvr/days")
+    def dvr_days() -> dict:
+        return {"ok": True, **engine.dvr.list_days()}
+
+    @app.get("/api/dvr/day")
+    def dvr_day(
+        date: str | None = Query(default=None),
+        start_ts: float | None = Query(default=None),
+        end_ts: float | None = Query(default=None),
+    ) -> dict:
+        if start_ts is not None and end_ts is not None:
+            st = float(start_ts)
+            en = min(st + 86400.0, max(st + 60.0, float(end_ts)))
+            eff_date = datetime.fromtimestamp(st).strftime("%Y-%m-%d")
+        else:
+            eff_date = (date or datetime.now().strftime("%Y-%m-%d")).strip()
+            try:
+                day_dt = datetime.strptime(eff_date, "%Y-%m-%d")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Некорректная дата (нужно YYYY-MM-DD)") from exc
+            st = day_dt.timestamp()
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            en = (
+                min(max(st + 60.0, time.time() + 10.0), st + 86400.0)
+                if eff_date == today_str
+                else (st + 86400.0)
+            )
+
+        return {
+            "ok": True,
+            "date": eff_date,
+            "start_ts": round(st, 3),
+            "end_ts": round(en, 3),
+            "timeline": engine.timeline.slice_range(st, en),
+            "summary": engine.timeline.summary_range(st, en),
+            "segments": engine.dvr.list_segments(st, en),
+            "motion_buckets": engine.motion_log.motion_buckets(st, en, bucket_sec=300.0),
+            "clips": [
+                c
+                for c in engine.archive.list_clips(limit=200)
+                if st <= float(c.get("ts") or 0.0) <= en
+            ],
+            "flags": engine.feedback.list_flags_in_range(st, en),
+        }
+
+    @app.get("/api/dvr/resolve")
+    def dvr_resolve(
+        request: Request,
+        ts: float = Query(...),
+        quality: str = Query(default="auto"),
+    ) -> dict:
+        raw_q = str(quality or "auto").strip().lower()
+        prefer_tier = "low" if raw_q == "360p" else "auto"
+        seg = engine.dvr.resolve_best_segment(ts, prefer_tier=prefer_tier)
+        return {
+            "ok": seg is not None,
+            "ts": round(float(ts), 3),
+            "segment": seg,
+        }
+
+    @app.get("/api/dvr/segments/{seg_id}.mp4")
+    def dvr_segment_file(seg_id: str, download: int = Query(default=0)) -> FileResponse:
+        seg_path = engine.dvr.get_segment_path(seg_id)
+        if seg_path is None:
+            raise HTTPException(status_code=404, detail="Сегмент архива не найден")
+        disposition = "attachment" if download == 1 else "inline"
+        return FileResponse(
+            seg_path,
+            media_type="video/mp4",
+            filename=f"{seg_id}.mp4",
+            content_disposition_type=disposition,
+        )
+
+    @app.get("/api/dvr/motion")
+    def dvr_motion(
+        start_ts: float = Query(...),
+        end_ts: float = Query(...),
+        max_points: int = Query(default=2400, ge=10, le=5000),
+    ) -> dict:
+        st = float(start_ts)
+        en = float(end_ts)
+        if en < st:
+            raise HTTPException(status_code=400, detail="end_ts меньше start_ts")
+        if (en - st) > 3600.0:
+            en = st + 3600.0
+        frames = engine.motion_log.query_range(st, en, max_points=max_points)
+        return {
+            "ok": True,
+            "start_ts": round(st, 3),
+            "end_ts": round(en, 3),
+            "frames": frames,
+        }
+
+    @app.post("/api/dvr/flag")
+    def dvr_flag_moment(
+        request: Request,
+        payload: DvrFlagPayload,
+    ) -> dict:
+        snap_bytes: bytes | None = None
+        raw_b64 = str(payload.snapshot_b64 or "").strip()
+        if raw_b64:
+            if "," in raw_b64 and raw_b64.startswith("data:"):
+                raw_b64 = raw_b64.split(",", 1)[1]
+            if len(raw_b64) <= 3_000_000:
+                try:
+                    snap_bytes = base64.b64decode(raw_b64, validate=False)
+                except Exception:
+                    snap_bytes = None
+        me = _resolve_identity(request)
+        reporter = str(payload.reporter or "").strip() or str(me.get("name") or "Веб-пульт")
+        try:
+            return engine.flag_dvr_moment(
+                event_ts=payload.ts,
+                kind=payload.kind,
+                note=payload.note,
+                reporter_name=reporter,
+                snapshot_jpg=snap_bytes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/snapshot.jpg")
-    def snapshot_jpg(overlay: int = Query(default=1)) -> Response:
-        jpeg = engine.get_latest_clean_jpeg() if overlay == 0 else engine.get_latest_jpeg()
+    def snapshot_jpg(
+        request: Request,
+        overlay: int = Query(default=1),
+        quality: str = Query(default="auto"),
+    ) -> Response:
+        auth_kind = _auth_kind_from_parts(request.headers, request.cookies, request.query_params)
+        eff_q = _resolve_stream_quality(
+            quality,
+            user_agent=request.headers.get("user-agent", ""),
+            auth_kind=auth_kind,
+        )
+        jpeg = engine.get_jpeg_scaled(overlay=(overlay != 0), quality=eff_q)
         if not jpeg:
             raise HTTPException(status_code=503, detail="Кадр ещё не готов")
         return Response(
             content=jpeg,
             media_type="image/jpeg",
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "X-Video-Quality": eff_q,
+            },
         )
 
     def _json_maybe_gzip(request: Request, data: Any) -> Response:
@@ -1205,11 +1372,15 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             headers["Content-Encoding"] = "gzip"
         return Response(content=body, media_type="application/json", headers=headers)
 
-    def _build_mjpeg_response(use_overlay: bool, max_frames: int = 0) -> StreamingResponse:
+    def _build_mjpeg_response(
+        use_overlay: bool,
+        max_frames: int = 0,
+        quality: str = "1080p",
+    ) -> StreamingResponse:
         async def _gen() -> AsyncGenerator[bytes, None]:
             sent = 0
             while True:
-                jpeg = engine.get_latest_jpeg() if use_overlay else engine.get_latest_clean_jpeg()
+                jpeg = engine.get_jpeg_scaled(overlay=use_overlay, quality=quality)
                 if jpeg:
                     yield (
                         b"--frame\r\n"
@@ -1223,43 +1394,59 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
         return StreamingResponse(
             _gen(),
             media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "X-Video-Quality": quality,
+            },
         )
 
     @app.get("/api/mjpeg")
     def stream_mjpeg_clean(
+        request: Request,
         overlay: int = Query(default=0),
         frames: int = Query(default=0, ge=0, le=1000),
+        quality: str = Query(default="auto"),
     ) -> StreamingResponse:
-        return _build_mjpeg_response(use_overlay=(overlay != 0), max_frames=frames)
+        auth_kind = _auth_kind_from_parts(request.headers, request.cookies, request.query_params)
+        eff_q = _resolve_stream_quality(quality, request.headers.get("user-agent", ""), auth_kind)
+        return _build_mjpeg_response(use_overlay=(overlay != 0), max_frames=frames, quality=eff_q)
 
     @app.get("/api/stream.mjpg")
     def stream_mjpg(
+        request: Request,
         overlay: int = Query(default=1),
         frames: int = Query(default=0, ge=0, le=1000),
+        quality: str = Query(default="auto"),
     ) -> StreamingResponse:
-        return _build_mjpeg_response(use_overlay=(overlay != 0), max_frames=frames)
+        auth_kind = _auth_kind_from_parts(request.headers, request.cookies, request.query_params)
+        eff_q = _resolve_stream_quality(quality, request.headers.get("user-agent", ""), auth_kind)
+        return _build_mjpeg_response(use_overlay=(overlay != 0), max_frames=frames, quality=eff_q)
 
     @app.get("/api/stream.mp4")
     async def stream_fmp4(
+        request: Request,
         max_fragments: int = Query(default=0, ge=0, le=10000),
+        quality: str = Query(default="auto"),
     ) -> StreamingResponse:
+        auth_kind = _auth_kind_from_parts(request.headers, request.cookies, request.query_params)
+        eff_q = _resolve_stream_quality(quality, request.headers.get("user-agent", ""), auth_kind)
+        hub = engine.get_stream_hub(eff_q)
         wait_t = (
-            3.5
-            if (engine.settings.camera_configured or engine.stream_hub.is_ready)
-            else 0.15
+            6.0
+            if (eff_q == "720p" and engine.settings.camera_configured)
+            else (3.5 if (engine.settings.camera_configured or hub.is_ready) else 0.15)
         )
-        ready = await engine.stream_hub.wait_ready(timeout=wait_t)
-        init_seg = engine.stream_hub.init_segment
+        ready = await hub.wait_ready(timeout=wait_t)
+        init_seg = hub.init_segment
         if not ready or not init_seg:
             raise HTTPException(
                 status_code=503,
-                detail=engine.stream_hub.last_error or "Прямой H.264 поток ещё не готов",
+                detail=hub.last_error or "Прямой H.264 поток ещё не готов",
             )
 
         async def _fmp4_gen() -> AsyncGenerator[bytes, None]:
             sent_frags = 0
-            async with engine.stream_hub.subscribe(include_gop=True) as sub:
+            async with hub.subscribe(include_gop=True) as sub:
                 yield init_seg
                 async for frag_bytes in sub:
                     yield frag_bytes
@@ -1272,7 +1459,8 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             media_type="video/mp4",
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "X-Stream-Codecs": engine.stream_hub.codec_string,
+                "X-Stream-Codecs": hub.codec_string,
+                "X-Video-Quality": eff_q,
             },
         )
 
@@ -1304,27 +1492,44 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             return
         await websocket.accept()
         try:
-            wait_t = (
-                3.5
-                if (engine.settings.camera_configured or engine.stream_hub.is_ready)
-                else 0.15
+            raw_q = str(websocket.query_params.get("quality", "auto"))
+            auth_kind = _auth_kind_from_parts(
+                websocket.headers,
+                websocket.cookies,
+                websocket.query_params,
             )
-            ready = await engine.stream_hub.wait_ready(timeout=wait_t)
-            init_seg = engine.stream_hub.init_segment
+            eff_q = _resolve_stream_quality(
+                raw_q,
+                user_agent=websocket.headers.get("user-agent", ""),
+                auth_kind=auth_kind,
+            )
+            hub = engine.get_stream_hub(eff_q)
+            wait_t = (
+                6.0
+                if (eff_q == "720p" and engine.settings.camera_configured)
+                else (3.5 if (engine.settings.camera_configured or hub.is_ready) else 0.15)
+            )
+            ready = await hub.wait_ready(timeout=wait_t)
+            init_seg = hub.init_segment
             if not ready or not init_seg:
+                fb_url = (
+                    "/api/mjpeg?overlay=0"
+                    if raw_q.strip().lower() in ("", "auto")
+                    else f"/api/mjpeg?overlay=0&quality={eff_q}"
+                )
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "fallback": "/api/mjpeg?overlay=0",
-                        "detail": engine.stream_hub.last_error or "Прямой H.264 поток недоступен",
+                        "fallback": fb_url,
+                        "detail": hub.last_error or "Прямой H.264 поток недоступен",
                     }
                 )
                 await websocket.close(code=1011)
                 return
 
-            await websocket.send_json(engine.stream_hub.get_init_message())
+            await websocket.send_json(hub.get_init_message())
             await websocket.send_bytes(init_seg)
-            async with engine.stream_hub.subscribe(include_gop=True) as sub:
+            async with hub.subscribe(include_gop=True) as sub:
                 async for frag_bytes in sub:
                     await websocket.send_bytes(frag_bytes)
         except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):

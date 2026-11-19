@@ -14,6 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, AsyncIterator, Iterator, Sequence
 
 import cv2
@@ -27,6 +28,7 @@ from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
 from .camera_health import CameraHealthMonitor
 from .devices import AlertFeed, DeviceStore, alert_matches_mode, duty_covers, duty_on
+from .dvr import DvrRecorderStore
 from .feedback import FalseAlertFeedbackStore, is_safe_alert_id
 from .geometry import (
     KP_L_ANKLE,
@@ -41,6 +43,7 @@ from .geometry import (
     point_in_polygon,
     sanitize_collapsed_bed_keypoints,
 )
+from .motion_log import MotionLogStore
 from .notifier import TelegramNotifier
 from .patient_id import FaceRegistry, PatientIdentifier, Role, TrackIdentity
 from .qr_svg import render_qr_svg
@@ -725,10 +728,10 @@ class FallGuardEngine:
         self.settings.models_dir.mkdir(parents=True, exist_ok=True)
 
         self.zones = ZoneStore(self.settings.data_dir / "zones.json")
-        # Храним полные 24 часа на диске, поддерживая отдачу окна 6 ч и 24 ч
+        # Храним полные 7 суток хроники состояний на диске
         self.timeline = TimelineStore(
             self.settings.data_dir / "timeline.json",
-            window_sec=86400.0,
+            window_sec=604800.0,
         )
         # Сводки ночей и список падений — для графиков по неделям и отчёта врачу
         self.care = CareHistory(self.settings.data_dir / "care_history.json")
@@ -840,11 +843,55 @@ class FallGuardEngine:
             if (self.settings.camera_configured and stream_enabled)
             else ""
         )
-        self.stream_hub = H264StreamHub(rtsp_url=stream_rtsp)
+        sub_rtsp = (
+            str(getattr(self.settings, "rtsp_sub_url", "") or "").strip()
+            if (self.settings.camera_configured and stream_enabled)
+            else ""
+        )
+        self.stream_hub = H264StreamHub(rtsp_url=stream_rtsp, quality_label="1080p")
+        self.stream_hub_low = H264StreamHub(
+            rtsp_url=sub_rtsp,
+            fallback_rtsp_url=stream_rtsp,
+            target_size=None if sub_rtsp else (640, 360),
+            fps_limit=0 if sub_rtsp else 10,
+            bitrate_kbps=0 if sub_rtsp else 400,
+            hwaccel=venc_pref,
+            on_demand=False,
+            quality_label="360p",
+        )
+        self.stream_hub_mid = H264StreamHub(
+            rtsp_url=stream_rtsp,
+            target_size=(1280, 720),
+            fps_limit=15,
+            bitrate_kbps=1400,
+            hwaccel=venc_pref,
+            on_demand=True,
+            idle_stop_sec=15.0,
+            quality_label="720p",
+        )
+
+        dvr_root = Path(getattr(self.settings, "dvr_dir", None) or (self.settings.data_dir / "dvr"))
+        self.motion_log = MotionLogStore(
+            dvr_root,
+            retention_days=float(getattr(self.settings, "dvr_retention_days", 7.0)),
+        )
+        self.dvr = DvrRecorderStore(
+            dvr_dir=dvr_root,
+            segment_seconds=int(getattr(self.settings, "dvr_segment_seconds", 300)),
+            retention_days=float(getattr(self.settings, "dvr_retention_days", 7.0)),
+            max_gb=float(getattr(self.settings, "dvr_max_gb", 120.0)),
+            min_free_gb=float(getattr(self.settings, "dvr_min_free_gb", 5.0)),
+            motion_hold_seconds=float(getattr(self.settings, "dvr_motion_hold_seconds", 15.0)),
+            motion_log=self.motion_log,
+            get_camera_transform=self.get_camera_transform,
+        )
+        if bool(getattr(self.settings, "dvr_enabled", True)):
+            self.dvr.attach_hubs(self.stream_hub_low, self.stream_hub)
 
         self._latest_jpeg: bytes | None = None
         self._latest_clean_jpeg: bytes | None = None
         self._latest_clean_frame_id: int = 0
+        self._scaled_jpeg_cache: dict[tuple[bool, str], tuple[bytes, bytes]] = {}
         self._latest_raw_frame: np.ndarray | None = None
         self._latest_observations: list[PoseObservation] = []
         self._latest_identities: dict[int, TrackIdentity] = {}
@@ -950,6 +997,10 @@ class FallGuardEngine:
             self.capture.start()
             if getattr(self.settings, "stream_h264_enabled", True):
                 self.stream_hub.start()
+                self.stream_hub_low.start()
+                self.stream_hub_mid.start()
+            if getattr(self.settings, "dvr_enabled", True):
+                self.dvr.start(self.stream_hub_low, self.stream_hub)
         if self.settings.telegram_configured:
             self.notifier.start_polling()
         self._stop_event.clear()
@@ -958,7 +1009,11 @@ class FallGuardEngine:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self.stream_hub_mid.stop()
+        self.stream_hub_low.stop()
         self.stream_hub.stop()
+        self.dvr.stop()
+        self.motion_log.flush()
         self.capture.stop()
         self.notifier.stop()
         if self._worker_thread and self._worker_thread.is_alive():
@@ -971,6 +1026,86 @@ class FallGuardEngine:
         self.timeline.flush()
         with self._lock:
             self._save_events_locked()
+
+    def get_stream_hub(self, quality: str = "1080p") -> H264StreamHub:
+        q = str(quality or "1080p").strip().lower()
+        if q == "360p":
+            if self.stream_hub_low.is_ready or self.settings.camera_configured or not self.stream_hub.is_ready:
+                return self.stream_hub_low
+            return self.stream_hub
+        if q == "720p":
+            if self.stream_hub_mid.is_ready or self.settings.camera_configured or not self.stream_hub.is_ready:
+                return self.stream_hub_mid
+            return self.stream_hub
+        return self.stream_hub
+
+    def get_jpeg_scaled(self, overlay: bool = True, quality: str = "1080p") -> bytes | None:
+        q = str(quality or "1080p").strip().lower()
+        base = self.get_latest_jpeg() if overlay else self.get_latest_clean_jpeg()
+        if not base or q not in ("360p", "720p"):
+            return base
+
+        cache_key = (bool(overlay), q)
+        with self._lock:
+            cached = self._scaled_jpeg_cache.get(cache_key)
+            if cached is not None and cached[0] is base:
+                return cached[1]
+
+        arr = np.frombuffer(base, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return base
+        h, w = img.shape[:2]
+        target_w = 640 if q == "360p" else 1280
+        if w <= target_w:
+            scaled_bytes = base
+        else:
+            target_h = max(2, int(round(h * (target_w / float(w)))) & ~1)
+            resized = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            jpg_q = 75 if q == "360p" else 80
+            ok, enc = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), jpg_q])
+            scaled_bytes = enc.tobytes() if ok else base
+
+        with self._lock:
+            self._scaled_jpeg_cache[cache_key] = (base, scaled_bytes)
+        return scaled_bytes
+
+    def flag_dvr_moment(
+        self,
+        event_ts: float,
+        kind: str = "phantom_visitor",
+        note: str = "",
+        reporter_name: str = "Веб-пульт",
+        snapshot_jpg: bytes | None = None,
+    ) -> dict[str, Any]:
+        ts_val = float(event_ts)
+        clean_rep = str(reporter_name or "").strip() or "Веб-пульт"
+        motion_slice = self.motion_log.recent_slice(window_sec=30.0, around_ts=ts_val)
+        seg_ref = self.dvr.resolve_best_segment(ts_val, prefer_tier="auto")
+        zones_dict = self.zones.get().to_dict()
+        cam_dict = self.get_camera_transform()
+        entry = self.feedback.save_dvr_flag(
+            event_ts=ts_val,
+            kind=kind,
+            note=note,
+            reporter_name=clean_rep,
+            zones_dict=zones_dict,
+            camera_dict=cam_dict,
+            motion_slice=motion_slice,
+            segment_ref=seg_ref,
+            snapshot_jpg=snapshot_jpg,
+        )
+        self._log_event(
+            "info",
+            f"Отметка по архиву: {entry['title']} ({clean_rep})",
+            category="system",
+        )
+        return {
+            "ok": True,
+            "flag": entry,
+            "segment_ref": seg_ref,
+            "motion_samples": len(motion_slice),
+        }
 
     def get_latest_jpeg(self) -> bytes | None:
         with self._lock:
@@ -2408,6 +2543,12 @@ class FallGuardEngine:
                 "server_tz_offset_min": round(-(time.altzone if time.localtime().tm_isdst > 0 else time.timezone) / 60),
                 "feedback_stats": feedback_stats,
                 "recent_clips": recent_clips,
+                "dvr": (
+                    self.dvr.status_summary()
+                    if getattr(self.settings, "dvr_enabled", True)
+                    else {"enabled": False}
+                ),
+                "video_qualities": ["auto", "360p", "720p", "1080p"],
             }
 
     def clear_door_visit(self) -> dict[str, Any]:
@@ -2643,12 +2784,17 @@ class FallGuardEngine:
                     mp4_bytes = mp4_path.read_bytes()
 
         zones_now = self.zones.get()
+        around_ev_ts = fallback_clip.get("ts") if fallback_clip else None
         live_context: dict[str, Any] = {
             "state": self.fsm.state.value,
             "telemetry_snapshot": self.get_telemetry_snapshot(),
             "baseline_in_bed": dict(getattr(self.fsm, "baseline_in_bed", {})),
             "zones": zones_now.to_dict(),
             "was_bed_latched": self._is_patient_in_bed_latched(),
+            "motion_history": self.motion_log.recent_slice(
+                window_sec=25.0,
+                around_ts=float(around_ev_ts) if isinstance(around_ev_ts, (int, float)) else None,
+            ),
         }
         fb_entry = self.feedback.mark_false_alert(
             alert_id=clean_id,
@@ -3135,6 +3281,7 @@ class FallGuardEngine:
             "baseline_in_bed": dict(getattr(self.fsm, "baseline_in_bed", {})),
             "zones": self.zones.get().to_dict(),
             "was_bed_latched": self._is_patient_in_bed_latched(),
+            "motion_history": self.motion_log.recent_slice(window_sec=25.0),
         }
         self.feedback.register_recent_alert(
             alert_id=alert_id,
@@ -3350,6 +3497,44 @@ class FallGuardEngine:
                 )
                 night_ir_now = _detect_night_ir_frame(frame, self.identifier)
                 self._handle_camera_health(frame, night_ir_now)
+
+                frame_opt_motion = float(
+                    _compute_roi_optical_motion(cur_opt_gray, prev_opt_gray, (0.0, 0.0, 1.0, 1.0)) or 0.0
+                )
+                wall_now = time.time()
+                fsm_timers = {
+                    "sit": round(float(getattr(self.fsm, "_sit_timer", 0.0) or 0.0), 2),
+                    "sc": round(float(getattr(self.fsm, "_sit_clear_timer", 0.0) or 0.0), 2),
+                    "lv": round(float(getattr(self.fsm, "_leave_timer", 0.0) or 0.0), 2),
+                    "fl": round(float(getattr(self.fsm, "_fall_timer", 0.0) or 0.0), 2),
+                }
+                self.motion_log.record(
+                    ts=wall_now,
+                    state=state_now.value,
+                    status_reason=getattr(self.fsm, "status_reason", ""),
+                    optical_motion=frame_opt_motion,
+                    caregiver_nearby=caregiver_nearby,
+                    door_visit_active=bool(getattr(self.identifier, "door_visit_active", False)),
+                    patient_in_bed_latched=patient_in_bed_latched,
+                    is_night_ir=night_ir_now,
+                    timers=fsm_timers,
+                    tracks_ui=tracks_ui,
+                    raw_observations=raw_observations,
+                )
+                if getattr(self.settings, "dvr_enabled", True):
+                    has_moving_track = any(
+                        not t.get("is_still", True)
+                        for t in tracks_ui
+                        if not t.get("virtual_presence")
+                    )
+                    if (
+                        frame_opt_motion >= 0.012
+                        or has_moving_track
+                        or state_now not in (PatientState.IN_BED, PatientState.IDLE, PatientState.PAUSED)
+                        or len(raw_observations) > len(live_observations)
+                        or caregiver_nearby
+                    ):
+                        self.dvr.notify_activity(wall_ts=wall_now)
 
                 done_mono = time.monotonic()
                 if last_tick_mono > 0.0:

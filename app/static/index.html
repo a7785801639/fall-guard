@@ -312,8 +312,51 @@
     .vp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
     .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); }
     .chip.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #FF4D57; }
-    .vp-btns { display: flex; gap: 6px; }
+    .vp-btns { display: flex; gap: 6px; align-items: center; }
     .vp-btn { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); }
+    .vp-btn.vp-qbtn { width: auto; min-width: 48px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: -0.01em; color: #fff; }
+    .tl-side { display: flex; flex-direction: column; gap: 4px; flex: none; }
+    .tl-dvr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 8px; background: var(--fill); color: var(--muted); font-size: 11.5px; font-weight: 600; transition: background 0.15s, color 0.15s; }
+    .tl-dvr-btn svg { width: 13px; height: 13px; }
+    @media (hover: hover) { .tl-dvr-btn:hover { background: var(--fill-2); color: var(--text); } }
+    /* 7-дневный архив и реплей логов движения */
+    .dvr-wrap { display: grid; gap: 14px; }
+    .dvr-days { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+    .dvr-days::-webkit-scrollbar { display: none; }
+    .dvr-day-btn { flex: none; display: grid; gap: 1px; text-align: left; padding: 8px 12px; border-radius: 12px; background: var(--raise-2); color: var(--muted); font-size: 12px; transition: background 0.15s, color 0.15s; border: 1px solid transparent; }
+    .dvr-day-btn b { font-size: 13.5px; color: var(--text); font-weight: 650; white-space: nowrap; }
+    .dvr-day-btn[aria-pressed="true"] { background: var(--calm-soft); border-color: rgba(91, 224, 161, 0.35); color: var(--calm); }
+    .dvr-day-btn[aria-pressed="true"] b { color: var(--calm); }
+    .dvr-store-bar { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; justify-content: space-between; }
+    .dvr-player-card { border-radius: 16px; overflow: hidden; background: var(--raise-2); border: 1px solid var(--line); display: grid; }
+    .dvr-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
+    .dvr-stage video, .dvr-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .dvr-stage video { object-fit: contain; }
+    .dvr-stage canvas { pointer-events: none; z-index: 2; }
+    .dvr-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: var(--muted); font-size: 13.5px; z-index: 1; background: rgba(11, 12, 15, 0.72); }
+    .dvr-badge { position: absolute; left: 10px; top: 10px; z-index: 3; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.68); backdrop-filter: blur(8px); font-size: 12px; font-weight: 650; color: #fff; }
+    .dvr-info { padding: 10px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+    .dvr-info b { color: var(--text); }
+    .dvr-ctrl { padding: 8px 10px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border-top: 1px solid var(--line); }
+    .dvr-ctrl .btn.sm { min-height: 32px; padding: 0 10px; font-size: 12.5px; }
+    .dvr-ctrl .dvr-flag-btn { margin-left: auto; background: var(--warn-soft); color: var(--warn); }
+    .dvr-daybar { position: relative; padding: 10px 12px; border-radius: 14px; background: var(--raise-2); display: grid; gap: 6px; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .dvr-motion-bars { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; align-items: end; height: 28px; gap: 1px; }
+    .dvr-motion-bars i { display: block; background: rgba(126, 168, 255, 0.45); border-radius: 2px 2px 0 0; min-height: 2px; }
+    .dvr-motion-bars i.hot { background: var(--warn); }
+    .dvr-motion-bars i.phantom { background: #F06292; }
+    .dvr-ribbon { position: relative; height: 28px; border-radius: 8px; background: #171A20; overflow: hidden; cursor: pointer; }
+    .dvr-ribbon i { position: absolute; top: 0; bottom: 0; min-width: 2px; }
+    .dvr-ribbon i.t-calm { background: #1A3A2E; } .dvr-ribbon i.t-caregiver { background: #2A4C8C; } .dvr-ribbon i.t-warn { background: #F5B23A; } .dvr-ribbon i.t-alarm { background: var(--alarm-strong); } .dvr-ribbon i.t-paused { background: #2D323C; }
+    .dvr-hd-line { position: relative; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+    .dvr-hd-line i { position: absolute; top: 0; bottom: 0; background: var(--calm); opacity: 0.75; min-width: 2px; }
+    .dvr-cur { position: absolute; top: 8px; bottom: 26px; width: 2px; background: #fff; pointer-events: none; z-index: 3; }
+    .dvr-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); }
+    .dvr-episodes { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+    .dvr-ep { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--raise-2); text-align: left; font-size: 13px; transition: background 0.15s; }
+    @media (hover: hover) { .dvr-ep:hover { background: var(--fill); } }
+    .dvr-ep time { font-weight: 700; color: var(--text); flex: none; }
+    .dvr-ep span { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .vp-btn svg { width: 17px; height: 17px; }
     #btnOverlay[aria-pressed="false"] { opacity: 0.5; }
     @media (hover: hover) and (pointer: fine) {
@@ -970,6 +1013,7 @@
               <div class="vp-chips"><span class="chip fs-status" id="chipStatus"><i></i><span id="chipStatusText"></span></span><span class="chip live" id="chipLight" hidden>Эфир</span><span class="scrub-badge num" id="scrubBadge" hidden></span><span class="chip" id="chipVisit" hidden>Визит родственника</span><span class="chip warn-chip" id="chipStall" hidden>Видео подвисло · переподключаю</span><span class="chip warn-chip" id="chipLost" hidden></span></div>
               <div class="vp-btns">
                 <button class="vp-btn theater-x" onclick="theaterExit()" aria-label="Свернуть видео" title="Свернуть видео"><svg class="ico"><use href="#i-x"/></svg></button>
+                <button class="vp-btn vp-qbtn num" id="btnQuality" onclick="qualityMenu(this)" aria-label="Качество видео" title="Разрешение видео">Авто</button>
                 <button class="vp-btn" id="btnPip" hidden onclick="enterPip()" aria-label="Маленькое окно" title="Видео в маленьком окне поверх других приложений"><svg class="ico"><use href="#i-pip"/></svg></button>
                 <button class="vp-btn" id="btnShot" onclick="saveFrame()" aria-label="Сохранить кадр" title="Сохранить кадр (C)"><svg class="ico"><use href="#i-camera"/></svg></button>
                 <button class="vp-btn" id="btnOverlay" aria-pressed="true" onclick="toggleOverlay()" aria-label="Показывать разметку" title="Подписи и скелеты людей на видео"><svg class="ico"><use href="#i-eye"/></svg></button>
@@ -992,9 +1036,12 @@
               <button class="btn sm primary" id="btnSaveZone" onclick="saveDraw()" disabled>Сохранить</button>
             </div>
           <section class="timeline" aria-label="Хроника">
-            <div class="seg" id="winSeg">
-              <button aria-pressed="true" onclick="setWindow(21600)">6 ч</button>
-              <button aria-pressed="false" onclick="setWindow(86400)">24 ч</button>
+            <div class="tl-side">
+              <div class="seg" id="winSeg">
+                <button aria-pressed="true" onclick="setWindow(21600)">6 ч</button>
+                <button aria-pressed="false" onclick="setWindow(86400)">24 ч</button>
+              </div>
+              <button class="tl-dvr-btn" id="btnArchive7d" onclick="openArchive7d()" title="Видео и логи движения за 7 дней"><svg class="ico"><use href="#i-history"/></svg><span>Архив 7 дн</span></button>
             </div>
             <div class="tl-track">
               <div class="ribbon-wrap" id="ribbonWrap"><div class="ribbon" id="ribbon"></div><span class="now-dot" id="nowDot"></span></div>
@@ -1418,7 +1465,46 @@
     lastWarnState = lvl === "warn" ? src.state : "";
   }, 1300);
 
-  /* ---------- Живое видео: fMP4 по WebSocket (MSE) с резервом MJPEG ---------- */
+  /* ---------- Живое видео: fMP4 по WebSocket (MSE) с резервом MJPEG и выбором качества ---------- */
+  const QUALITY_MODES = ["auto", "360p", "720p", "1080p"];
+  const normQuality = (q) => (QUALITY_MODES.includes(q) ? q : "auto");
+  let videoQuality = normQuality(lsGet("fg_quality", "auto"));
+  const isPhoneClient = () => document.body.classList.contains("pip") || matchMedia("(max-width: 820px), (pointer: coarse)").matches || Boolean(native);
+  const effectiveQuality = () => (videoQuality === "auto" ? (isPhoneClient() ? "360p" : "1080p") : videoQuality);
+  function syncQualityBtn() {
+    const b = $("btnQuality"); if (!b) return;
+    const eff = effectiveQuality();
+    b.textContent = videoQuality === "auto" ? ("Авто·" + (eff === "1080p" ? "HD" : eff)) : videoQuality;
+    b.title = "Разрешение видео: " + (videoQuality === "auto" ? `Авто (сейчас ${eff})` : videoQuality);
+  }
+  function setVideoQuality(next) {
+    next = normQuality(next);
+    if (next === videoQuality) return;
+    videoQuality = next;
+    lsSet("fg_quality", next);
+    syncQualityBtn();
+    waitingFrame = true; syncVpMsg();
+    startStream(true);
+    renderSheet();
+    toast("Видео: " + (next === "auto" ? `Авто (${effectiveQuality()})` : next), "info");
+  }
+  function qualityMenu(el) {
+    const r = el.getBoundingClientRect();
+    const eff = effectiveQuality();
+    const opts = [
+      ["auto", `Авто (сейчас ${eff})`],
+      ["360p", "360p · для телефона"],
+      ["720p", "720p · среднее"],
+      ["1080p", "1080p · чёткое"],
+    ];
+    showMenu(r.right - 220, r.bottom + 6, "Качество видео", opts.map(([v, lbl]) => ({
+      label: lbl,
+      icon: videoQuality === v ? "i-check" : "i-blank",
+      cls: videoQuality === v ? "on" : "",
+      fn: () => setVideoQuality(v),
+    })));
+  }
+
   const video = $("liveVideo"), img = $("liveImg"), viewport = $("viewport");
   const MSE = window.ManagedMediaSource || window.MediaSource || null;
   let ws = null, ms = null, sb = null, msUrl = "", queue = [], session = 0, fails = 0, lastChunk = Date.now(), reTimer = 0, mjpeg = false;
@@ -1443,7 +1529,7 @@
     video.hidden = true;
     try { video.pause(); video.removeAttribute("src"); video.load(); } catch (_) {}
     img.hidden = false;
-    img.src = withAuth("/api/mjpeg?overlay=0&t=" + Date.now());
+    img.src = withAuth("/api/mjpeg?overlay=0&quality=" + encodeURIComponent(effectiveQuality()) + "&t=" + Date.now());
     lastChunk = Date.now();
   }
   function trimBuffer() {
@@ -1509,7 +1595,7 @@
     const sid = ++session;
     teardown(false);
     let sock;
-    try { sock = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + withAuth("/ws/stream")); } catch (_) { useMjpeg(); return; }
+    try { sock = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + withAuth("/ws/stream?quality=" + encodeURIComponent(effectiveQuality()))); } catch (_) { useMjpeg(); return; }
     sock.binaryType = "arraybuffer";
     ws = sock; lastChunk = Date.now();
     sock.onmessage = (ev) => {
@@ -2059,7 +2145,7 @@
   document.addEventListener("pointerdown", (e) => {
     if (!$("menu").hidden && menuOwner && e.target.closest && e.target.closest("button, [role=button], label.btn") === menuOwner) { const o = menuOwner; hideMenu(); swallowClick = o; return; }
   }, true);
-  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest(".more") && !e.target.closest(".pick") && !e.target.closest("#btnShot") && !e.target.closest("button.face")) hideMenu(); }, true);
+  document.addEventListener("pointerdown", (e) => { if (!$("menu").hidden && !e.target.closest("#menu") && !e.target.closest(".pcell") && !e.target.closest("#btnPause") && !e.target.closest("#btnQuality") && !e.target.closest(".dvr-flag-btn") && !e.target.closest(".more") && !e.target.closest(".pick") && !e.target.closest("#btnShot") && !e.target.closest("button.face")) hideMenu(); }, true);
   function menuAt(el) { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 6]; }
   function trackMenuItems(t) {
     const id = Number(t.track_id);
@@ -2212,9 +2298,12 @@
     }
   };
   window.fallguardPip = (on) => {
+    const prevEff = effectiveQuality();
     document.body.classList.toggle("pip", Boolean(on));
     applyTheater(); // в маленьком окне — свой компактный вид, без «кинотеатра»
     if (on) { hideMenu(); $("tip").hidden = true; }
+    syncQualityBtn();
+    if (videoQuality === "auto" && effectiveQuality() !== prevEff) startStream(true);
     setTimeout(() => { layout(); syncPills(); }, 60);
   };
   function togglePipSetting() {
@@ -2726,7 +2815,7 @@
     return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
   }
   function journalHtml() {
-    const seg = `<div class="seg">${[["alerts", "Тревоги"], ["nights", "Ночи"], ["log", "Все события"]].map(([v, l]) => `<button aria-pressed="${journalView === v}" onclick="journalView='${v}';renderSheet()">${l}</button>`).join("")}</div>`;
+    const seg = `<div class="seg">${[["alerts", "Тревоги"], ["dvr", "7 дней"], ["nights", "Ночи"], ["log", "События"]].map(([v, l]) => `<button aria-pressed="${journalView === v}" onclick="setJournalView('${v}')">${l}</button>`).join("")}</div>`;
     const st = S.clips_stats || {};
     let body = "";
     if (journalView === "nights") {
@@ -2740,6 +2829,8 @@
       }
       body = `<div class="group"><h3>За последние сутки</h3>${statsHtml(S.care)}</div><div class="group">${body}</div>
         <div class="group"><p>${st.count || 0} записей · ${Number(st.used_mb || 0).toFixed(1)} из ${st.max_total_mb || 250} МБ</p><button class="btn red-text" onclick="clearArchive()">${ico("i-trash")}Очистить архив</button></div>`;
+    } else if (journalView === "dvr") {
+      body = `<div id="dvrRoot" class="dvr-wrap"><div id="dvrBody"><div class="empty">Загрузка 7-дневного архива…</div></div></div>`;
     } else {
       const evs = (S.events || []).filter((e) => logFilter === "all" || e.category === logFilter);
       body = `<div class="group"><div style="margin-bottom:12px" class="seg">${[["all", "Всё"], ["alert", "Тревоги"], ["system", "Система"]].map(([v, l]) => `<button aria-pressed="${logFilter === v}" onclick="logFilter='${v}';renderSheet()">${l}</button>`).join("")}</div>`
@@ -2872,6 +2963,455 @@
       <div class="group">${table}</div>`;
   }
 
+  function setJournalView(v) {
+    if (v !== "dvr") stopDvrPlayer();
+    journalView = v;
+    $("sheetBody")._h = null;
+    renderSheet();
+    if (v === "dvr") loadDvrDays();
+  }
+  function openArchive7d() {
+    journalView = "dvr";
+    openJournal();
+    loadDvrDays();
+  }
+
+  /* ---------- 7-дневный архив и реплей логов движения ---------- */
+  const dvr = {
+    days: [], storage: null, date: "", dayData: null,
+    seg: null, segStartTs: 0, targetTs: 0, currentTs: 0,
+    frames: [], loadedStart: 0, loadedEnd: 0,
+    showSkel: true, speed: 1, tierPref: "auto", loading: false, raf: 0,
+  };
+  const DVR_SPEEDS = [1, 2, 4, 0.5];
+  function stopDvrPlayer() {
+    cancelAnimationFrame(dvr.raf);
+    const v = $("dvrVideo");
+    if (v) { try { v.pause(); v.removeAttribute("src"); v.load(); } catch (_) {} }
+    dvr.seg = null;
+  }
+  function dvrShortDate(dStr) {
+    if (!dStr) return "";
+    const todayStr = new Date().toLocaleDateString("sv-SE");
+    const yestStr = new Date(Date.now() - 86400000).toLocaleDateString("sv-SE");
+    if (dStr === todayStr) return "Сегодня";
+    if (dStr === yestStr) return "Вчера";
+    const dt = new Date(dStr + "T12:00:00");
+    return dt.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "short" });
+  }
+  function clockFull(ts) {
+    const d = new Date(ts * 1000);
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  async function loadDvrDays() {
+    try {
+      const r = await api("/api/dvr/days");
+      if (!r.ok) { toast("Архив 7 дней недоступен", "error"); return; }
+      const d = await r.json();
+      dvr.days = d.days || [];
+      dvr.storage = d.storage || null;
+      if (!dvr.date || !dvr.days.some((x) => x.date === dvr.date)) {
+        const best = dvr.days.find((x) => (x.low_count + x.hi_count > 0) || x.has_motion) || dvr.days[0];
+        dvr.date = best ? best.date : "";
+      }
+      renderDvrContent();
+      if (dvr.date) await selectDvrDay(dvr.date, true);
+    } catch (_) { toast("Не удалось загрузить список дней архива", "error"); }
+  }
+  async function selectDvrDay(dateStr, autoOpenLatest) {
+    dvr.date = dateStr;
+    renderDvrContent();
+    try {
+      const r = await api("/api/dvr/day?date=" + encodeURIComponent(dateStr));
+      if (!r.ok) return;
+      dvr.dayData = await r.json();
+      renderDvrContent();
+      if (autoOpenLatest && !dvr.seg) {
+        const segs = dvr.dayData.segments || [];
+        if (segs.length) {
+          const lastSeg = segs[segs.length - 1];
+          const tsInit = Math.max(lastSeg.start_ts, lastSeg.end_ts - 15);
+          openDvrAt(tsInit);
+        } else if ((dvr.dayData.motion_buckets || []).length) {
+          const b = dvr.dayData.motion_buckets[dvr.dayData.motion_buckets.length - 1];
+          openDvrAt((b.start_ts + b.end_ts) / 2);
+        }
+      }
+    } catch (_) {}
+  }
+  function dvrFindMotionAt(ts) {
+    const arr = dvr.frames || [];
+    if (!arr.length) return null;
+    let lo = 0, hi = arr.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].ts < ts) lo = mid + 1; else hi = mid; }
+    const a = arr[lo], b = arr[lo - 1];
+    const best = (b && Math.abs(b.ts - ts) < Math.abs(a.ts - ts)) ? b : a;
+    return best && Math.abs(best.ts - ts) <= 5.5 ? best : null;
+  }
+  async function openDvrAt(ts, prefTier) {
+    dvr.targetTs = ts; dvr.currentTs = ts;
+    if (prefTier) dvr.tierPref = prefTier;
+    const badge = $("dvrTimeBadge");
+    if (badge) badge.textContent = clockFull(ts);
+    try {
+      const [resR, motR] = await Promise.all([
+        api(`/api/dvr/resolve?ts=${ts.toFixed(2)}&quality=${encodeURIComponent(dvr.tierPref)}`),
+        (ts >= dvr.loadedStart + 10 && ts <= dvr.loadedEnd - 10 && dvr.frames.length)
+          ? Promise.resolve(null)
+          : api(`/api/dvr/motion?start_ts=${Math.max(0, ts - 180).toFixed(1)}&end_ts=${(ts + 240).toFixed(1)}`),
+      ]);
+      if (motR && motR.ok) {
+        const md = await motR.json();
+        dvr.frames = md.frames || [];
+        dvr.loadedStart = md.start_ts || 0;
+        dvr.loadedEnd = md.end_ts || 0;
+      }
+      if (resR && resR.ok) {
+        const rd = await resR.json();
+        mountDvrSegment(rd.segment, ts);
+      }
+    } catch (_) {}
+    syncDvrDayCursor();
+    drawDvrOverlay();
+  }
+  function applyDvrOrientation(v, seg) {
+    const rot = (((Number(seg && seg.rotate !== undefined ? seg.rotate : cam.rotate) || 0) % 360) + 360) % 360;
+    const flip = Boolean(seg && seg.flip_h !== undefined ? seg.flip_h : cam.flip_h);
+    const stage = $("dvrStage"); if (!stage || !v) return;
+    const side = rot === 90 || rot === 270;
+    const vw = stage.clientWidth || 640, vh = stage.clientHeight || 360;
+    v.style.width = side ? vh + "px" : "";
+    v.style.height = side ? vw + "px" : "";
+    v.style.left = side ? (vw - vh) / 2 + "px" : "";
+    v.style.top = side ? (vh - vw) / 2 + "px" : "";
+    v.style.transform = (flip ? "scaleX(-1) " : "") + (rot ? `rotate(${rot}deg)` : "");
+  }
+  function mountDvrSegment(seg, targetTs) {
+    const v = $("dvrVideo"), emp = $("dvrEmpty");
+    if (!v || !emp) return;
+    if (!seg) {
+      emp.hidden = false; emp.textContent = "Видео за эту секунду не найдено (доступны только логи движения)";
+      v.hidden = true; dvr.seg = null;
+      return;
+    }
+    emp.hidden = true; v.hidden = false;
+    const offset = Math.max(0, Number(seg.offset_sec || 0));
+    if (dvr.seg && dvr.seg.id === seg.id) {
+      dvr.seg = seg; dvr.segStartTs = seg.start_ts;
+      try { v.currentTime = offset; if (v.paused) v.play().catch(() => {}); } catch (_) {}
+      return;
+    }
+    dvr.seg = seg; dvr.segStartTs = seg.start_ts;
+    applyDvrOrientation(v, seg);
+    v.playbackRate = dvr.speed;
+    v.onloadedmetadata = () => {
+      try {
+        if (isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(offset, Math.max(0, v.duration - 0.1));
+        v.play().catch(() => {});
+      } catch (_) {}
+      drawDvrOverlay();
+    };
+    v.ontimeupdate = () => {
+      if (dvr.seg) dvr.currentTs = dvr.segStartTs + (v.currentTime || 0);
+      syncDvrDayCursor();
+      drawDvrOverlay();
+    };
+    v.onended = () => {
+      if (dvr.seg && dvr.seg.end_ts) {
+        const nextTs = dvr.seg.end_ts + 0.5;
+        openDvrAt(nextTs);
+      }
+    };
+    v.src = withAuth(seg.url);
+    const tierBtn = $("dvrTierBtn");
+    if (tierBtn) tierBtn.textContent = seg.tier === "hi" ? "HD · 1080p" : "360p";
+  }
+  function toggleDvrPlay() {
+    const v = $("dvrVideo"); if (!v || v.hidden) return;
+    if (v.paused) v.play().catch(() => {}); else v.pause();
+    const b = $("dvrPlayBtn");
+    if (b) b.innerHTML = ico(v.paused ? "i-play" : "i-pause") + (v.paused ? "Играть" : "Пауза");
+  }
+  function stepDvr(dt) {
+    const cur = dvr.currentTs || dvr.targetTs;
+    const v = $("dvrVideo");
+    if (dvr.seg && v && !v.hidden) {
+      const nextLocal = (v.currentTime || 0) + dt;
+      if (nextLocal >= 0 && isFinite(v.duration) && nextLocal < v.duration - 0.2) {
+        v.currentTime = nextLocal; dvr.currentTs = dvr.segStartTs + nextLocal;
+        syncDvrDayCursor(); drawDvrOverlay();
+        return;
+      }
+    }
+    if (cur > 0) openDvrAt(cur + dt);
+  }
+  function toggleDvrSkel() { dvr.showSkel = !dvr.showSkel; const b = $("dvrSkelBtn"); if (b) b.setAttribute("aria-pressed", String(dvr.showSkel)); drawDvrOverlay(); }
+  function cycleDvrSpeed() {
+    const i = (DVR_SPEEDS.indexOf(dvr.speed) + 1) % DVR_SPEEDS.length;
+    dvr.speed = DVR_SPEEDS[i];
+    const v = $("dvrVideo"); if (v) v.playbackRate = dvr.speed;
+    const b = $("dvrSpdBtn"); if (b) b.textContent = String(dvr.speed).replace(".", ",") + "×";
+  }
+  function toggleDvrTier() {
+    const next = dvr.tierPref === "low" ? "auto" : "low";
+    dvr.tierPref = next;
+    openDvrAt(dvr.currentTs || dvr.targetTs, next);
+  }
+  function syncDvrDayCursor() {
+    const cur = $("dvrDayCur"), dd = dvr.dayData;
+    if (!cur || !dd || !dvr.currentTs) return;
+    const span = Math.max(60, 86400);
+    const f = Math.max(0, Math.min(1, (dvr.currentTs - dd.start_ts) / span));
+    cur.style.left = (f * 100).toFixed(2) + "%";
+  }
+  function drawDvrOverlay() {
+    const cv = $("dvrCanvas"), stage = $("dvrStage"), info = $("dvrFrameInfo"), badge = $("dvrTimeBadge"), v = $("dvrVideo");
+    if (!cv || !stage) return;
+    const curTs = (dvr.seg && v && !v.hidden) ? (dvr.segStartTs + (v.currentTime || 0)) : (dvr.currentTs || dvr.targetTs);
+    if (curTs) dvr.currentTs = curTs;
+    if (badge) badge.textContent = (curTs ? clockFull(curTs) : "--:--") + (dvr.seg ? (" · " + (dvr.seg.tier === "hi" ? "HD" : "360p")) : "");
+
+    const vw = stage.clientWidth, vh = stage.clientHeight;
+    if (!vw || !vh) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (cv.width !== Math.round(vw * dpr) || cv.height !== Math.round(vh * dpr)) { cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr); }
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, vw, vh);
+
+    const rec = curTs ? dvrFindMotionAt(curTs) : null;
+    if (info) {
+      if (!rec) info.innerHTML = `<span class="muted">Нет записанной телеметрии на эту секунду</span>`;
+      else {
+        const stRu = (STATE[rec.st] && STATE[rec.st][0]) || rec.st;
+        const tm = rec.tm || {};
+        const tmParts = [["sit", "посадка"], ["lv", "выход"], ["fl", "падение"]].filter(([k]) => tm[k] > 0).map(([k, l]) => `${l} ${tm[k]}с`);
+        const ignN = (rec.ign || []).length;
+        const pat = (rec.tr || []).find((t) => t.r === "patient");
+        const angTxt = pat && pat.ang != null ? ` · угол ${pat.ang}°` : "";
+        info.innerHTML = `<span><b>${esc(stRu)}</b>${rec.sr ? " · " + esc(rec.sr) : ""}${angTxt}</span>`
+          + `<span class="num">движ: ${Number(rec.opt || 0).toFixed(3)}${tmParts.length ? " · " + tmParts.join(", ") : ""}${ignN ? ` · <b style="color:#F06292">отсеяно ${ignN}</b>` : ""}</span>`;
+      }
+    }
+    if (!rec || !dvr.showSkel) return;
+
+    // Расчёт прямоугольника видео внутри .dvr-stage (16:9 или по размеру сегмента)
+    const segW = (dvr.seg && dvr.seg.width) || (v && v.videoWidth) || 16;
+    const segH = (dvr.seg && dvr.seg.height) || (v && v.videoHeight) || 9;
+    const rot = (((Number(dvr.seg ? dvr.seg.rotate : cam.rotate) || 0) % 360) + 360) % 360;
+    const [sw, sh] = (rot === 90 || rot === 270) ? [segH, segW] : [segW, segH];
+    const k = Math.min(vw / sw, vh / sh);
+    const rx = (vw - sw * k) / 2, ry = (vh - sh * k) / 2, rw = sw * k, rh = sh * k;
+    const mapPt = (p) => [rx + p[0] * rw, ry + p[1] * rh];
+
+    const drawPose = (b, kps, color, text, dashed) => {
+      if (!Array.isArray(b) || b.length < 4) return;
+      const [x1, y1] = mapPt([b[0], b[1]]), [x2, y2] = mapPt([b[2], b[3]]);
+      g.save();
+      g.strokeStyle = color; g.lineWidth = 2;
+      if (dashed) g.setLineDash([5, 4]);
+      g.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      if (Array.isArray(kps) && kps.length) {
+        g.lineWidth = 1.5; g.globalAlpha = 0.75;
+        g.beginPath();
+        for (const [a, c] of EDGES) {
+          const p = kps[a], q = kps[c];
+          if (!p || !q || p[2] <= 0 || q[2] <= 0) continue;
+          const [ax, ay] = mapPt(p), [bx, by] = mapPt(q);
+          g.moveTo(ax, ay); g.lineTo(bx, by);
+        }
+        g.stroke(); g.globalAlpha = 1;
+      }
+      g.setLineDash([]);
+      if (text) {
+        g.font = "600 11px system-ui, sans-serif";
+        const tw = g.measureText(text).width + 10;
+        const lx = Math.max(rx, Math.min(x1, rx + rw - tw)), ly = Math.max(ry, y1 - 18);
+        g.fillStyle = color; g.fillRect(lx, ly, tw, 16);
+        g.fillStyle = "#0B0D11"; g.fillText(text, lx + 5, ly + 12);
+      }
+      g.restore();
+    };
+    for (const t of rec.tr || []) {
+      const col = ROLE_COLOR[t.r] || ROLE_COLOR.unknown;
+      const lbl = (t.r === "patient" ? "Бабушка" : t.r === "visitor" ? "Свой" : "Кто-то") + (t.rs ? " · " + t.rs : "");
+      drawPose(t.b, t.kp, col, lbl, false);
+    }
+    for (const f of rec.ign || []) {
+      drawPose(f.b, f.kp, "#F06292", "Отсеян #" + (f.id ?? "?"), true);
+    }
+    if (v && !v.paused && !v.hidden) { cancelAnimationFrame(dvr.raf); dvr.raf = requestAnimationFrame(drawDvrOverlay); }
+  }
+  function captureDvrVideoBase64() {
+    const v = $("dvrVideo");
+    if (!v || v.hidden || v.readyState < 2 || !v.videoWidth) return "";
+    try {
+      const W = v.videoWidth, H = v.videoHeight;
+      const rot = (((Number(dvr.seg ? dvr.seg.rotate : cam.rotate) || 0) % 360) + 360) % 360;
+      const flip = Boolean(dvr.seg ? dvr.seg.flip_h : cam.flip_h);
+      const side = rot === 90 || rot === 270;
+      const c = document.createElement("canvas");
+      c.width = side ? H : W; c.height = side ? W : H;
+      const g = c.getContext("2d");
+      if (flip) { g.translate(c.width, 0); g.scale(-1, 1); }
+      if (rot === 90) { g.translate(H, 0); g.rotate(Math.PI / 2); }
+      else if (rot === 180) { g.translate(W, H); g.rotate(Math.PI); }
+      else if (rot === 270) { g.translate(0, W); g.rotate(-Math.PI / 2); }
+      g.drawImage(v, 0, 0);
+      return c.toDataURL("image/jpeg", 0.85).split(",")[1] || "";
+    } catch (_) { return ""; }
+  }
+  function flagDvrMenu(el) {
+    const ts = dvr.currentTs || dvr.targetTs;
+    if (!ts) { toast("Сначала выберите момент в архиве", "info"); return; }
+    const kinds = [
+      ["phantom_visitor", "Ложный «Свой» / фантом"],
+      ["false_standup", "Ложное вставание / посадка"],
+      ["wrong_role", "Перепутана роль человека"],
+      ["missed_alert", "Пропущенная тревога"],
+      ["other", "Другое замечание"],
+    ];
+    const r = el.getBoundingClientRect();
+    showMenu(r.right - 250, r.top - 8, "Отметить момент " + clockFull(ts), kinds.map(([k, lbl]) => ({
+      label: lbl,
+      icon: "i-alert",
+      fn: () => submitDvrFlag(ts, k, lbl),
+    })));
+    const m = $("menu"); m.style.top = Math.max(8, r.top - m.offsetHeight - 8) + "px"; m.style.transformOrigin = "100% 100%";
+  }
+  async function submitDvrFlag(ts, kind, label) {
+    const snap = captureDvrVideoBase64();
+    const d = await call("/api/dvr/flag", { json: { ts, kind, note: label, reporter: me.kind === "lan" ? "Веб-пульт" : me.name, snapshot_b64: snap } }, "Момент и логи сохранены для разбора");
+    if (d && d.ok && dvr.date) selectDvrDay(dvr.date, false);
+  }
+  function bindDvrBarDrag() {
+    const bar = $("dvrDayBar"); if (!bar || bar._bound) return;
+    bar._bound = true;
+    const tsAt = (e) => {
+      const dd = dvr.dayData; if (!dd) return null;
+      const r = bar.getBoundingClientRect();
+      const f = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+      return dd.start_ts + f * 86400;
+    };
+    bar.addEventListener("pointerdown", (e) => {
+      const t = tsAt(e); if (t == null) return;
+      dvr.currentTs = t; syncDvrDayCursor();
+      bar._drag = true; bar.setPointerCapture(e.pointerId);
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!bar._drag) return;
+      const t = tsAt(e); if (t == null) return;
+      dvr.currentTs = t; syncDvrDayCursor();
+    });
+    const done = (e) => {
+      if (!bar._drag) return;
+      bar._drag = false;
+      const t = tsAt(e); if (t != null) openDvrAt(t);
+    };
+    bar.addEventListener("pointerup", done);
+    bar.addEventListener("pointercancel", () => { bar._drag = false; });
+  }
+  function renderDvrContent() {
+    const host = $("dvrBody"); if (!host) return;
+    const st = dvr.storage;
+    const daysHtml = dvr.days.length
+      ? dvr.days.map((d) => {
+          const hrs = (d.covered_sec / 3600).toFixed(1).replace(".", ",");
+          const sub = (d.low_count + d.hi_count) ? `${hrs} ч` + (d.hi_count ? ` · ${d.hi_count} HD` : "") : (d.has_motion ? "только логи" : "нет");
+          return `<button class="dvr-day-btn" aria-pressed="${d.date === dvr.date}" onclick="selectDvrDay('${esc(d.date)}', true)"><b>${esc(dvrShortDate(d.date))}</b><span>${esc(sub)}</span></button>`;
+        }).join("")
+      : `<span class="muted small">Дней пока нет</span>`;
+    const storeLine = st
+      ? `<span>Записано <b>${Number(st.used_gb || 0).toFixed(2).replace(".", ",")} ГБ</b> (логи ${Number(st.motion_log_mb || 0).toFixed(1)} МБ) · свободно <b>${Number(st.disk_free_gb || 0).toFixed(1).replace(".", ",")} ГБ</b> · до ${Math.round(st.retention_days || 7)} дн</span>`
+      : "";
+
+    let playerCard = $("dvrStage") ? null : `
+      <div class="dvr-player-card">
+        <div class="dvr-stage" id="dvrStage">
+          <video id="dvrVideo" playsinline muted preload="auto" hidden></video>
+          <canvas id="dvrCanvas"></canvas>
+          <div class="dvr-empty" id="dvrEmpty">Выберите момент на шкале дня или эпизод ниже</div>
+          <span class="dvr-badge num" id="dvrTimeBadge">--:--</span>
+        </div>
+        <div class="dvr-info" id="dvrFrameInfo"><span class="muted">Выберите время на 24-часовой шкале</span></div>
+        <div class="dvr-ctrl">
+          <button class="btn sm" onclick="stepDvr(-15)">−15 с</button>
+          <button class="btn sm" onclick="stepDvr(-5)">−5 с</button>
+          <button class="btn sm" id="dvrPlayBtn" onclick="toggleDvrPlay()">${ico("i-pause")}Пауза</button>
+          <button class="btn sm" onclick="stepDvr(5)">+5 с</button>
+          <button class="btn sm" onclick="stepDvr(15)">+15 с</button>
+          <button class="btn sm" id="dvrSkelBtn" aria-pressed="${dvr.showSkel}" onclick="toggleDvrSkel()">Скелеты</button>
+          <button class="btn sm num" id="dvrSpdBtn" onclick="cycleDvrSpeed()">${String(dvr.speed).replace(".", ",")}×</button>
+          <button class="btn sm num" id="dvrTierBtn" onclick="toggleDvrTier()">HD / 360p</button>
+          <button class="btn sm dvr-flag-btn" onclick="flagDvrMenu(this)">${ico("i-alert")}Ошибка / фантом</button>
+        </div>
+      </div>`;
+
+    const dd = dvr.dayData;
+    let dayDetailsHtml = `<div class="empty">Загрузка данных дня…</div>`;
+    if (dd) {
+      const daySt = dd.start_ts, dayWin = 86400;
+      const segs = dd.segments || [];
+      const buckets = dd.motion_buckets || [];
+      const bMap = new Map(buckets.map((b) => [Math.floor((b.start_ts - daySt) / 300), b]));
+      let bars = "";
+      for (let i = 0; i < 288; i++) {
+        const b = bMap.get(i);
+        const hPct = b ? Math.max(8, Math.min(100, Math.round((b.max_opt || 0) * 1800))) : 4;
+        const cls = b && b.ign_hits > 0 ? "phantom" : (b && (b.alert_states > 0 || b.max_opt >= 0.015) ? "hot" : "");
+        bars += `<i class="${cls}" style="height:${b ? hPct : 3}%${b ? "" : ";opacity:.15"}"></i>`;
+      }
+      const spans = (dd.timeline && dd.timeline.spans) || [];
+      const rib = spans.map((sp) => {
+        const l = Math.max(0, (sp.start - daySt) / dayWin * 100);
+        const w = Math.min(100 - l, (sp.end - sp.start) / dayWin * 100);
+        return w > 0 ? `<i class="t-${esc(sp.tone)}" style="left:${l.toFixed(2)}%;width:${Math.max(0.2, w).toFixed(2)}%"></i>` : "";
+      }).join("");
+      const hiMarks = segs.filter((s) => s.tier === "hi").map((s) => {
+        const l = Math.max(0, (s.start_ts - daySt) / dayWin * 100);
+        const w = Math.min(100 - l, Math.max(0.3, (s.end_ts - s.start_ts) / dayWin * 100));
+        return `<i style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%"></i>`;
+      }).join("");
+
+      // Список интересных эпизодов за день (тревоги + отметки + всплески движения/фантомов)
+      const episodes = [];
+      for (const f of dd.flags || []) episodes.push({ ts: f.event_ts || f.reported_ts, title: "Отметка: " + (f.title || f.kind), tone: "warn" });
+      for (const c of dd.clips || []) episodes.push({ ts: c.ts, title: (c.title || c.state) + (c.false_alarm ? " (ложная)" : ""), tone: c.state === "fallen" ? "alarm" : "warn" });
+      for (const b of buckets) {
+        if (b.ign_hits > 0 || b.alert_states > 0 || b.max_opt >= 0.018) {
+          const prev = episodes.find((e) => Math.abs(e.ts - b.start_ts) < 320);
+          if (!prev) {
+            const note = b.ign_hits > 0 ? `Отсеяно фантомов: ${b.ign_hits}` : `Активное движение (макс ${b.max_opt.toFixed(2)})`;
+            episodes.push({ ts: b.start_ts, title: note, tone: "care" });
+          }
+        }
+      }
+      episodes.sort((a, b) => b.ts - a.ts);
+      const epHtml = episodes.length
+        ? `<div class="dvr-episodes">${episodes.slice(0, 80).map((ep) => `<button class="dvr-ep" onclick="openDvrAt(${Number(ep.ts).toFixed(1)})"><time class="num">${clockFull(ep.ts)}</time><span>${esc(ep.title)}</span><span class="badge ${ep.tone || ""}" style="flex:none">Перейти</span></button>`).join("")}</div>`
+        : `<div class="empty">За выбранные сутки эпизодов не зафиксировано</div>`;
+
+      dayDetailsHtml = `
+        <div class="dvr-daybar" id="dvrDayBar" title="Нажмите или потяните по шкале, чтобы открыть запись за нужное время">
+          <div class="dvr-motion-bars">${bars}</div>
+          <div class="dvr-ribbon">${rib}</div>
+          <div class="dvr-hd-line" title="Зелёным выделены интервалы с записью HD 1080p">${hiMarks}</div>
+          <div class="dvr-cur" id="dvrDayCur"></div>
+          <div class="dvr-axis num"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        </div>
+        <div class="group"><h3>Активность и события за ${esc(dvrShortDate(dd.date))}</h3>${epHtml}</div>`;
+    }
+
+    if (playerCard) {
+      host.innerHTML = `<div class="dvr-days">${daysHtml}</div><div class="dvr-store-bar num">${storeLine}</div>${playerCard}<div id="dvrDaySection">${dayDetailsHtml}</div>`;
+    } else {
+      const dBox = host.querySelector(".dvr-days"); if (dBox) dBox.innerHTML = daysHtml;
+      const sBox = host.querySelector(".dvr-store-bar"); if (sBox) sBox.innerHTML = storeLine;
+      const sec = $("dvrDaySection"); if (sec) sec.innerHTML = dayDetailsHtml;
+    }
+    bindDvrBarDrag();
+    syncDvrDayCursor();
+  }
   function openClip(id) {
     const c = clips.find((x) => x.id === id);
     if (!c) { toast("Запись уже удалена из архива"); return; }
@@ -3059,7 +3599,7 @@
     panel.addEventListener("touchstart", (e) => {
       state = -1;
       if (window.innerWidth >= 760 || e.touches.length !== 1) return;
-      if (e.target.closest("input, select, textarea, .pl-bar, .menu, canvas")) return;
+      if (e.target.closest("input, select, textarea, .pl-bar, .menu, canvas, .dvr-daybar, .dvr-stage")) return;
       x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); dy = 0; state = 1;
     }, { passive: true });
     panel.addEventListener("touchmove", (e) => {
@@ -3174,10 +3714,12 @@
     $("tabs").hidden = true;
     showLayer($("sheetScrim")); hideMenu();
     $("sheetBody")._h = null; fadeBody(); renderSheet(); $("sheetBody").scrollTop = 0; syncBack();
+    if (journalView === "dvr") loadDvrDays();
     poll(true);
   }
   function closeSheet(now) {
     clearInterval(pairTimer); pairInfo = null;
+    stopDvrPlayer();
     if (now !== true) hideLayer($("sheetScrim"));
   }
   function fadeBody() { const b = $("sheetBody"); b.classList.remove("fade"); void b.offsetWidth; b.classList.add("fade"); clearTimeout(b._f); b._f = setTimeout(() => b.classList.remove("fade"), 600); }
@@ -3363,7 +3905,9 @@
         <div class="rowi">${ri("i-sliders")}<div class="rowi-body"><div class="rowi-title">Толщина линий</div></div>${pick("ovW", OV.width, [["thin", "Тонкие"], ["normal", "Обычные"], ["bold", "Толстые"]], (v) => setOv("width", v), "Толщина линий")}</div>
       </div></div>`;
     const rot = Number(cam.rotate) || 0;
+    const effQ = effectiveQuality();
     h += `<div class="group"><h3>Камера</h3><div class="rows">
+        <div class="rowi">${ri("i-sliders")}<div class="rowi-body"><div class="rowi-title">Качество видео</div><div class="rowi-sub">на этом устройстве · сейчас ${esc(effQ)}</div></div>${pick("vidQ", videoQuality, [["auto", `Авто (${effQ})`], ["360p", "360p · телефон"], ["720p", "720p · среднее"], ["1080p", "1080p · чёткое"]], (v) => setVideoQuality(v), "Качество видео")}</div>
         <div class="rowi wr">${ri("i-rotate")}<div class="rowi-body"><div class="rowi-title">Поворот кадра</div></div><div class="seg">${[0, 90, 180, 270].map((r) => `<button aria-pressed="${rot === r}" onclick="setCam({rotate:${r}})">${r}°</button>`).join("")}</div></div>
         <div class="rowi">${ri("i-flip")}<div class="rowi-body"><div class="rowi-title">Зеркально</div></div>${sw(cam.flip_h, `setCam({flip_h:${!cam.flip_h}})`, "Зеркально")}</div>
         <div class="rowi">${ri("i-sun")}<div class="rowi-body"><div class="rowi-title">Осветлять тёмный кадр</div></div>${sw(cam.enhance, `setCam({enhance:${!cam.enhance}})`, "Осветление")}</div>
@@ -3441,8 +3985,13 @@
     if (!isOpen($("sheetScrim")) || !S) return;
     const active = document.activeElement;
     if (active && $("sheetBody").contains(active) && /^(INPUT|SELECT)$/.test(active.tagName)) return;
+    if (sheetMode === "journal" && journalView === "dvr" && $("dvrRoot") && $("sheetBody").contains($("dvrRoot"))) {
+      renderDvrContent();
+      return;
+    }
     const html = sheetMode === "journal" ? journalHtml() : ({ recipients: tabRecipients, zones: tabZones, people: tabPeople, care: tabCare, phone: hasPhone() ? tabPhone : tabRecipients }[activeTab] || tabRecipients)();
     setHtml($("sheetBody"), html);
+    if (sheetMode === "journal" && journalView === "dvr" && dvr.days.length) renderDvrContent();
     syncPills($("sheetBody"), (sheetMode === "journal" ? "j" : activeTab) + ":");
   }
 
@@ -3711,6 +4260,7 @@
     $("btnShot").hidden = Boolean(native) && typeof native.saveImage !== "function";
     $("btnPip").hidden = !(native && typeof native.enterPip === "function");
     syncSoundBtn();
+    syncQualityBtn();
     startStream(true);
     connectTelemetry();
     await refreshMe();
