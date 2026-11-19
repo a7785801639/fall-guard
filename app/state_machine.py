@@ -271,6 +271,7 @@ class FallStateMachine:
         # Таймеры непрерывности кандидатов состояния
         self._help_timer = 0.0
         self._sit_timer = 0.0
+        self._sit_clear_timer = 0.0
         self._leave_timer = 0.0
         self._fall_timer = 0.0
         self._missing_timer = 0.0
@@ -505,6 +506,7 @@ class FallStateMachine:
                 self._status_reason = "охрана возобновлена"
             self._help_timer = 0.0
             self._sit_timer = 0.0
+            self._sit_clear_timer = 0.0
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
@@ -534,6 +536,7 @@ class FallStateMachine:
         with self._lock:
             self._help_timer = 0.0
             self._sit_timer = 0.0
+            self._sit_clear_timer = 0.0
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
@@ -550,13 +553,19 @@ class FallStateMachine:
                 self._state = PatientState.IDLE
                 self._status_reason = "ожидание в кадре"
 
-    def dismiss_false_alert(self, patient_in_bed_latched: bool = False) -> None:
+    def dismiss_false_alert(
+        self,
+        patient_in_bed_latched: bool = False,
+        seated_patient_obs: PoseObservation | None = None,
+        zones: ZonesConfig | None = None,
+    ) -> None:
         """Снимает ложную тревогу по кнопке «Ты ошибся» без постановки охраны на 15-минутную паузу."""
         with self._lock:
             prev_state = self._state
             self._fall_unacknowledged = False
             self._help_timer = 0.0
             self._sit_timer = 0.0
+            self._sit_clear_timer = 0.0
             self._leave_timer = 0.0
             self._fall_timer = 0.0
             self._missing_timer = 0.0
@@ -577,6 +586,29 @@ class FallStateMachine:
                     )
             elif prev_state in (PatientState.FALLEN, PatientState.LEFT_BED, PatientState.MISSING):
                 self._clear_assisted_seated()
+            if (
+                self._state != PatientState.PAUSED
+                and seated_patient_obs is not None
+                and zones is not None
+                and prev_state in (PatientState.SITTING_UP, PatientState.LEFT_BED)
+            ):
+                now_eval = self._last_eval_ts if self._last_eval_ts is not None else 0.0
+                is_calm_sit, on_chair = self._classify_calm_seated_pose(
+                    seated_patient_obs,
+                    zones,
+                    now_eval,
+                )
+                if is_calm_sit:
+                    self._latch_or_update_assisted_seated(
+                        seated_patient_obs,
+                        on_chair=on_chair,
+                        solo_confirmed=True,
+                    )
+                    self._state = PatientState.IN_BED
+                    self._status_reason = "сидит после ухода родственника"
+                    self._was_monitored_recently = True
+                    self._last_seen_deep_in_bed = False
+                    return
             if self._state != PatientState.PAUSED:
                 if patient_in_bed_latched:
                     self._state = PatientState.IN_BED
@@ -837,6 +869,8 @@ class FallStateMachine:
         now: float,
     ) -> bool:
         """Явно вертикально стоящая поза (включая наклон вперёд стоя на прямых ногах, кейс 130059)."""
+        if zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones):
+            return False
         upper = obs.upper_body_point
         mh = obs.mid_hip or obs.body_center
         angle = obs.torso_angle_from_vertical_deg()
@@ -1085,8 +1119,9 @@ class FallStateMachine:
             if self._baseline.calibrated:
                 shoulder_lift = self._baseline.shoulder_y - upper[1]
                 rise_gain = rise - self._baseline.torso_rise
-                if shoulder_lift >= 0.068 and (
-                    (angle is not None and angle <= 52.0) or rise_gain >= 0.055
+                if shoulder_lift >= 0.085 and (
+                    (angle is not None and angle <= 48.0 and rise_gain >= 0.045)
+                    or rise_gain >= 0.085
                 ):
                     return True, "Поднялась и села на кровати"
             else:
@@ -1409,6 +1444,7 @@ class FallStateMachine:
             if patient_obs is None:
                 self._help_timer = 0.0
                 self._sit_timer = 0.0
+                self._sit_clear_timer = 0.0
                 self._leave_timer = 0.0
                 self._fall_timer = 0.0
                 self._clear_immobility_tracking()
@@ -1554,6 +1590,7 @@ class FallStateMachine:
                 self._fall_timer = 0.0
                 self._help_timer = 0.0
                 self._sit_timer = 0.0
+                self._sit_clear_timer = 0.0
                 self._leave_timer = 0.0
                 self._missing_timer = 0.0
                 self._fall_unacknowledged = False
@@ -1573,6 +1610,8 @@ class FallStateMachine:
                 if self._fall_timer >= needed_fall:
                     self._clear_assisted_seated()
                     self._caregiver_active_until = -1e9
+                    self._sit_timer = 0.0
+                    self._sit_clear_timer = 0.0
                     prev = self._state
                     self._state = PatientState.FALLEN
                     self._status_reason = fall_reason.rstrip(".")
@@ -1662,6 +1701,7 @@ class FallStateMachine:
                     self._was_monitored_recently = True
                     self._last_seen_deep_in_bed = False
                     self._sit_timer = 0.0
+                    self._sit_clear_timer = 0.0
                     self._leave_timer = 0.0
                     self._clear_away_tracking()
                     self._clear_immobility_tracking()
@@ -1696,6 +1736,7 @@ class FallStateMachine:
                         self._was_monitored_recently = True
                         self._last_seen_deep_in_bed = False
                         self._sit_timer = 0.0
+                        self._sit_clear_timer = 0.0
                         self._leave_timer = 0.0
                         self._clear_away_tracking()
                         self._clear_immobility_tracking()
@@ -1710,7 +1751,8 @@ class FallStateMachine:
             if sitting:
                 self._was_monitored_recently = True
                 self._last_seen_deep_in_bed = False
-                self._sit_timer += dt
+                self._sit_clear_timer = 0.0
+                self._sit_timer = min(self._sit_timer + dt, eff_sit_confirm + 1.5)
                 self._leave_timer = 0.0
                 self._clear_immobility_tracking()
                 if self._sit_timer >= eff_sit_confirm:
@@ -1738,17 +1780,24 @@ class FallStateMachine:
                     polygon_distance_norm(bed_anchor_pt, zones.bed_polygon) >= 0.025
                     and not are_legs_hanging_outside_bed(patient_obs, zones.bed_polygon, zones=zones)
                 )
-                if not hand_raised:
-                    self._update_bed_baseline(patient_obs, zones, dt)
                 self._leave_timer = 0.0
                 self._clear_away_tracking()
+                self._fall_unacknowledged = False
+                if self._state == PatientState.SITTING_UP:
+                    self._sit_clear_timer += dt
+                    if self._sit_clear_timer < 3.5:
+                        self._state = PatientState.SITTING_UP
+                        return None
+                    self._sit_clear_timer = 0.0
+                    self._sit_timer = 0.0
+                if not hand_raised:
+                    self._update_bed_baseline(patient_obs, zones, dt)
                 self._state = PatientState.IN_BED
                 self._status_reason = (
                     "спит в кровати · эталон калиброван"
                     if self._baseline.calibrated
                     else "лежит в кровати · калибровка позы"
                 )
-                self._fall_unacknowledged = False
                 return self._update_immobility_in_bed(patient_obs, now)
 
             # Приоритет №6: Стоит / идёт вне кровати одна
@@ -1758,6 +1807,8 @@ class FallStateMachine:
                 self._leave_timer += dt
                 if self._leave_timer >= eff_leave_confirm:
                     prev = self._state
+                    self._sit_timer = 0.0
+                    self._sit_clear_timer = 0.0
                     self._state = PatientState.LEFT_BED
                     self._status_reason = "вышла из кровати без сопровождения"
                     if self._away_since is None:

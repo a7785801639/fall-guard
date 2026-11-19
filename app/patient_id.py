@@ -1303,10 +1303,12 @@ class PatientIdentifier:
         # Закон сохранения Своих через дверной портал (Волна 7: DoorPortalTracker)
         self._first_update_ts: float | None = None
         self._door_visit_active: bool = False
+        self._door_visit_from_real_door: bool = False
         self._door_visit_started_at: float = -1e9
         self._last_visitor_seen_at: float = -1e9
         self._last_visitor_at_door_ts: float = -1e9
         self._latched_visitor_bbox: tuple[float, float, float, float] | None = None
+        self._latched_visitor_track_id: int | None = None
         self._last_visitor_roi_blur: np.ndarray | None = None
         self._last_visitor_frame_mean: float = 0.0
         self._last_visitor_roi_frame_id: int | None = None
@@ -1603,10 +1605,12 @@ class PatientIdentifier:
 
     def _reset_door_visit_portal(self) -> None:
         self._door_visit_active = False
+        self._door_visit_from_real_door = False
         self._door_visit_started_at = -1e9
         self._last_visitor_seen_at = -1e9
         self._last_visitor_at_door_ts = -1e9
         self._latched_visitor_bbox = None
+        self._latched_visitor_track_id = None
         self._last_visitor_roi_blur = None
         self._last_visitor_frame_mean = 0.0
         self._last_visitor_roi_frame_id = None
@@ -1647,6 +1651,11 @@ class PatientIdentifier:
         with self._lock:
             return bool(self._door_visit_active and self._visitor_spot_occupied)
 
+    @property
+    def latched_visitor_track_id(self) -> int | None:
+        with self._lock:
+            return self._latched_visitor_track_id if self._door_visit_active else None
+
     @visitor_spot_occupied.setter
     def visitor_spot_occupied(self, value: bool) -> None:
         with self._lock:
@@ -1657,14 +1666,32 @@ class PatientIdentifier:
         with self._lock:
             self._reset_door_visit_portal()
 
-    def _activate_door_visit(self, now: float) -> None:
+    def _activate_door_visit(self, now: float, *, from_door: bool = False) -> None:
         if not self._door_visit_active:
             self._door_visit_active = True
+            self._door_visit_from_real_door = bool(from_door)
             self._door_visit_started_at = now
             self._last_visitor_at_door_ts = -1e9
             self._visitor_entered_interior = False
             self._visitor_exiting_at_door = False
+        elif from_door:
+            self._door_visit_from_real_door = True
         self._last_visitor_seen_at = now
+
+    def _purge_phantom_visitor_latch_for_patient(self, pat_obs: PoseObservation) -> None:
+        """Очищает защёлку гостя, если она ошибочно совпала с треком или рамкой самой бабушки."""
+        self._recent_visitors.pop(pat_obs.track_id, None)
+        vis_box = self._latched_visitor_bbox
+        overlaps_patient = bool(
+            vis_box is not None and bbox_iou(pat_obs.bbox_norm, vis_box) >= 0.20
+        )
+        if self._latched_visitor_track_id == pat_obs.track_id or overlaps_patient:
+            self._latched_visitor_bbox = None
+            self._latched_visitor_track_id = None
+            self._last_visitor_roi_blur = None
+            self._last_visitor_frame_mean = 0.0
+            self._last_visitor_roi_frame_id = None
+            self._visitor_spot_occupied = False
 
     @staticmethod
     def _is_touching_door(obs: PoseObservation, zones: ZonesConfig) -> bool:
@@ -2137,7 +2164,7 @@ class PatientIdentifier:
             target.bed_accum_sec = 0.0
             target.was_on_bed = False
             target.manual_assigned_at = ts
-            self._activate_door_visit(ts)
+            self._activate_door_visit(ts, from_door=True)
 
             if was_patient:
                 self._last_patient_track_id = None
@@ -3246,7 +3273,13 @@ class PatientIdentifier:
                         else False
                     )
                     origin_outside_bed = (
-                        (not on_bed or not point_in_polygon(origin_center, zones.bed_polygon))
+                        (
+                            not on_bed
+                            or (
+                                origin_in_door
+                                and not point_in_polygon(origin_center, zones.bed_polygon)
+                            )
+                        )
                         if zones.has_bed
                         else True
                     )
@@ -3282,11 +3315,7 @@ class PatientIdentifier:
                     near_door_portal_entry = (
                         zones.has_door
                         and moved_flag
-                        and (
-                            origin_in_door
-                            or polygon_distance_norm(origin_center, zones.door_polygon) >= -0.05
-                            or polygon_distance_norm(obs.body_center, zones.door_polygon) >= -0.05
-                        )
+                        and origin_in_door
                     )
                     strict_door_track = (
                         zones.has_door
@@ -3340,7 +3369,7 @@ class PatientIdentifier:
                         tr.reason = "door_entry"
                         tr.spawned_in_door = True
                         tr.confirmed_second_track = True
-                        self._activate_door_visit(now)
+                        self._activate_door_visit(now, from_door=True)
                     elif fg_seated_companion:
                         tr.role = Role.VISITOR
                         tr.reason = "foreground_seated_companion"
@@ -3416,14 +3445,23 @@ class PatientIdentifier:
                     and not on_bed
                     and tr.bed_accum_sec < 1.0
                     and not tr.was_on_bed
-                    and tr.reason != "manual_override"
+                    and tr.reason not in ("manual_override", "face_patient")
                     and (
                         self._door_visit_active
                         or (
                             zones.has_door
                             and self._patient_in_bed_latched
                             and not any_obs_on_bed
-                            and (obs.track_id != self._latched_patient_track_id or homography.calibrated)
+                            and obs.track_id != self._latched_patient_track_id
+                            and (
+                                is_standing_in_front_of_bed(obs, zones.bed_polygon, zones=zones)
+                                or polygon_distance_norm(obs.body_center, zones.bed_polygon) < -0.035
+                            )
+                            and (
+                                self._latched_patient_bed_bbox is None
+                                or bbox_iou(obs.bbox_norm, self._latched_patient_bed_bbox) < 0.30
+                                or obs.bbox_norm[3] >= polygon_y_bounds(zones.bed_polygon)[1] + 0.08
+                            )
                         )
                     )
                 )
@@ -3439,11 +3477,8 @@ class PatientIdentifier:
                     tr.bed_accum_sec = 0.0
                     self._activate_door_visit(now)
 
-                # Вход через полигон двери (или её 5%-порог с реальным движением) на первых секундах жизни трека -> железный Role.VISITOR ("door_entry")
-                in_door_portal_now = zones.has_door and (
-                    in_door
-                    or (moved_flag and polygon_distance_norm(obs.body_center, zones.door_polygon) >= -0.05)
-                )
+                # Вход через полигон двери на первых секундах жизни трека -> железный Role.VISITOR ("door_entry")
+                in_door_portal_now = zones.has_door and in_door
                 if (
                     in_door_portal_now
                     and not on_bed
@@ -3456,7 +3491,7 @@ class PatientIdentifier:
                     tr.spawned_in_door = True
                     tr.confirmed_second_track = True
                     tr.bed_accum_sec = 0.0
-                    self._activate_door_visit(now)
+                    self._activate_door_visit(now, from_door=True)
 
                 # Актуализация воротниково-торсового профиля строго в активной модальности:
                 # Днём — 48D RGB/HSV, Ночью ИК — 64D LBP + Sobel + CLAHE (без кросс-смешивания!)
@@ -3495,6 +3530,18 @@ class PatientIdentifier:
                     and self._first_update_ts is not None
                     and (now - self._first_update_ts) > 15.0
                 )
+                has_door_or_second_person_context = bool(
+                    in_door
+                    or tr.spawned_in_door
+                    or self._door_visit_active
+                    or (len(observations) >= 2 and any_obs_on_bed)
+                    or (
+                        self._patient_in_bed_latched
+                        and not on_bed
+                        and zones.has_bed
+                        and is_standing_in_front_of_bed(obs, zones.bed_polygon, zones=zones)
+                    )
+                )
 
                 # Проверка по сохранённой 8-часовой галерее одежды родственников («Свой»):
                 # НИКОГДА не применяется к реально лежащему в кровати человеку (reclining_on_bed),
@@ -3520,13 +3567,16 @@ class PatientIdentifier:
                         vis_outfit_sim >= min_vis_outfit
                         and vis_outfit_sim >= pat_anchor_sim + 0.06
                         and tr.role != Role.PATIENT
-                        and (not strict_outfit_guard or (not on_bed and tr.has_moved))
+                        and (
+                            not strict_outfit_guard
+                            or (not on_bed and tr.has_moved and has_door_or_second_person_context)
+                        )
                     ):
                         tr.role = Role.VISITOR
                         tr.reason = "visitor_outfit_match"
                         tr.confirmed_second_track = True
                         tr.bed_accum_sec = 0.0
-                        if not on_bed and tr.has_moved:
+                        if not on_bed and tr.has_moved and has_door_or_second_person_context:
                             self._activate_door_visit(now)
 
                 # Перехват перескока track_id у сидящего/стоящего гостя (НИКОГДА не трогает лежащего в кровати!)
@@ -3624,13 +3674,17 @@ class PatientIdentifier:
                         matched_role == Role.VISITOR
                         and not reclining_on_bed
                         and obs.track_id < 9000
-                        and (not strict_outfit_guard or score >= 0.48)
+                        and (
+                            not strict_outfit_guard
+                            or (score >= 0.48 and not on_bed and has_door_or_second_person_context)
+                        )
                     ):
                         tr.role = Role.VISITOR
                         tr.reason = "face_visitor"
                         tr.confirmed_second_track = True
                         tr.face_score = score
-                        self._activate_door_visit(now)
+                        if has_door_or_second_person_context:
+                            self._activate_door_visit(now)
                     elif (
                         matched_role == Role.PATIENT
                         and not tall_floor_stander
@@ -3720,12 +3774,12 @@ class PatientIdentifier:
                     and not on_bed
                     and tr.bed_accum_sec < 1.0
                     and not tr.was_on_bed
-                    and tr.reason != "manual_override"
+                    and tr.reason not in ("manual_override", "face_patient")
                     and (
                         self._door_visit_active
                         or (
                             self._patient_in_bed_latched
-                            and (obs.track_id != self._latched_patient_track_id or homography.calibrated)
+                            and obs.track_id != self._latched_patient_track_id
                         )
                     )
                 )
@@ -4222,6 +4276,17 @@ class PatientIdentifier:
                 for obs in observations
                 if obs.track_id in self._tracks and self._tracks[obs.track_id].role == Role.VISITOR
             ]
+            if patient_obs is not None:
+                self._purge_phantom_visitor_latch_for_patient(patient_obs)
+                if (
+                    self._door_visit_active
+                    and not active_visitors
+                    and not self._door_visit_from_real_door
+                    and len(observations) == 1
+                    and not any(o.track_id != patient_obs.track_id for o in non_bed_obs_in_room)
+                ):
+                    self._reset_door_visit_portal()
+
             if not self._door_visit_active and not active_visitors and cur_gray_small is not None and cur_textured:
                 # Запоминаем эталон пустой комнаты (пустого стула и двери) ДО начала визита родственника
                 self._pre_visit_gray_small = cur_gray_small
@@ -4230,24 +4295,30 @@ class PatientIdentifier:
             if active_visitors:
                 self._last_visitor_seen_at = now
                 primary_vis = max(active_visitors, key=lambda o: o.conf)
-                self._latched_visitor_bbox = primary_vis.bbox_norm
-                self._visitor_spot_occupied = True
-                if cur_gray_small is not None and cur_textured:
-                    v_roi = OpticalKeypointStabilizer._extract_blurred_roi(
-                        cur_gray_small,
-                        primary_vis.bbox_norm,
-                    )
-                    if v_roi is not None:
-                        self._last_visitor_roi_blur = v_roi
-                        self._last_visitor_frame_mean = float(np.mean(cur_gray_small))
-                        self._last_visitor_roi_frame_id = id(frame_bgr) if frame_bgr is not None else None
+                overlaps_pat_live = bool(
+                    patient_obs is not None
+                    and bbox_iou(primary_vis.bbox_norm, patient_obs.bbox_norm) >= 0.25
+                )
+                if not overlaps_pat_live:
+                    self._latched_visitor_track_id = primary_vis.track_id
+                    self._latched_visitor_bbox = primary_vis.bbox_norm
+                    self._visitor_spot_occupied = True
+                    if cur_gray_small is not None and cur_textured:
+                        v_roi = OpticalKeypointStabilizer._extract_blurred_roi(
+                            cur_gray_small,
+                            primary_vis.bbox_norm,
+                        )
+                        if v_roi is not None:
+                            self._last_visitor_roi_blur = v_roi
+                            self._last_visitor_frame_mean = float(np.mean(cur_gray_small))
+                            self._last_visitor_roi_frame_id = id(frame_bgr) if frame_bgr is not None else None
 
                 for v_obs in active_visitors:
                     v_tr = self._tracks[v_obs.track_id]
                     touching_door = self._is_touching_door(v_obs, zones)
                     if not touching_door and (
                         not zones.has_door
-                        or polygon_distance_norm(v_obs.body_center, zones.door_polygon) < -0.04
+                        or polygon_distance_norm(v_obs.body_center, zones.door_polygon) <= -0.03
                     ):
                         self._visitor_entered_interior = True
                         self._visitor_exiting_at_door = False
@@ -4263,8 +4334,14 @@ class PatientIdentifier:
                             # Низкое сидение на стуле у двери не является выходом стоя через проём двери
                             self._visitor_exiting_at_door = False
             elif self._door_visit_active:
+                pat_overlaps_vis_spot = bool(
+                    patient_obs is not None
+                    and self._latched_visitor_bbox is not None
+                    and bbox_iou(patient_obs.bbox_norm, self._latched_visitor_bbox) >= 0.20
+                )
                 if (
-                    cur_gray_small is not None
+                    not pat_overlaps_vis_spot
+                    and cur_gray_small is not None
                     and cur_textured
                     and self._last_visitor_roi_blur is not None
                     and self._latched_visitor_bbox is not None
@@ -4360,12 +4437,24 @@ class PatientIdentifier:
                         and idle_sec >= 2.5
                         and not door_busy_now
                     )
+                    visit_span_sec = max(
+                        0.0,
+                        self._last_visitor_seen_at - self._door_visit_started_at,
+                    )
+                    transient_door_passby = (
+                        not non_bed_obs_in_room
+                        and not self._visitor_spot_occupied
+                        and not self._visitor_entered_interior
+                        and visit_span_sec < 3.0
+                        and idle_sec >= 2.5
+                        and not door_busy_now
+                    )
                     timed_out = (
                         not non_bed_obs_in_room
                         and not self._visitor_spot_occupied
                         and idle_sec >= self._door_visit_idle_timeout_sec
                     )
-                    if exited_via_door or timed_out:
+                    if exited_via_door or transient_door_passby or timed_out:
                         self._reset_door_visit_portal()
 
             self._last_update_now = now

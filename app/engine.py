@@ -35,6 +35,8 @@ from .geometry import (
     bbox_iou,
     bbox_polygon_overlap_ratio,
     is_person_on_bed,
+    is_pose_touching_door,
+    is_standing_in_front_of_bed,
     point_in_polygon,
     sanitize_collapsed_bed_keypoints,
 )
@@ -1728,6 +1730,30 @@ class FallGuardEngine:
             spot_occupied = bool(getattr(self.identifier, "visitor_spot_occupied", False))
             vis_bbox = self._resolve_latched_visitor_bbox()
             if spot_occupied and vis_bbox is not None:
+                overlaps_patient_card = any(
+                    t.get("role") == Role.PATIENT.value
+                    and isinstance(t.get("bbox"), (list, tuple))
+                    and len(t["bbox"]) == 4
+                    and bbox_iou(
+                        (
+                            float(vis_bbox[0]),
+                            float(vis_bbox[1]),
+                            float(vis_bbox[2]),
+                            float(vis_bbox[3]),
+                        ),
+                        (
+                            float(t["bbox"][0]),
+                            float(t["bbox"][1]),
+                            float(t["bbox"][2]),
+                            float(t["bbox"][3]),
+                        ),
+                    )
+                    >= 0.20
+                    for t in out
+                )
+                if overlaps_patient_card:
+                    spot_occupied = False
+            if spot_occupied and vis_bbox is not None:
                 vis_card: dict[str, Any] = {
                     "track_id": self._resolve_latched_visitor_tid(),
                     "role": Role.VISITOR.value,
@@ -2742,13 +2768,21 @@ class FallGuardEngine:
             # 1) Самоисцеление при ложной тревоге («Ты ошибся») для всех состояний (включая sitting_up и fallen):
             # если виновный трек находится вне кровати ИЛИ стоит/сидит у кровати без истории сна (< 3 с),
             # переводим его в Role.VISITOR, откатываем загрязнённый якорь и повышаем реального человека на кровати!
+            # Исключение: единственная подтверждённая бабушка, сидящая на кровати (не разжалуем в «Своего»).
+            was_bed_latched_ctx = bool(
+                (alert_ctx or {}).get("was_bed_latched", False)
+                if isinstance(alert_ctx, dict)
+                else False
+            )
+            should_demote = False
+            target_obs: PoseObservation | None = None
+            target_tr: TrackIdentity | None = None
             if cand_tid is not None and zones_now.has_door:
                 target_obs = next(
                     (o for o in obs_snapshot if o.track_id == cand_tid),
                     None,
                 )
                 target_tr = ident_init.get(cand_tid)
-                should_demote = False
                 if target_obs is not None:
                     on_bed_now = (
                         is_person_on_bed(target_obs, zones_now.bed_polygon, zones=zones_now)
@@ -2786,6 +2820,53 @@ class FallGuardEngine:
                         )
                         if not reclining_now and bed_accum < 3.0:
                             should_demote = True
+
+                    # Защита от разжалования единственной бабушки в «Своего» при ложной тревоге вставания:
+                    # если в кадре 1 человек с подтверждённой личностью / историей кровати (не стоящий у двери/перед кроватью)
+                    if should_demote and len(obs_snapshot) == 1 and target_tr is not None:
+                        tr_reason = str(getattr(target_tr, "reason", "") or "")
+                        tr_was_on_bed = bool(getattr(target_tr, "was_on_bed", False))
+                        tr_bed_accum = float(getattr(target_tr, "bed_accum_sec", 0.0))
+                        touching_door_now = is_pose_touching_door(
+                            target_obs,
+                            zones_now.door_polygon,
+                            min_overlap=0.15,
+                        )
+                        standing_front_now = (
+                            zones_now.has_bed
+                            and is_standing_in_front_of_bed(
+                                target_obs,
+                                zones_now.bed_polygon,
+                                zones=zones_now,
+                            )
+                        )
+                        tall_stander_now = bool(
+                            hasattr(self.identifier, "_is_tall_floor_stander")
+                            and self.identifier._is_tall_floor_stander(  # type: ignore[attr-defined]
+                                target_obs,
+                                target_tr,
+                                zones_now,
+                            )
+                        )
+                        confirmed_sole_grandma = (
+                            on_bed_now
+                            and (
+                                tr_reason == "face_patient"
+                                or tr_was_on_bed
+                                or tr_bed_accum >= 1.0
+                                or not was_bed_latched_ctx
+                            )
+                        ) or (
+                            not was_bed_latched_ctx
+                            and (tr_reason == "face_patient" or tr_was_on_bed or tr_bed_accum >= 3.0)
+                        )
+                        if (
+                            confirmed_sole_grandma
+                            and not touching_door_now
+                            and not standing_front_now
+                            and not tall_stander_now
+                        ):
+                            should_demote = False
                 elif target_tr is not None and not bool(getattr(target_tr, "was_on_bed", False)):
                     if float(getattr(target_tr, "bed_accum_sec", 0.0)) < 1.0:
                         should_demote = True
@@ -2840,7 +2921,21 @@ class FallGuardEngine:
             # 3) Снимаем ложную тревогу в FSM без 15-минутной паузы
             bed_latched_now = self._is_patient_in_bed_latched()
             if hasattr(self.fsm, "dismiss_false_alert"):
-                self.fsm.dismiss_false_alert(bed_latched_now)  # type: ignore[attr-defined]
+                if (
+                    not should_demote
+                    and target_obs is not None
+                    and alert_state in ("sitting_up", "left_bed")
+                ):
+                    try:
+                        self.fsm.dismiss_false_alert(  # type: ignore[attr-defined]
+                            bed_latched_now,
+                            seated_patient_obs=target_obs,
+                            zones=zones_now,
+                        )
+                    except TypeError:
+                        self.fsm.dismiss_false_alert(bed_latched_now)  # type: ignore[attr-defined]
+                else:
+                    self.fsm.dismiss_false_alert(bed_latched_now)  # type: ignore[attr-defined]
             elif hasattr(self.fsm, "reset_to_idle"):
                 self.fsm.reset_to_idle()  # type: ignore[attr-defined]
                 if bed_latched_now and self.fsm.state != PatientState.PAUSED:

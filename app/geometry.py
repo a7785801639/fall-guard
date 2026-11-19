@@ -602,7 +602,7 @@ def is_standing_in_front_of_bed(
         # Полноростовой взрослый на калиброванном полу перед кроватью (включая лёгкий сгиб колена или наклон к подушке)
         if (
             hom.calibrated
-            and obs.bbox_norm[3] >= (bed_max_y + 0.06)
+            and obs.bbox_norm[3] >= (bed_max_y + 0.045)
             and obs.bbox_height >= 0.42
         ):
             if (
@@ -610,7 +610,7 @@ def is_standing_in_front_of_bed(
                 and m.height_cm is not None
                 and m.height_cm >= 168.0
                 and (
-                    obs.bbox_norm[1] <= (bed_min_y - 0.015)
+                    obs.bbox_norm[1] <= (bed_min_y - 0.012)
                     or (m.floor_xy_cm is not None and m.floor_xy_cm[1] >= 58.0)
                 )
             ):
@@ -637,6 +637,12 @@ def is_standing_in_front_of_bed(
         ):
             return True
 
+    # При калиброванной гомографии пола не проваливаемся в 2D-эвристику бортов кровати:
+    # сидящий на матрасе человек со свешенными ногами имеет таз на кровати (Z=55 см)
+    # и уже отклонён FloorHomography.measure_pose().
+    if m is not None and hom.calibrated:
+        return False
+
     # Геометрический фолбэк для нестандартных синтетических полигонов без калиброванного пола
     if angle >= 28.0 or obs.aspect_ratio_wh >= 0.55:
         return False
@@ -654,6 +660,11 @@ def is_standing_in_front_of_bed(
         dist_in = polygon_distance_norm(mh, bed_polygon)
         if mh[1] < (bed_max_y - 0.08) and dist_in > 0.08:
             return False
+        if mh[1] < (bed_max_y - 0.08):
+            for k_idx in (KP_L_KNEE, KP_R_KNEE):
+                k_pt = obs.kp(k_idx, 0.45)
+                if k_pt is not None and k_pt[1] < (bed_max_y - 0.015) and point_in_polygon(k_pt, bed_polygon):
+                    return False
     return True
 
 
@@ -1096,6 +1107,17 @@ def are_legs_hanging_outside_bed(
         and point_in_polygon(ms, bed_polygon)
         and point_in_polygon(mh, bed_polygon)
         and obs.bbox_norm[3] <= (bed_max_y + 0.03)
+    ):
+        return False
+    if (
+        angle is not None
+        and angle >= 58.0
+        and ms is not None
+        and mh is not None
+        and polygon_distance_norm(ms, bed_polygon) >= 0.03
+        and polygon_distance_norm(mh, bed_polygon) >= 0.03
+        and obs.torso_vertical_rise() <= 0.085
+        and mh[1] <= (bed_max_y - 0.07)
     ):
         return False
     anchor = obs.mid_hip or obs.body_center
