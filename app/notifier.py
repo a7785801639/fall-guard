@@ -20,6 +20,7 @@ from .devices import (
     ALERT_MODE_FALLS,
     ALERT_MODE_STANDUP,
     alert_matches_mode,
+    normalize_duty,
     normalize_alert_mode,
 )
 from .state_machine import AlertEvent, AlertSeverity
@@ -240,6 +241,8 @@ class TelegramNotifier:
         self._transport = transport
 
         self._sub_lock = threading.RLock()
+        # Проверка дежурств (ставит движок): (chat_id, событие) -> слать ли этому чату
+        self.duty_gate: Callable[[str, AlertEvent], bool] | None = None
         self._subscribers: dict[str, dict[str, Any]] = {}
         self._load_subscribers()
         self._seed_env_subscribers()
@@ -302,6 +305,7 @@ class TelegramNotifier:
                     "joined_at": str(item.get("joined_at") or ""),
                     "enabled": is_enabled,
                     "mode": normalize_alert_mode(item.get("mode")),
+                    "duty": normalize_duty(item.get("duty")),
                 }
             with self._sub_lock:
                 self._subscribers = loaded
@@ -390,7 +394,26 @@ class TelegramNotifier:
                     matches = bool(for_fall or mode == ALERT_MODE_ALL)
                 if matches:
                     result.append(cid)
-            return result
+        # Дежурства — вне блокировки: проверка смотрит и на телефоны, и на других получателей
+        gate = self.duty_gate
+        if event is not None and gate is not None:
+            result = [cid for cid in result if gate(cid, event)]
+        return result
+
+    def set_subscriber_duty(self, chat_id: str, duty: dict[str, Any]) -> dict[str, object] | None:
+        """Часы дежурства Telegram-получателя."""
+        cid = str(chat_id or "").strip()
+        with self._sub_lock:
+            existing = self._subscribers.get(cid)
+            if existing is None and cid not in self._env_chat_ids:
+                return None
+            if existing is None:
+                existing = {"chat_id": cid, "name": f"Чат из .env ({cid})", "username": "",
+                            "joined_at": "статический (.env)", "enabled": True, "mode": ALERT_MODE_ALL}
+                self._subscribers[cid] = existing
+            existing["duty"] = normalize_duty(duty)
+        self._save_subscribers()
+        return next((i for i in self.list_subscribers() if i.get("chat_id") == cid), None)
 
     def get_subscriber_mode(self, chat_id: str) -> str:
         with self._sub_lock:
@@ -463,6 +486,7 @@ class TelegramNotifier:
                         "removable": False,
                         "enabled": bool(sub.get("enabled", True)) if sub is not None else True,
                         "mode": normalize_alert_mode(sub.get("mode")) if sub is not None else ALERT_MODE_ALL,
+                        "duty": normalize_duty(sub.get("duty")) if sub is not None else normalize_duty(None),
                     }
                 )
             for cid, sub in self._subscribers.items():
@@ -478,6 +502,7 @@ class TelegramNotifier:
                         "removable": True,
                         "enabled": bool(sub.get("enabled", True)),
                         "mode": normalize_alert_mode(sub.get("mode")),
+                        "duty": normalize_duty(sub.get("duty")),
                     }
                 )
             return items

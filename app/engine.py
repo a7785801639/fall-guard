@@ -26,7 +26,7 @@ from .capture import VideoStreamCapture
 from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
 from .camera_health import CameraHealthMonitor
-from .devices import AlertFeed, DeviceStore
+from .devices import AlertFeed, DeviceStore, alert_matches_mode, duty_covers, duty_on
 from .feedback import FalseAlertFeedbackStore, is_safe_alert_id
 from .geometry import (
     KP_L_ANKLE,
@@ -892,6 +892,10 @@ class FallGuardEngine:
         if "webapp_url" in notif_params:
             notif_kwargs["webapp_url"] = self.settings.public_webapp_url
         self.notifier = TelegramNotifier(**notif_kwargs)  # type: ignore[arg-type]
+        if hasattr(self.notifier, "duty_gate"):
+            self.notifier.duty_gate = lambda cid, ev: self.duty_allows(
+                "telegram", cid, getattr(ev.state, "value", ev.state), getattr(ev.severity, "value", ev.severity), time.time()
+            )
 
     def _load_events_locked(self) -> None:
         if not self._events_path.exists():
@@ -2202,6 +2206,41 @@ class FallGuardEngine:
             "tracks": tracks_snapshot,
         }
 
+    # ---------------------------------------------------------------- дежурства
+    def _duty_recipients(self) -> list[tuple[str, str, dict[str, Any], str]]:
+        """Все включённые получатели: (вид, id, дежурство, режим). Молчащие телефоны не считаются."""
+        out: list[tuple[str, str, dict[str, Any], str]] = []
+        for d in self.devices.list():
+            if d.get("enabled") and not d.get("stale"):
+                out.append(("device", str(d["id"]), d.get("duty") or {}, str(d.get("mode") or "all")))
+        for sub in self.notifier.list_subscribers() if hasattr(self.notifier, "list_subscribers") else []:
+            if sub.get("enabled", True):
+                out.append(("telegram", str(sub.get("chat_id")), dict(sub.get("duty") or {}), str(sub.get("mode") or "all")))
+        return out
+
+    def duty_allows(self, kind: str, rid: str, state: Any, severity: Any, ts: float) -> bool:
+        """
+        Получит ли этот получатель тревогу, поднятую в момент ts. Решает время тревоги, а не опроса:
+        иначе телефон, у которого кончилось дежурство посреди тревоги, перестал бы звонить.
+        Если в этот час на дежурстве нет никого, кому эта тревога подходит, — шлём всем.
+        """
+        ns, ne = self._night_hours()
+        hour = datetime.fromtimestamp(float(ts)).hour
+        recips = self._duty_recipients()
+        mine = next((r for r in recips if r[0] == kind and r[1] == str(rid)), None)
+        duty = mine[2] if mine else {}
+        if duty_covers(duty, state, hour, ns, ne):
+            return True
+        anyone = any(
+            duty_covers(r[2], state, hour, ns, ne) and alert_matches_mode(state, severity, r[3])
+            for r in recips
+        )
+        return not anyone
+
+    def duty_now(self, duty: Any) -> bool:
+        ns, ne = self._night_hours()
+        return duty_on(duty, datetime.now().hour, ns, ne)
+
     def _night_hours(self) -> tuple[int, int]:
         p = self.prefs.get()
         return int(p["night_start_hour"]), int(p["night_end_hour"])
@@ -2299,9 +2338,9 @@ class FallGuardEngine:
                 "telegram_configured": self.settings.telegram_configured,
                 "telegram_bot_username": uname,
                 "telegram_bot_url": f"https://t.me/{uname}",
-                "telegram_subscribers": subs,
+                "telegram_subscribers": [{**x, "on_duty": self.duty_now(x.get("duty"))} for x in subs],
                 "telegram_recipients_count": len(self.notifier.get_recipient_chat_ids()),
-                "devices": self.devices.list(),
+                "devices": [{**d, "on_duty": self.duty_now(d.get("duty"))} for d in self.devices.list()],
                 "public_webapp_url": self.settings.public_webapp_url,
                 "missing_env_keys": self.settings.missing_required_keys(),
                 "runtime": self.pose.runtime_label,
@@ -2333,6 +2372,8 @@ class FallGuardEngine:
                 "clip_pre_sec": float(self.settings.pre_event_seconds),
                 # Часы сервера: клиенты считают «сколько прошло» от них, а не от своих (часы телефона могут уйти)
                 "server_ts": round(time.time(), 3),
+                # Дежурства и ночи считаются по часам сервера: пульт предупредит, если они не совпадают с вашими
+                "server_tz_offset_min": round(-(time.altzone if time.localtime().tm_isdst > 0 else time.timezone) / 60),
                 "feedback_stats": feedback_stats,
                 "recent_clips": recent_clips,
             }

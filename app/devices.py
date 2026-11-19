@@ -50,6 +50,56 @@ def alert_matches_mode(state: object, severity: object, mode: object) -> bool:
     return False
 
 
+# --- Дежурства: кому слать тревоги в какие часы ------------------------------------------
+DUTY_MODES = ("always", "night", "day", "custom")
+
+
+def normalize_duty(raw: object) -> dict[str, Any]:
+    """{"mode": always|night|day|custom, "from": час, "to": час, "falls_always": bool}. Нет — всегда."""
+    d = raw if isinstance(raw, dict) else {}
+    mode = str(d.get("mode") or "always").strip().lower()
+    if mode not in DUTY_MODES:
+        mode = "always"
+
+    def hour(v: object, default: int) -> int:
+        try:
+            return int(v) % 24  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "mode": mode,
+        "from": hour(d.get("from"), 22),
+        "to": hour(d.get("to"), 7),
+        "falls_always": bool(d.get("falls_always", True)),
+    }
+
+
+def _in_hours(hour: int, start: int, end: int) -> bool:
+    if start == end:
+        return True
+    return start <= hour < end if start < end else (hour >= start or hour < end)
+
+
+def duty_on(duty: object, hour: int, night_start: int = 22, night_end: int = 7) -> bool:
+    """Дежурит ли получатель в этот час (местное время сервера). Ночь — из настроек ночного режима."""
+    d = normalize_duty(duty)
+    if d["mode"] == "always":
+        return True
+    if d["mode"] == "night":
+        return _in_hours(hour, night_start, night_end)
+    if d["mode"] == "day":
+        return not _in_hours(hour, night_start, night_end)
+    return _in_hours(hour, d["from"], d["to"])
+
+
+def duty_covers(duty: object, state: object, hour: int, night_start: int = 22, night_end: int = 7) -> bool:
+    """Получит ли тревогу: дежурит — да; не дежурит — только падение, если «падения — всегда»."""
+    st = str(getattr(state, "value", state) or "").strip().lower()
+    d = normalize_duty(duty)
+    return duty_on(d, hour, night_start, night_end) or (st == "fallen" and d["falls_always"])
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -96,6 +146,7 @@ class DeviceStore:
                     "token_hash": token_hash,
                     "mode": normalize_alert_mode(item.get("mode")),
                     "enabled": bool(item.get("enabled", True)),
+                    "duty": normalize_duty(item.get("duty")),
                     "created_at": float(item.get("created_at") or 0.0),
                     "last_seen": float(item.get("last_seen") or 0.0),
                 }
@@ -122,6 +173,7 @@ class DeviceStore:
             "platform": dev["platform"],
             "mode": dev["mode"],
             "enabled": dev["enabled"],
+            "duty": normalize_duty(dev.get("duty")),
             "created_at": dev["created_at"],
             "last_seen": dev["last_seen"],
         }
@@ -231,6 +283,7 @@ class DeviceStore:
         name: str | None = None,
         mode: str | None = None,
         enabled: bool | None = None,
+        duty: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             dev = self._devices.get(str(dev_id or "").strip())
@@ -242,6 +295,8 @@ class DeviceStore:
                 dev["mode"] = normalize_alert_mode(mode)
             if enabled is not None:
                 dev["enabled"] = bool(enabled)
+            if duty is not None:
+                dev["duty"] = normalize_duty(duty)
             self._save_locked()
             return self._public(dev)
 
@@ -294,6 +349,14 @@ class AlertFeed:
             }
             self._items.append(item)
             return dict(item)
+
+    def last_ts(self, states: tuple[str, ...]) -> float | None:
+        """Время последней тревоги с одним из этих состояний — с него и решаем, кто на дежурстве."""
+        with self._lock:
+            for item in reversed(self._items):
+                if str(item.get("state")) in states:
+                    return float(item.get("ts") or 0.0) or None
+        return None
 
     def since(self, after_seq: int, mode: str = ALERT_MODE_ALL, max_age_sec: float = 0.0) -> list[dict[str, Any]]:
         eff_mode = normalize_alert_mode(mode)

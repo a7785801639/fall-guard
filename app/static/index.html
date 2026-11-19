@@ -562,6 +562,9 @@
     .ring-left span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; }
     /* Сводка за сутки — плитки */
     /* Ночи по неделям */
+    .duty-note { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--raise-2); color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .duty-note svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+    .duty-note b { color: var(--warn); font-weight: 650; }
     .ninsight { display: flex; gap: 12px; padding: 14px; border-radius: 14px; background: var(--raise-2); }
     .ninsight > div { display: grid; gap: 3px; min-width: 0; }
     .ninsight b { font-size: 15px; }
@@ -2399,7 +2402,9 @@
     const who = me.kind === "telegram" ? "мне в Telegram" : me.kind === "device" ? "на этот телефон" : "в этом браузере";
     $("sigTitle").textContent = me.kind === "lan" ? "Звук в этом браузере" : "Тревоги " + who;
     card.dataset.lan = me.kind === "lan" ? "1" : "0"; // в браузере выбор событий нужен и без звука — что считать тревогой на экране
-    $("sigSub").textContent = on ? "Включены · " + (MODE_SHORT[normMode(me.mode)] || MODE_SHORT.all)
+    const r = dutyRange(me.duty);
+    $("sigSub").textContent = on && r && me.on_duty === false ? `Не на дежурстве · до ${hh(r[0])}:00 ${me.duty && me.duty.falls_always === false ? "тишина" : "только падения"}`
+      : on ? "Включены · " + (MODE_SHORT[normMode(me.mode)] || MODE_SHORT.all) + (r ? ` · дежурство ${hh(r[0])}–${hh(r[1])}` : "")
       : me.kind === "lan" ? "Выключен" : "Выключены";
     $("modeHint").textContent = on ? (MODE_HINT[normMode(me.mode)] || MODE_HINT.all)
       : me.kind === "lan" ? "Тревога будет видна только на экране" : "Падения и другие тревоги сюда не придут";
@@ -3139,16 +3144,17 @@
     else h += `<div class="rows">` + subs.map((s) => {
       const cid = esc(s.chat_id), mine = me.kind === "telegram" && me.id === String(s.chat_id);
       return recipientRow(`<span class="ri tg">${initial(s.name)}</span>`, esc(s.name) + (mine ? ' <span class="badge calm">это вы</span>' : ""),
-        (s.enabled ? "тревоги включены" : "тревоги выключены") + (s.username ? " · @" + esc(s.username) : ""),
+        (s.enabled ? "тревоги включены" : "тревоги выключены") + (s.username ? " · @" + esc(s.username) : "") + dutySub(s),
         modeSeg(s.mode, `(m=>setSubMode('${cid}',m))`), sw(s.enabled, `toggleSub('${cid}')`, "Тревоги"),
-        s.removable ? `subMenu(this,'${cid}')` : "");
+        `subMenu(this,'${cid}')`);
     }).join("") + `</div>`;
     if (S.telegram_configured) h += `<div class="row" style="margin-top:10px"><a class="btn" href="${esc(S.telegram_bot_url || "https://t.me/" + bot)}" target="_blank" rel="noopener">${ico("i-send")}Открыть @${esc(bot)}</a><button class="btn" onclick="testTelegram()">${ico("i-camera")}Проверочный кадр всем</button></div>`;
     h += `</div><div class="group"><h3>Телефоны с приложением</h3>`;
+    const anyDuty = [...subs, ...devs].some((x) => x.duty && x.duty.mode !== "always");
     if (devs.length) h += `<div class="rows">` + devs.map((d) => {
       const id = esc(d.id), mine = me.kind === "device" && me.id === d.id, fresh = d.last_seen && nowS() - d.last_seen < 600;
       return recipientRow(ri("i-phone", fresh ? "calm" : ""), esc(d.name) + (mine ? ' <span class="badge calm">этот телефон</span>' : ""),
-        d.stale ? `<span class="badge warn">не на связи ${esc(dur(d.offline_sec || 0))}</span>` : d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь",
+        (d.stale ? `<span class="badge warn">не на связи ${esc(dur(d.offline_sec || 0))}</span>` : d.last_seen ? "на связи " + ago(d.last_seen) : "ещё не выходил на связь") + dutySub(d),
         modeSeg(d.mode, `(m=>patchDevice('${id}',{mode:m}))`), sw(d.enabled, `patchDevice('${id}',{enabled:${!d.enabled}})`, "Тревоги"),
         `devMenu(this,'${id}')`);
     }).join("") + `</div>`;
@@ -3161,6 +3167,10 @@
             <span class="ring-left" title="Код действует ограниченное время"><svg viewBox="0 0 44 44"><circle class="bg" cx="22" cy="22" r="19"/><circle class="fg" id="pairRing" cx="22" cy="22" r="19" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="0"/></svg><span class="num" id="pairLeft"></span></span></div>
         </div></div>`;
     } else h += `<button class="btn block" style="margin-top:10px" onclick="pairPhone()">${ico("i-phone-plus")}Подключить телефон</button>`;
+    if (anyDuty) {
+      const diff = Math.round(((S.server_tz_offset_min ?? -new Date().getTimezoneOffset()) + new Date().getTimezoneOffset()) / 60);
+      h += `<div class="duty-note">${ico("i-clock")}<span>Вне своих часов — только падения. Если не дежурит никто, тревогу получат все.${diff ? ` <b>Часы сервера отличаются от ваших на ${Math.abs(diff)} ч</b> — дежурства считаются по ним (TZ в .env).` : ""}</span></div>`;
+    }
     if (native && typeof native.isPipEnabled === "function") {
       let pipOn = true; try { pipOn = native.isPipEnabled(); } catch (_) {}
       h += `<div class="rows" style="margin-top:10px"><div class="rowi">${ri("i-pip", pipOn ? "calm" : "")}<div class="rowi-body"><div class="rowi-title">Видео в маленьком окне</div><div class="rowi-sub">при сворачивании приложения</div></div>${sw(pipOn, "togglePipSetting()", "Маленькое окно")}</div></div>`;
@@ -3174,8 +3184,68 @@
     return `<div class="rowi rcp">${icon}<div class="rowi-body"><div class="rowi-title">${title}</div><div class="rowi-sub">${sub}</div></div>${menuFn ? moreBtn(menuFn, "Ещё") : ""}
       <div class="rcp-ctrl">${seg}<span class="rcp-sw"><span class="muted small">Тревоги</span>${toggle}</span></div></div>`;
   }
-  function subMenu(el, cid) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отключить чат", icon: "i-trash", cls: "danger", fn: () => removeSub(cid) }]); }
-  function devMenu(el, id) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Отвязать телефон", icon: "i-trash", cls: "danger", fn: () => removeDevice(id) }]); }
+  function subMenu(el, cid) {
+    const s = (S.telegram_subscribers || []).find((x) => String(x.chat_id) === String(cid)) || {};
+    const items = dutyItems(s.duty, (duty) => saveDuty("telegram", cid, duty));
+    if (s.removable) items.push({ label: "Отключить чат", icon: "i-trash", cls: "danger", fn: () => removeSub(cid) });
+    const [x, y] = menuAt(el); showMenu(x - 230, y, "Когда получать тревоги", items);
+  }
+  function devMenu(el, id) {
+    const d = (S.devices || []).find((x) => x.id === id) || {};
+    const items = dutyItems(d.duty, (duty) => saveDuty("device", id, duty));
+    items.push({ label: "Отвязать телефон", icon: "i-trash", cls: "danger", fn: () => removeDevice(id) });
+    const [x, y] = menuAt(el); showMenu(x - 230, y, "Когда получать тревоги", items);
+  }
+
+  /* ---------- Дежурства: кому слать тревоги в какие часы ---------- */
+  const nightHours = () => { const p = (S && S.prefs) || {}; return [Number(p.night_start_hour ?? 22), Number(p.night_end_hour ?? 7)]; };
+  const hh = (h) => pad(((h % 24) + 24) % 24);
+  function dutyRange(duty) {
+    const [ns, ne] = nightHours(), d = duty || {};
+    if (d.mode === "night") return [ns, ne];
+    if (d.mode === "day") return [ne, ns];
+    if (d.mode === "custom") return [Number(d.from), Number(d.to)];
+    return null;
+  }
+  function dutyLabel(duty) {
+    const d = duty || {}, r = dutyRange(d);
+    if (!r) return "";
+    const word = d.mode === "night" ? "ночью" : d.mode === "day" ? "днём" : "";
+    return `дежурит ${word ? word + ", " : ""}${hh(r[0])}–${hh(r[1])}`;
+  }
+  /** Подпись в строке получателя: часы дежурства и «сейчас не дежурит». */
+  function dutySub(x) {
+    const lbl = dutyLabel(x.duty);
+    if (!lbl) return "";
+    return ` · ${lbl}${x.duty.falls_always === false ? ", падения не будят" : ""}` + (x.on_duty === false && x.enabled ? ` <span class="badge">сейчас не дежурит</span>` : "");
+  }
+  function dutyItems(duty, save) {
+    const d = Object.assign({ mode: "always", from: 22, to: 7, falls_always: true }, duty || {});
+    const [ns, ne] = nightHours();
+    const opt = (mode, label, extra) => ({ label, icon: d.mode === mode ? "i-check" : "i-blank", cls: d.mode === mode ? "on" : "", fn: () => mode === "custom" ? pickHours(d, save) : save(Object.assign({}, d, { mode }, extra || {})) });
+    return [
+      opt("always", "Всегда"),
+      opt("night", `Только ночью · ${hh(ns)}–${hh(ne)}`),
+      opt("day", `Только днём · ${hh(ne)}–${hh(ns)}`),
+      opt("custom", d.mode === "custom" ? `Свои часы · ${hh(d.from)}–${hh(d.to)}` : "Свои часы…"),
+      ...(d.mode !== "always" ? [{ label: "Падения — всегда", icon: d.falls_always ? "i-check" : "i-blank", cls: d.falls_always ? "on" : "", fn: () => save(Object.assign({}, d, { falls_always: !d.falls_always })) }] : []),
+    ];
+  }
+  /** Свои часы — два коротких выбора подряд: с какого часа и до какого. */
+  function pickHours(d, save) {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const at = menuAt($("sheetBody").querySelector(".more") || $("sheetBody"));
+    showMenu(at[0] - 230, at[1], "Дежурит с", hours.map((h) => ({ label: hh(h) + ":00", icon: h === d.from ? "i-check" : "i-blank", cls: h === d.from ? "on" : "", fn: () => {
+      setTimeout(() => showMenu(at[0] - 230, at[1], `С ${hh(h)}:00 — до`, hours.filter((x) => x !== h).map((t) => ({ label: hh(t) + ":00", icon: t === d.to ? "i-check" : "i-blank", cls: t === d.to ? "on" : "", fn: () => save(Object.assign({}, d, { mode: "custom", from: h, to: t })) }))), 0);
+    } })));
+  }
+  async function saveDuty(kind, id, duty) {
+    const r = kind === "device" ? await call(`/api/devices/${id}`, { json: { duty } }) : await call(`/api/subscribers/${id}/duty`, { json: { duty } });
+    if (!r) return;
+    toast(duty.mode === "always" ? "Получает тревоги всегда" : "Дежурство: " + dutyLabel(duty).replace(/^дежурит /, ""));
+    await poll(true); renderSheet(); refreshMe();
+  }
+
   function zoneMenu(el, payload) { const [x, y] = menuAt(el); showMenu(x - 190, y, "", [{ label: "Убрать зону", icon: "i-trash", cls: "danger", fn: () => clearZone(payload) }]); }
   function ignoreMenu(el) {
     const [x, y] = menuAt(el);

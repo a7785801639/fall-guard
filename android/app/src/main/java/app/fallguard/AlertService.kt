@@ -320,7 +320,13 @@ class AlertService : Service() {
         val state = j.optString("state")
         val (title, _) = Glance.describe(state, alarmActive)
         linkTitle = title
-        setLink(j.optString("status_line", "На связи") + (if (enabled) " · $mode" else " · тревоги выключены"))
+        // Дежурства: вне своих часов этот телефон получает только падения
+        val onDuty = j.optBoolean("on_duty", true)
+        setLink(j.optString("status_line", "На связи") + when {
+            !enabled -> " · тревоги выключены"
+            !onDuty -> " · не на дежурстве"
+            else -> " · $mode"
+        })
         Glance.update(this, state, alarmActive, if (enabled) "" else "тревоги выключены", true)
     }
 
