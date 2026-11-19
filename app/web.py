@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .devices import DEVICE_COOKIE, normalize_alert_mode
+from .devices import DEVICE_COOKIE, normalize_alert_mode, normalize_duty
 from .engine import FallGuardEngine
 from .qr_svg import render_qr_svg
 from .patient_id import Role
@@ -101,6 +101,11 @@ class DevicePatchPayload(BaseModel):
     name: str | None = None
     mode: str | None = None
     enabled: bool | None = None
+    duty: dict[str, Any] | None = None
+
+
+class DutyPayload(BaseModel):
+    duty: dict[str, Any]
 
 
 class TelegramAuthPayload(BaseModel):
@@ -244,6 +249,10 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
                 }
         return None
 
+    def _sub_duty(cid: str) -> dict[str, Any]:
+        sub = next((x for x in engine.notifier.list_subscribers() if str(x.get("chat_id")) == cid), None)
+        return normalize_duty(sub.get("duty") if sub else None)
+
     def _resolve_identity(request: Request) -> dict[str, Any]:
         """Кто смотрит пульт: привязанный телефон, подписчик Telegram или анонимный браузер в LAN."""
         auth = _authenticate_external_credentials(
@@ -259,6 +268,8 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
                 "name": str(dev.get("name") or auth.get("name") or "Телефон"),
                 "mode": normalize_alert_mode(dev.get("mode")),
                 "enabled": bool(dev.get("enabled", True)),
+                "duty": normalize_duty(dev.get("duty")),
+                "on_duty": engine.duty_now(dev.get("duty")),
             }
         if auth is not None and auth.get("chat_id"):
             cid = str(auth["chat_id"])
@@ -268,6 +279,8 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
                 "name": str(auth.get("name") or f"Чат {cid}"),
                 "mode": engine.notifier.get_subscriber_mode(cid),
                 "enabled": engine.notifier.is_subscriber_enabled(cid),
+                "duty": _sub_duty(cid),
+                "on_duty": engine.duty_now(_sub_duty(cid)),
             }
         return {"kind": "lan", "id": "", "name": "Этот браузер", "mode": "all", "enabled": True}
 
@@ -554,6 +567,14 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
         engine.log_event("info", f"{name}: тревоги {'включены' if enabled else 'выключены'}", category="system")
         return {"ok": True, "me": _resolve_identity(request)}
 
+    @app.post("/api/subscribers/{chat_id}/duty")
+    def set_subscriber_duty(chat_id: str, payload: DutyPayload) -> dict:
+        """Часы дежурства Telegram-получателя."""
+        updated = engine.notifier.set_subscriber_duty(chat_id, payload.duty)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Подписчик не найден")
+        return {"ok": True, "subscriber": updated, "subscribers": engine.list_subscribers_normalized()}
+
     @app.post("/api/subscribers/{chat_id}/mode")
     def set_subscriber_mode(chat_id: str, payload: AlertModePayload) -> dict:
         updated = engine.notifier.set_subscriber_mode(chat_id, payload.mode)
@@ -635,6 +656,7 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             name=payload.name,
             mode=payload.mode,
             enabled=payload.enabled,
+            duty=payload.duty,
         )
         if updated is None:
             raise HTTPException(status_code=404, detail="Устройство не найдено")
@@ -667,10 +689,19 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             if alerts or time.monotonic() >= deadline or await request.is_disconnected():
                 break
             await asyncio.sleep(0.4)
+        if me["kind"] in ("device", "telegram"):
+            alerts = [a for a in alerts if engine.duty_allows(me["kind"], me["id"], a.get("state"), a.get("severity"), float(a.get("ts") or time.time()))]
         for item in alerts:
             item["image_url"] = f"/api/clips/{item['id']}.jpg" if item.get("has_image") else ""
         state = engine.fsm.state.value
         fall_active = bool(engine.fsm.fall_unacknowledged and state == "fallen")
+        # Звонит ли тревога этому получателю — по той тревоге, что её подняла, и по её времени:
+        # состояние могло уже смениться, а дежурство — закончиться, но непринятая тревога звонит дальше
+        raised = engine.alert_feed.last_alarm() or {}
+        duty_ok = me["kind"] not in ("device", "telegram") or engine.duty_allows(
+            me["kind"], me["id"], raised.get("state") or "fallen", raised.get("severity") or "critical",
+            float(raised.get("ts") or time.time()),
+        )
         return {
             "ok": True,
             "alerts": alerts,
@@ -678,12 +709,28 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             "state": state,
             "status_line": engine.get_human_status_line(),
             "fall_active": fall_active,
-            "alarm_active": bool(engine.fsm.fall_unacknowledged) and enabled
+            "alarm_active": bool(engine.fsm.fall_unacknowledged) and enabled and duty_ok
             and (fall_active or eff_mode == "all"),
+            "on_duty": me.get("on_duty", True),
             "mode": eff_mode,
             "enabled": enabled,
             "server_ts": round(time.time(), 3),
         }
+
+    @app.get("/api/report.pdf")
+    def doctor_report(days: int = Query(default=30, ge=7, le=400)) -> Response:
+        """Отчёт для врача: падения и ночная активность за период. Собирается в потоке, не в цикле событий."""
+        from .doctor_report import build_report
+
+        pdf = build_report(engine.get_care_stats(days=days), days)
+        name = f"fallguard-report-{time.strftime('%Y-%m-%d')}.pdf"
+        engine.log_event("info", f"Сформирован отчёт для врача за {days} дн.", category="system")
+        return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/api/stats/nights")
+    def care_stats(days: int = Query(default=28, ge=7, le=400)) -> dict:
+        """Ночи за последние недели, тренд и падения — для графиков в журнале."""
+        return {"ok": True, **engine.get_care_stats(days=days)}
 
     @app.get("/api/status")
     def status(

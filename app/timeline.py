@@ -409,6 +409,20 @@ class TimelineStore:
                 "spans": visible,
             }
 
+    def spans_between(self, start_ts: float, end_ts: float) -> list[dict[str, Any]]:
+        """Копии интервалов, обрезанные по окну [start_ts, end_ts) — для ночной сводки."""
+        out: list[dict[str, Any]] = []
+        with self._lock:
+            for sp in self._spans:
+                st = max(float(start_ts), float(sp["start"]))
+                en = min(float(end_ts), float(sp["end"]))
+                if en <= st:
+                    continue
+                item = dict(sp)
+                item["start"], item["end"] = st, en
+                out.append(item)
+        return out
+
     def summary_stats(
         self,
         now_ts: float | None = None,

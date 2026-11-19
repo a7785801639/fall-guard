@@ -600,7 +600,8 @@ class MainActivity : Activity() {
             val o = JSONObject()
             o.put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" })
             val st = Readiness.check(ctx)
-            o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen))
+            o.put("ready", JSONObject().put("notifications", st.notifications).put("battery", st.battery).put("fullScreen", st.fullScreen).put("overlay", st.overlay))
+            o.put("overlayAlarm", prefs.overlayAlarm)
             val pend = if (Updater.enabled) Updater.pending(ctx) else null
             o.put("update", JSONObject().put("enabled", Updater.enabled).put("pending", pend?.name ?: JSONObject.NULL))
             o.put("lan", prefs.lanUrl).put("public", prefs.publicUrl)
@@ -691,10 +692,15 @@ class MainActivity : Activity() {
                             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
                         } catch (_: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
                         "fullScreen" -> if (Build.VERSION.SDK_INT >= 34) startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                        "overlay" -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                     }
                 } catch (_: Exception) {}
             }
         }
+
+        /** Мини-тревога сверху экрана вкл/выкл (разрешение — отдельно, «Разрешить»). */
+        @JavascriptInterface
+        fun setOverlayAlarm(on: Boolean) { prefs.overlayAlarm = on }
 
         @JavascriptInterface
         fun checkUpdate() {
@@ -860,6 +866,31 @@ class MainActivity : Activity() {
                     .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "FallGuard/" + safeName(name, "mp4"))
                 getSystemService(DownloadManager::class.java)?.enqueue(req)
                 runOnUiThread { Toast.makeText(this@MainActivity, "Видео скачивается — уведомление покажет, когда готово", Toast.LENGTH_SHORT).show() }
+                true
+            } catch (_: Exception) { false }
+        }
+
+        /**
+         * Любой файл с сервера (отчёт для врача в PDF и т. п.) — в «Загрузки/FallGuard» системным загрузчиком.
+         * Только с адреса своего сервера, с авторизацией телефона; из уведомления файл открывается сразу.
+         */
+        @JavascriptInterface
+        fun downloadFile(url: String, name: String, mime: String): Boolean {
+            val base = loadedBase
+            if (base.isEmpty()) return false
+            val full = if (url.startsWith("http")) url else base.trimEnd('/') + "/" + url.trimStart('/')
+            if (!full.startsWith(base)) return false
+            val ext = name.substringAfterLast('.', "").ifEmpty { "bin" }
+            return try {
+                val req = DownloadManager.Request(Uri.parse(full))
+                    .addRequestHeader("Cookie", "fg_device=${prefs.token}")
+                    .setTitle(name)
+                    .setDescription("FallGuard")
+                    .setMimeType(mime.ifBlank { "application/octet-stream" })
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "FallGuard/" + safeName(name.substringBeforeLast('.'), ext))
+                getSystemService(DownloadManager::class.java)?.enqueue(req)
+                runOnUiThread { Toast.makeText(this@MainActivity, "Файл скачивается — откройте его из уведомления", Toast.LENGTH_SHORT).show() }
                 true
             } catch (_: Exception) { false }
         }

@@ -21,11 +21,12 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .archive import ClipArchiveStore
+from .care_history import CareHistory, care_trend_window, trend as care_trend
 from .capture import VideoStreamCapture
 from .config import Settings
 from .detector import PoseTracker, _load_font, render_annotated_frame
 from .camera_health import CameraHealthMonitor
-from .devices import AlertFeed, DeviceStore
+from .devices import AlertFeed, DeviceStore, alert_matches_mode, duty_covers, duty_on
 from .feedback import FalseAlertFeedbackStore, is_safe_alert_id
 from .geometry import (
     KP_L_ANKLE,
@@ -729,6 +730,9 @@ class FallGuardEngine:
             self.settings.data_dir / "timeline.json",
             window_sec=86400.0,
         )
+        # Сводки ночей и список падений — для графиков по неделям и отчёта врачу
+        self.care = CareHistory(self.settings.data_dir / "care_history.json")
+        self._care_rollup_mono = -1e9
         self.thumbs = _create_thumbnail_store(self.settings.data_dir / "thumbs")
         self.prefs = RuntimePrefsStore(
             self.settings.data_dir / "runtime_prefs.json",
@@ -890,6 +894,10 @@ class FallGuardEngine:
         if "webapp_url" in notif_params:
             notif_kwargs["webapp_url"] = self.settings.public_webapp_url
         self.notifier = TelegramNotifier(**notif_kwargs)  # type: ignore[arg-type]
+        if hasattr(self.notifier, "duty_gate"):
+            self.notifier.duty_gate = lambda cid, ev: self.duty_allows(
+                "telegram", cid, getattr(ev.state, "value", ev.state), getattr(ev.severity, "value", ev.severity), time.time()
+            )
 
     def _load_events_locked(self) -> None:
         if not self._events_path.exists():
@@ -2224,6 +2232,84 @@ class FallGuardEngine:
             "tracks": tracks_snapshot,
         }
 
+    # ---------------------------------------------------------------- дежурства
+    def _duty_recipients(self) -> list[tuple[str, str, dict[str, Any], str]]:
+        """Все включённые получатели: (вид, id, дежурство, режим). Молчащие телефоны не считаются."""
+        out: list[tuple[str, str, dict[str, Any], str]] = []
+        for d in self.devices.list():
+            if d.get("enabled") and not d.get("stale"):
+                out.append(("device", str(d["id"]), d.get("duty") or {}, str(d.get("mode") or "all")))
+        for sub in self.notifier.list_subscribers() if hasattr(self.notifier, "list_subscribers") else []:
+            if sub.get("enabled", True):
+                out.append(("telegram", str(sub.get("chat_id")), dict(sub.get("duty") or {}), str(sub.get("mode") or "all")))
+        return out
+
+    def duty_allows(self, kind: str, rid: str, state: Any, severity: Any, ts: float) -> bool:
+        """
+        Получит ли этот получатель тревогу, поднятую в момент ts. Решает время тревоги, а не опроса:
+        иначе телефон, у которого кончилось дежурство посреди тревоги, перестал бы звонить.
+        Если в этот час на дежурстве нет никого, кому эта тревога подходит, — шлём всем.
+        """
+        ns, ne = self._night_hours()
+        hour = datetime.fromtimestamp(float(ts)).hour
+        recips = self._duty_recipients()
+        mine = next((r for r in recips if r[0] == kind and r[1] == str(rid)), None)
+        duty = mine[2] if mine else {}
+        if duty_covers(duty, state, hour, ns, ne):
+            return True
+        anyone = any(
+            duty_covers(r[2], state, hour, ns, ne) and alert_matches_mode(state, severity, r[3])
+            for r in recips
+        )
+        return not anyone
+
+    def duty_now(self, duty: Any) -> bool:
+        ns, ne = self._night_hours()
+        return duty_on(duty, datetime.now().hour, ns, ne)
+
+    def _record_timeline(self, cam_ok: bool) -> None:
+        """Хроника состояний — и сразу (раз в минуту) сворачивание закончившейся ночи.
+        Не зависит от того, открыт ли пульт: иначе ночь, которую никто не смотрел, потерялась бы."""
+        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._maybe_care_rollup()
+
+    def _night_hours(self) -> tuple[int, int]:
+        p = self.prefs.get()
+        return int(p["night_start_hour"]), int(p["night_end_hour"])
+
+    def _maybe_care_rollup(self) -> None:
+        """Раз в минуту: закончившаяся ночь сворачивается в запись истории (пока хроника её помнит)."""
+        mono = time.monotonic()
+        if mono - self._care_rollup_mono < 60.0:
+            return
+        self._care_rollup_mono = mono
+        try:
+            ns, ne = self._night_hours()
+            self.care.rollup(self.timeline, ns, ne)
+        except Exception as exc:
+            logger.warning("Не удалось обновить историю ночей: %s", exc)
+
+    def get_care_stats(self, days: int = 28) -> dict[str, Any]:
+        """Ночи за последние недели, идущая ночь, тренд и падения — для графиков и отчёта."""
+        self._care_rollup_mono = -1e9
+        self._maybe_care_rollup()
+        ns, ne = self._night_hours()
+        days = max(7, min(400, int(days)))
+        nights = self.care.nights(days=max(days, care_trend_window()))
+        false_ids = self.feedback.false_alert_ids()
+        since = time.time() - days * 86400.0
+        falls = [dict(f, false_alarm=f["id"] in false_ids) for f in self.care.falls(since_ts=since)]
+        now = time.time()
+        return {
+            "night_hours": [ns, ne],
+            "nights": [n for n in nights if n["start"] >= now - days * 86400.0 - 86400.0],
+            "current": self.care.current_night(self.timeline, ns, ne),
+            "trend": care_trend(nights),
+            "falls": falls,
+            "server_tz_offset_min": round(-time.altzone / 60 if time.localtime().tm_isdst > 0 else -time.timezone / 60),
+            "server_ts": round(now, 3),
+        }
+
     def get_status(self, timeline_window_sec: float = 21600.0) -> dict[str, Any]:
         now = time.monotonic()
         z = self.zones.get()
@@ -2233,6 +2319,7 @@ class FallGuardEngine:
         prefs_cur = self.prefs.get()
         diag = self.get_care_diagnostics(now_mono=now)
         summary_24h = self.timeline.summary_stats(window_sec=86400.0)
+        self._maybe_care_rollup()
         clips_stats = self.archive.storage_stats()
         feedback_stats = self.feedback.stats()
         recent_clips = self.archive.list_clips(limit=40)
@@ -2283,9 +2370,9 @@ class FallGuardEngine:
                 "telegram_configured": self.settings.telegram_configured,
                 "telegram_bot_username": uname,
                 "telegram_bot_url": f"https://t.me/{uname}",
-                "telegram_subscribers": subs,
+                "telegram_subscribers": [{**x, "on_duty": self.duty_now(x.get("duty"))} for x in subs],
                 "telegram_recipients_count": len(self.notifier.get_recipient_chat_ids()),
-                "devices": self.devices.list(),
+                "devices": [{**d, "on_duty": self.duty_now(d.get("duty"))} for d in self.devices.list()],
                 "public_webapp_url": self.settings.public_webapp_url,
                 "missing_env_keys": self.settings.missing_required_keys(),
                 "runtime": self.pose.runtime_label,
@@ -2317,6 +2404,8 @@ class FallGuardEngine:
                 "clip_pre_sec": float(self.settings.pre_event_seconds),
                 # Часы сервера: клиенты считают «сколько прошло» от них, а не от своих (часы телефона могут уйти)
                 "server_ts": round(time.time(), 3),
+                # Дежурства и ночи считаются по часам сервера: пульт предупредит, если они не совпадают с вашими
+                "server_tz_offset_min": round(-(time.altzone if time.localtime().tm_isdst > 0 else time.timezone) / 60),
                 "feedback_stats": feedback_stats,
                 "recent_clips": recent_clips,
             }
@@ -2392,7 +2481,7 @@ class FallGuardEngine:
         with self._lock:
             self._sync_tracks_summary_locked()
         cam_ok = bool(self.get_camera_transform().get("connected", self.capture.is_connected))
-        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._record_timeline(cam_ok)
         self._log_event("info", f"Пауза охраны ({int(seconds // 60)} мин)", category="system")
         self.publish_telemetry()
 
@@ -2408,7 +2497,7 @@ class FallGuardEngine:
                 self._caregiver_nearby = False
             self._sync_tracks_summary_locked()
         cam_ok = bool(self.get_camera_transform().get("connected", self.capture.is_connected))
-        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._record_timeline(cam_ok)
         self._log_event("info", "Охрана включена", category="system")
         self.publish_telemetry()
 
@@ -3071,6 +3160,11 @@ class FallGuardEngine:
             clip_id=clip_id,
             state=ev_state,
         )
+        if ev_state == "fallen":
+            try:
+                self.care.record_fall(alert_id, time.time(), event.title, event.description, clip_id)
+            except Exception as exc:
+                logger.warning("Не удалось записать падение в историю: %s", exc)
 
         def _task() -> None:
             photo_params = inspect.signature(self.notifier.send_alert_photo).parameters
@@ -3130,7 +3224,7 @@ class FallGuardEngine:
                 loop_t0 = time.monotonic()
 
                 if not self.settings.camera_configured:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     jpeg = self._build_placeholder_jpeg("Укажите RTSP_URL и TG_BOT_TOKEN в файле .env")
                     with self._lock:
                         self._latest_jpeg = jpeg
@@ -3141,7 +3235,7 @@ class FallGuardEngine:
 
                 frame, frame_ts = self.capture.get_latest()
                 if frame is None or frame_ts <= 0.0:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     err_hint = self.capture.last_error or "Подключение к камере…"
                     jpeg = self._build_placeholder_jpeg(err_hint)
                     with self._lock:
@@ -3153,7 +3247,7 @@ class FallGuardEngine:
 
                 age = loop_t0 - frame_ts
                 if age > 20.0:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     if self._camera_was_online and not self._camera_offline_alerted:
                         self._camera_offline_alerted = True
                         self._log_event("warning", "Потерян сигнал камеры (>20 с)", category="system")
@@ -3218,7 +3312,7 @@ class FallGuardEngine:
                     )
                 alert_event = self.fsm.step(**step_kwargs)
                 self._check_alarm_resolved_by_family()
-                self.timeline.record(self.fsm.state.value, True)
+                self._record_timeline(True)
                 if self.thumbs is not None:
                     try:
                         self.thumbs.maybe_record(frame, self.fsm.state.value)

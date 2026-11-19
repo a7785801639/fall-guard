@@ -100,6 +100,10 @@ class SettingsActivity : Activity() {
                 } catch (_: Exception) {}
             }
         }
+        // По желанию: когда телефон в руках, тревога выезжает карточкой сверху, не закрывая всё
+        addRow(list, st.overlay, "Мини-тревога сверху экрана", "по желанию: когда телефон в руках") {
+            try { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+        }
     }
 
     /** Полоска из трёх делений: зелёное — готово, янтарное — нужно разрешить. */
