@@ -2241,6 +2241,12 @@ class FallGuardEngine:
         ns, ne = self._night_hours()
         return duty_on(duty, datetime.now().hour, ns, ne)
 
+    def _record_timeline(self, cam_ok: bool) -> None:
+        """Хроника состояний — и сразу (раз в минуту) сворачивание закончившейся ночи.
+        Не зависит от того, открыт ли пульт: иначе ночь, которую никто не смотрел, потерялась бы."""
+        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._maybe_care_rollup()
+
     def _night_hours(self) -> tuple[int, int]:
         p = self.prefs.get()
         return int(p["night_start_hour"]), int(p["night_end_hour"])
@@ -2449,7 +2455,7 @@ class FallGuardEngine:
         with self._lock:
             self._sync_tracks_summary_locked()
         cam_ok = bool(self.get_camera_transform().get("connected", self.capture.is_connected))
-        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._record_timeline(cam_ok)
         self._log_event("info", f"Пауза охраны ({int(seconds // 60)} мин)", category="system")
         self.publish_telemetry()
 
@@ -2465,7 +2471,7 @@ class FallGuardEngine:
                 self._caregiver_nearby = False
             self._sync_tracks_summary_locked()
         cam_ok = bool(self.get_camera_transform().get("connected", self.capture.is_connected))
-        self.timeline.record(self.fsm.state.value, cam_ok)
+        self._record_timeline(cam_ok)
         self._log_event("info", "Охрана включена", category="system")
         self.publish_telemetry()
 
@@ -3123,7 +3129,7 @@ class FallGuardEngine:
                 loop_t0 = time.monotonic()
 
                 if not self.settings.camera_configured:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     jpeg = self._build_placeholder_jpeg("Укажите RTSP_URL и TG_BOT_TOKEN в файле .env")
                     with self._lock:
                         self._latest_jpeg = jpeg
@@ -3134,7 +3140,7 @@ class FallGuardEngine:
 
                 frame, frame_ts = self.capture.get_latest()
                 if frame is None or frame_ts <= 0.0:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     err_hint = self.capture.last_error or "Подключение к камере…"
                     jpeg = self._build_placeholder_jpeg(err_hint)
                     with self._lock:
@@ -3146,7 +3152,7 @@ class FallGuardEngine:
 
                 age = loop_t0 - frame_ts
                 if age > 20.0:
-                    self.timeline.record(self.fsm.state.value, False)
+                    self._record_timeline(False)
                     if self._camera_was_online and not self._camera_offline_alerted:
                         self._camera_offline_alerted = True
                         self._log_event("warning", "Потерян сигнал камеры (>20 с)", category="system")
@@ -3211,7 +3217,7 @@ class FallGuardEngine:
                     )
                 alert_event = self.fsm.step(**step_kwargs)
                 self._check_alarm_resolved_by_family()
-                self.timeline.record(self.fsm.state.value, True)
+                self._record_timeline(True)
                 if self.thumbs is not None:
                     try:
                         self.thumbs.maybe_record(frame, self.fsm.state.value)

@@ -695,9 +695,13 @@ def create_web_app(engine: FallGuardEngine, lifespan: Any = None) -> FastAPI:
             item["image_url"] = f"/api/clips/{item['id']}.jpg" if item.get("has_image") else ""
         state = engine.fsm.state.value
         fall_active = bool(engine.fsm.fall_unacknowledged and state == "fallen")
-        # Звонит ли тревога этому получателю — по дежурству в момент, когда тревога началась
-        alarm_ts = engine.alert_feed.last_ts(("fallen",)) or time.time()
-        duty_ok = me["kind"] not in ("device", "telegram") or engine.duty_allows(me["kind"], me["id"], "fallen" if fall_active else state, "critical", alarm_ts)
+        # Звонит ли тревога этому получателю — по той тревоге, что её подняла, и по её времени:
+        # состояние могло уже смениться, а дежурство — закончиться, но непринятая тревога звонит дальше
+        raised = engine.alert_feed.last_alarm() or {}
+        duty_ok = me["kind"] not in ("device", "telegram") or engine.duty_allows(
+            me["kind"], me["id"], raised.get("state") or "fallen", raised.get("severity") or "critical",
+            float(raised.get("ts") or time.time()),
+        )
         return {
             "ok": True,
             "alerts": alerts,

@@ -115,3 +115,27 @@ def test_telegram_gate_applies_duty(tmp_path: Path) -> None:
     assert "777" in engine.notifier._target_chats(event=ev)
     fall = AlertEvent(state=PatientState.FALLEN, severity=AlertSeverity.CRITICAL, title="Падение", description="", timestamp=time.time(), patient_track_id=None)
     assert cid in engine.notifier._target_chats(event=fall)
+
+
+def test_unacknowledged_fall_keeps_ringing_off_duty_phone_after_state_changes(tmp_path: Path) -> None:
+    engine, client, tokens, ids = _engine_with_phones(tmp_path)
+    hour = datetime.now().hour
+    off = {"mode": "custom", "from": (hour + 2) % 24, "to": (hour + 3) % 24, "falls_always": True}
+    engine.devices.update(ids["Борис"], duty=off)
+    engine.devices.update(ids["Анна"], duty={"mode": "always"})
+    engine.alert_feed.push("fall1", "fallen", "critical", "Падение", "На полу")
+    # Тревогу никто не принял, а состояние уже сменилось (например, «вышла из кадра»)
+    engine.fsm._fall_unacknowledged = True
+    from app.state_machine import PatientState
+    engine.fsm._state = PatientState.MISSING
+    res = client.get("/api/alerts/poll?after=0&wait=0", headers={**EXTERNAL, "authorization": f"Bearer {tokens['Борис']}"}).json()
+    assert res["alarm_active"] is True
+
+
+def test_nights_are_rolled_up_by_the_engine_without_anyone_opening_the_panel(tmp_path: Path, monkeypatch) -> None:
+    engine = FallGuardEngine(_build_test_settings(tmp_path))
+    calls = []
+    monkeypatch.setattr(engine.care, "rollup", lambda *a, **k: calls.append(a) or False)
+    engine._care_rollup_mono = -1e9
+    engine._record_timeline(True)
+    assert calls, "сворачивание ночей должно идти из основного цикла, а не только из запроса статуса"

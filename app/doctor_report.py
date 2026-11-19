@@ -67,6 +67,13 @@ def _num(v: float, digits: int = 1) -> str:
     return f"{v:.{digits}f}".replace(".", ",")
 
 
+def _utc_offset(stats: dict[str, Any]) -> str:
+    m = int(stats.get("server_tz_offset_min", 0) or 0)
+    sign = "+" if m >= 0 else "−"
+    h, mm_ = divmod(abs(m), 60)
+    return f"UTC{sign}{h}" + (f":{mm_:02d}" if mm_ else "")
+
+
 def _night_name(day: str) -> str:
     d = datetime.strptime(day, "%Y-%m-%d")
     return f"{d.day} {MONTHS[d.month - 1]}, {WD[d.weekday()]}"
@@ -143,7 +150,7 @@ def build_report(stats: dict[str, Any], days: int, now_ts: float | None = None) 
     story.append(Paragraph("Отчёт для врача: падения и ночная активность", st["h1"]))
     story.append(Paragraph(
         f"Период: {_d(period_from)} — {_d(now)} ({days} дн.) · Ночь считается с {ns:02d}:00 до {ne:02d}:00 · "
-        f"Сформирован {_d(now)} в {_hm(now)}", st["sub"]))
+        f"Сформирован {_d(now)} в {_hm(now)} · Время в отчёте — по часам системы ({_utc_offset(stats)})", st["sub"]))
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("Пациент: ______________________________ &nbsp;&nbsp; Дата рождения: ______________", st["p"]))
 

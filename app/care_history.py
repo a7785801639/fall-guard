@@ -142,10 +142,12 @@ def trend(nights: list[dict[str, Any]]) -> dict[str, Any]:
     out["getups_ratio"] = round(ratio, 2)
     if r_get - b_get >= 1.0 and ratio >= 2.0:
         out["level"] = "warn"
-        out["items"].append({
-            "kind": "getups",
-            "text": f"За неделю вставала в среднем {r_get:.1f} раза за ночь — в {ratio:.1f} раза чаще обычного ({b_get:.1f})".replace(".", ","),
-        })
+        text = (
+            f"За неделю вставала в среднем {r_get:.1f} раза за ночь — в {ratio:.1f} раза чаще обычного ({b_get:.1f})"
+            if b_get >= 0.5
+            else f"За неделю вставала в среднем {r_get:.1f} раза за ночь, а обычно почти не вставала ({b_get:.1f})"
+        )
+        out["items"].append({"kind": "getups", "text": text.replace(".", ",")})
     if b_bed - r_bed >= 1.5:
         out["level"] = "warn"
         out["items"].append({

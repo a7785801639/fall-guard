@@ -350,6 +350,14 @@ class AlertFeed:
             self._items.append(item)
             return dict(item)
 
+    def last_alarm(self) -> dict[str, Any] | None:
+        """Последняя тревога, которая звонит: падение или критическая (по ней и решаем дежурство)."""
+        with self._lock:
+            for item in reversed(self._items):
+                if str(item.get("state")) == "fallen" or str(item.get("severity")) == "critical":
+                    return dict(item)
+        return None
+
     def last_ts(self, states: tuple[str, ...]) -> float | None:
         """Время последней тревоги с одним из этих состояний — с него и решаем, кто на дежурстве."""
         with self._lock:

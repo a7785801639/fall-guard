@@ -2815,10 +2815,12 @@
     const base = tr.ready ? tr.baseline : null;
     const falls = D.falls || [], real = falls.filter((f) => !f.false_alarm);
     const fallsLine = falls.length
-      ? `<div class="rows"><div class="rowi">${ri("i-fall", real.length ? "alarm" : "")}<div class="rowi-body"><div class="rowi-title">Падений за ${nightsDays === 28 ? "4 недели" : "12 недель"}: ${real.length}</div><div class="rowi-sub">${real.slice(-3).reverse().map((f) => `${nightLabel(new Date(f.ts * 1000).toISOString().slice(0, 10))}, ${hm(f.ts)}`).join(" · ") || "—"}${falls.length > real.length ? ` · ложных: ${falls.length - real.length}` : ""}</div></div></div></div>`
+      ? `<div class="rows"><div class="rowi">${ri("i-fall", real.length ? "alarm" : "")}<div class="rowi-body"><div class="rowi-title">Падений за ${nightsDays === 28 ? "4 недели" : "12 недель"}: ${real.length}</div><div class="rowi-sub">${real.slice(-3).reverse().map((f) => { const d = new Date(f.ts * 1000); return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${hm(f.ts)}`; }).join(" · ") || "—"}${falls.length > real.length ? ` · ложных: ${falls.length - real.length}` : ""}</div></div></div></div>`
       : `<div class="rows"><div class="rowi">${ri("i-shield", "calm")}<div class="rowi-body"><div class="rowi-title">Падений за ${nightsDays === 28 ? "4 недели" : "12 недель"} не было</div></div></div></div>`;
     const table = `<details class="ntable"><summary>По ночам таблицей</summary><table><thead><tr><th>Ночь</th><th>Вставала</th><th>В кровати</th><th>Садилась</th></tr></thead><tbody>${items.slice().reverse().map((it) => `<tr class="${it.valid || it.partial ? "" : "weak"}"><td>${WDAYS[nightDate(it.day).getDay()]}, ${nightLabel(it.day)}${it.partial ? " · сейчас" : ""}</td><td>${it.getups}</td><td>${num1(it.in_bed_sec / 3600)} ч</td><td>${it.sit_ups}</td></tr>`).join("")}</tbody></table></details>`;
-    return `<div class="group">${per}${card}${report}</div>
+    const tzDiff = D.server_tz_offset_min == null ? 0 : Math.round((D.server_tz_offset_min + new Date().getTimezoneOffset()) / 60);
+    const tzNote = tzDiff ? `<div class="duty-note">${ico("i-clock")}<span><b>Часы сервера отличаются от ваших на ${Math.abs(tzDiff)} ч</b> — ночь и время в отчёте считаются по ним. Укажите свой часовой пояс в TZ в файле .env на сервере.</span></div>` : "";
+    return `<div class="group">${per}${card}${report}${tzNote}</div>
       <div class="group nchart"><h3>Сколько раз вставала за ночь</h3><p>Ночь ${hours}. Яркие — последняя неделя${items.some((i) => !i.valid && !i.partial) ? ", штриховка — камера видела меньше половины ночи" : ""}.</p>
         ${nightBars("g", items, (it) => it.getups, { fmt: (v) => String(Math.round(v)), base: base ? base.getups : null, minMax: 3, step: 1, label: "Вставания по ночам" })}<div class="ntip" id="nightTip" hidden></div></div>
       <div class="group nchart"><h3>Сколько была в кровати ночью, ч</h3><p>Не то же самое, что сон: лежать можно и без сна.</p>
