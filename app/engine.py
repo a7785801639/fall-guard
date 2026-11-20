@@ -2195,28 +2195,61 @@ class FallGuardEngine:
             if target_obs is None and len(observations) == 1:
                 target_obs = observations[0]
 
+        if target_obs is None and len(observations) > 1:
+            return False, "В кадре несколько человек — выберите конкретного человека для сохранения лица"
+        if target_obs is not None and FaceRegistry._is_back_turned_posture(target_obs):
+            return False, "Человек отвёрнут спиной к камере — лицо не сохранено"
+
         # При явном указании track_id среди нескольких людей ограничиваем поиск кропом вокруг этого трека,
-        # чтобы не захватить чужое лицо второго человека на другом краю комнаты, если целевой стоит спиной.
+        # сохраняя obs, смещение crop_origin_px и other_observations для проверки spatial ownership.
         enroll_frame = frame
         enroll_obs = target_obs
+        crop_origin_px: tuple[int, int] = (0, 0)
+        full_frame_shape: tuple[int, int] = (int(frame.shape[0]), int(frame.shape[1]))
         if track_id is not None and target_obs is not None and len(observations) > 1:
             h, w = frame.shape[:2]
             bx1, by1, bx2, by2 = target_obs.bbox_norm
             bw = max(0.05, bx2 - bx1)
             bh = max(0.05, by2 - by1)
-            cx1 = int(max(0, (bx1 - bw * 0.24) * w))
-            cx2 = int(min(w, (bx2 + bw * 0.24) * w))
-            cy1 = int(max(0, (by1 - bh * 0.20) * h))
-            cy2 = int(min(h, (by2 + bh * 0.16) * h))
+            cx1 = int(max(0, (bx1 - bw * 0.14) * w))
+            cx2 = int(min(w, (bx2 + bw * 0.14) * w))
+            cy1 = int(max(0, (by1 - bh * 0.12) * h))
+            cy2 = int(min(h, (by2 + bh * 0.12) * h))
             if (cx2 - cx1) >= 40 and (cy2 - cy1) >= 40:
                 enroll_frame = frame[cy1:cy2, cx1:cx2]
-                enroll_obs = None
+                crop_origin_px = (cx1, cy1)
+
+        other_obs = [
+            o for o in observations if target_obs is None or o.track_id != target_obs.track_id
+        ]
+        zones_now = self.zones.get()
+        latched_bed = (
+            self.identifier.latched_patient_bed_bbox
+            if getattr(self.identifier, "patient_in_bed_latched", False)
+            else None
+        )
 
         if hasattr(self.faces, "enroll_from_frame"):
             enroll_fn = getattr(self.faces, "enroll_from_frame")
-            ok, info = enroll_fn(role, enroll_frame, obs=enroll_obs)
+            try:
+                ok, info = enroll_fn(
+                    role,
+                    enroll_frame,
+                    obs=enroll_obs,
+                    other_observations=other_obs,
+                    zones=zones_now,
+                    latched_patient_bed_bbox=latched_bed,
+                    crop_origin_px=crop_origin_px,
+                    full_frame_shape=full_frame_shape,
+                )
+            except TypeError:
+                ok, info = enroll_fn(role, enroll_frame, obs=enroll_obs)
         else:
-            ok, info = self._fallback_enroll_from_frame(role, enroll_frame, enroll_obs)
+            ok, info = self._fallback_enroll_from_frame(
+                role,
+                enroll_frame,
+                enroll_obs if crop_origin_px == (0, 0) else None,
+            )
 
         if ok:
             role_ru = "бабушка" if role == Role.PATIENT else "свой"
@@ -2233,15 +2266,16 @@ class FallGuardEngine:
         if obs is not None:
             h, w = frame_bgr.shape[:2]
             bx1, by1, bx2, by2 = obs.bbox_norm
-            pad_x = (bx2 - bx1) * 0.22
-            pad_y = (by2 - by1) * 0.16
+            pad_x = (bx2 - bx1) * 0.14
+            pad_y = (by2 - by1) * 0.12
             x1 = int(max(0, (bx1 - pad_x) * w))
             x2 = int(min(w, (bx2 + pad_x) * w))
             y1 = int(max(0, (by1 - pad_y) * h))
-            y2 = int(min(h, (by1 + (by2 - by1) * 0.72) * h))
+            y2 = int(min(h, (by1 + (by2 - by1) * 0.65) * h))
             if (x2 - x1) >= 40 and (y2 - y1) >= 40:
                 candidates.append(frame_bgr[y1:y2, x1:x2])
-        candidates.append(frame_bgr)
+        else:
+            candidates.append(frame_bgr)
 
         last_err = "Лицо на кадре не обнаружено — повернитесь к камере"
         for crop in candidates:

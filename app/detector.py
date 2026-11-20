@@ -480,13 +480,22 @@ class PoseTracker:
             cand.bbox_norm, stabilized_bed_box
         ) or cls._boxes_mergeable_on_mattress(cand.bbox_norm, raw_bed_box)
 
+    def _reset_bed_pinning(self) -> None:
+        """Сбрасывает пиннинг ID кровати, эталонную рамку сна и кэш ROI при выходе трека с кровати."""
+        self._last_bed_track_id = 9001
+        self._last_bed_bbox = None
+        self._last_bed_seen_ts = 0.0
+        self._bed_envelope_bbox = None
+        self._bed_envelope_ts = 0.0
+        self._cached_roi_obs = None
+        self._cached_roi_ts = 0.0
+
     def _allocate_bed_roi_track_id(self, existing_ids: set[int]) -> int:
         tid = self._last_bed_track_id
         if tid in existing_ids:
             tid = 9001
             while tid in existing_ids:
                 tid += 1
-            self._last_bed_track_id = tid
         return tid
 
     def _resolve_anon_track_id(
@@ -563,6 +572,81 @@ class PoseTracker:
                 x2 = max(x1 + 0.14, min(x2, occ.bbox_norm[0] + 0.015))
         return (x1, y1, x2, y2)
 
+    @staticmethod
+    def _clamp_bed_envelope(
+        box_norm: tuple[float, float, float, float],
+        b_min_x: float,
+        b_max_x: float,
+        b_min_y: float,
+        b_max_y: float,
+        anchor_pt: tuple[float, float] | None = None,
+    ) -> tuple[float, float, float, float]:
+        """
+        Жёстко ограничивает спальную рамку AABB полигона кровати (+0.02 X / +0.03 Y)
+        и максимальным размером (<= 0.75 * bed_w, <= 0.72 * bed_h), исключая раздувание на пол/ходунки.
+        """
+        bed_w = max(0.12, b_max_x - b_min_x)
+        bed_h = max(0.12, b_max_y - b_min_y)
+        lim_x1 = max(0.0, b_min_x - 0.02)
+        lim_x2 = min(1.0, b_max_x + 0.02)
+        lim_y1 = max(0.0, b_min_y - 0.03)
+        lim_y2 = min(1.0, b_max_y + 0.03)
+
+        x1 = max(lim_x1, min(lim_x2, float(box_norm[0])))
+        x2 = max(lim_x1, min(lim_x2, float(box_norm[2])))
+        y1 = max(lim_y1, min(lim_y2, float(box_norm[1])))
+        y2 = max(lim_y1, min(lim_y2, float(box_norm[3])))
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+
+        max_w = 0.75 * bed_w
+        if (x2 - x1) > max_w:
+            cx = 0.5 * (x1 + x2)
+            nx1 = cx - 0.5 * max_w
+            nx2 = cx + 0.5 * max_w
+            if anchor_pt is not None:
+                ax = max(lim_x1, min(lim_x2, float(anchor_pt[0])))
+                margin_x = min(0.04, 0.25 * max_w)
+                if ax < nx1 + margin_x:
+                    nx1 = max(x1, ax - margin_x)
+                    nx2 = nx1 + max_w
+                elif ax > nx2 - margin_x:
+                    nx2 = min(x2, ax + margin_x)
+                    nx1 = nx2 - max_w
+            if nx1 < lim_x1:
+                nx1 = lim_x1
+                nx2 = min(lim_x2, nx1 + max_w)
+            elif nx2 > lim_x2:
+                nx2 = lim_x2
+                nx1 = max(lim_x1, nx2 - max_w)
+            x1, x2 = nx1, nx2
+
+        max_h = 0.72 * bed_h
+        if (y2 - y1) > max_h:
+            cy = 0.5 * (y1 + y2)
+            ny1 = cy - 0.5 * max_h
+            ny2 = cy + 0.5 * max_h
+            if anchor_pt is not None:
+                ay = max(lim_y1, min(lim_y2, float(anchor_pt[1])))
+                margin_y = min(0.04, 0.25 * max_h)
+                if ay < ny1 + margin_y:
+                    ny1 = max(y1, ay - margin_y)
+                    ny2 = ny1 + max_h
+                elif ay > ny2 - margin_y:
+                    ny2 = min(y2, ay + margin_y)
+                    ny1 = ny2 - max_h
+            if ny1 < lim_y1:
+                ny1 = lim_y1
+                ny2 = min(lim_y2, ny1 + max_h)
+            elif ny2 > lim_y2:
+                ny2 = lim_y2
+                ny1 = max(lim_y1, ny2 - max_h)
+            y1, y2 = ny1, ny2
+
+        return (x1, y1, x2, y2)
+
     def _stabilize_bed_sleeper_bbox(
         self,
         obs: PoseObservation,
@@ -573,8 +657,9 @@ class PoseTracker:
         """
         Удерживает полноразмерную спокойную рамку спящей в кровати бабушки (_bed_envelope_bbox):
         когда одеяло закрывает корпус и YOLO сжимает бокс до одной головы/воротника (bw < 0.16 или bh < 0.11
-        или площадь < 52% эталона сна), рамка монолитно держит контур спящего человека без прыжков,
-        но аккуратно поджимается по границе перекрывающего родственника (occluders).
+        или площадь < 52% эталона сна), рамка монолитно держит контур спящего человека без прыжков и раздувания,
+        строго в границах AABB кровати (+0.02 X / +0.03 Y, <= 0.75 * bed_w x <= 0.72 * bed_h),
+        и аккуратно поджимается по границе перекрывающего родственника (occluders).
         """
         if len(bed_polygon) < 3 or not self._is_reclining_in_bed(obs, bed_polygon):
             return obs
@@ -585,6 +670,10 @@ class PoseTracker:
         b_min_y, b_max_y = min(b_ys), max(b_ys)
         bed_w = max(0.12, b_max_x - b_min_x)
         bed_h = max(0.12, b_max_y - b_min_y)
+        anchor_pt = obs.head_center or obs.mid_shoulder or obs.body_center
+        obs_clamped = self._clamp_bed_envelope(
+            obs.bbox_norm, b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+        )
 
         bw = obs.bbox_width
         bh = obs.bbox_height
@@ -604,42 +693,54 @@ class PoseTracker:
 
         if bw >= 0.16 and bh >= 0.11 and (stale_env or not any_box_overlap):
             if stale_env:
-                self._bed_envelope_bbox = obs.bbox_norm
+                self._bed_envelope_bbox = obs_clamped
             else:
                 assert self._bed_envelope_bbox is not None
+                cur_env = self._clamp_bed_envelope(
+                    self._bed_envelope_bbox, b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+                )
                 env_area = max(
                     1e-6,
-                    (self._bed_envelope_bbox[2] - self._bed_envelope_bbox[0])
-                    * (self._bed_envelope_bbox[3] - self._bed_envelope_bbox[1]),
+                    (cur_env[2] - cur_env[0]) * (cur_env[3] - cur_env[1]),
                 )
                 if area >= 0.52 * env_area:
                     a_env = 0.20
-                    self._bed_envelope_bbox = (
-                        self._bed_envelope_bbox[0] * (1.0 - a_env) + obs.bbox_norm[0] * a_env,
-                        self._bed_envelope_bbox[1] * (1.0 - a_env) + obs.bbox_norm[1] * a_env,
-                        self._bed_envelope_bbox[2] * (1.0 - a_env) + obs.bbox_norm[2] * a_env,
-                        self._bed_envelope_bbox[3] * (1.0 - a_env) + obs.bbox_norm[3] * a_env,
+                    blended_env = (
+                        cur_env[0] * (1.0 - a_env) + obs_clamped[0] * a_env,
+                        cur_env[1] * (1.0 - a_env) + obs_clamped[1] * a_env,
+                        cur_env[2] * (1.0 - a_env) + obs_clamped[2] * a_env,
+                        cur_env[3] * (1.0 - a_env) + obs_clamped[3] * a_env,
                     )
+                    self._bed_envelope_bbox = self._clamp_bed_envelope(
+                        blended_env, b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+                    )
+                else:
+                    self._bed_envelope_bbox = cur_env
             self._bed_envelope_ts = now
         elif stale_env:
             # Старт сразу с глубоко укрытой головы: строим естественную горизонтальную рамку сна вдоль кровати
-            anchor_pt = obs.head_center or obs.mid_shoulder or obs.body_center
             target_w = min(bed_w * 0.62, max(0.25, bw))
             target_h = min(bed_h * 0.56, max(0.16, bh))
             if (b_max_x - anchor_pt[0]) <= (anchor_pt[0] - b_min_x):
-                ex2 = min(b_max_x, max(obs.bbox_norm[2], anchor_pt[0] + 0.04))
+                ex2 = min(b_max_x, max(obs_clamped[2], anchor_pt[0] + 0.04))
                 ex1 = max(b_min_x, ex2 - target_w)
             else:
-                ex1 = max(b_min_x, min(obs.bbox_norm[0], anchor_pt[0] - 0.04))
+                ex1 = max(b_min_x, min(obs_clamped[0], anchor_pt[0] - 0.04))
                 ex2 = min(b_max_x, ex1 + target_w)
-            ey1 = max(max(0.0, b_min_y - 0.02), min(obs.bbox_norm[1], anchor_pt[1] - target_h * 0.36))
-            ey2 = min(b_max_y, max(obs.bbox_norm[3], ey1 + target_h))
-            self._bed_envelope_bbox = (ex1, ey1, ex2, ey2)
+            ey1 = max(max(0.0, b_min_y - 0.02), min(obs_clamped[1], anchor_pt[1] - target_h * 0.36))
+            ey2 = min(b_max_y, max(obs_clamped[3], ey1 + target_h))
+            self._bed_envelope_bbox = self._clamp_bed_envelope(
+                (ex1, ey1, ex2, ey2), b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+            )
             self._bed_envelope_ts = now
 
         env = self._bed_envelope_bbox
         if env is None:
             return obs
+        env = self._clamp_bed_envelope(
+            env, b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+        )
+        self._bed_envelope_bbox = env
 
         if any_box_overlap:
             self._bed_envelope_ts = now
@@ -660,19 +761,54 @@ class PoseTracker:
         env_area = max(1e-6, (env[2] - env[0]) * (env[3] - env[1]))
         is_shrunk = bw < 0.16 or bh < 0.11 or area < (0.52 * env_area)
         if is_shrunk:
-            merged = (
-                min(env[0], obs.bbox_norm[0]),
-                min(env[1], obs.bbox_norm[1]),
-                max(env[2], obs.bbox_norm[2]),
-                max(env[3], obs.bbox_norm[3]),
-            )
-            alpha = 0.15
-            stable_box = (
-                env[0] * (1.0 - alpha) + merged[0] * alpha,
-                env[1] * (1.0 - alpha) + merged[1] * alpha,
-                env[2] * (1.0 - alpha) + merged[2] * alpha,
-                env[3] * (1.0 - alpha) + merged[3] * alpha,
-            )
+            # Без монотонного min/max храповика: если obs внутри env — держим env на месте;
+            # если край obs вышел за env — мягко сдвигаем env с сохранением размеров (rigid shift).
+            ox1, oy1, ox2, oy2 = obs_clamped
+            dx = 0.0
+            if ox1 < env[0] and ox2 <= env[2]:
+                dx = ox1 - env[0]
+            elif ox2 > env[2] and ox1 >= env[0]:
+                dx = ox2 - env[2]
+            elif ox1 < env[0] and ox2 > env[2]:
+                dx = 0.5 * (ox1 + ox2) - 0.5 * (env[0] + env[2])
+
+            dy = 0.0
+            if oy1 < env[1] and oy2 <= env[3]:
+                dy = oy1 - env[1]
+            elif oy2 > env[3] and oy1 >= env[1]:
+                dy = oy2 - env[3]
+            elif oy1 < env[1] and oy2 > env[3]:
+                dy = 0.5 * (oy1 + oy2) - 0.5 * (env[1] + env[3])
+
+            if dx != 0.0 or dy != 0.0:
+                alpha = 0.15
+                lim_x1 = max(0.0, b_min_x - 0.02)
+                lim_x2 = min(1.0, b_max_x + 0.02)
+                lim_y1 = max(0.0, b_min_y - 0.03)
+                lim_y2 = min(1.0, b_max_y + 0.03)
+                ew = env[2] - env[0]
+                eh = env[3] - env[1]
+                sx1 = env[0] + dx * alpha
+                sy1 = env[1] + dy * alpha
+                sx2 = env[2] + dx * alpha
+                sy2 = env[3] + dy * alpha
+                if sx1 < lim_x1:
+                    sx1 = lim_x1
+                    sx2 = min(lim_x2, sx1 + ew)
+                elif sx2 > lim_x2:
+                    sx2 = lim_x2
+                    sx1 = max(lim_x1, sx2 - ew)
+                if sy1 < lim_y1:
+                    sy1 = lim_y1
+                    sy2 = min(lim_y2, sy1 + eh)
+                elif sy2 > lim_y2:
+                    sy2 = lim_y2
+                    sy1 = max(lim_y1, sy2 - eh)
+                stable_box = self._clamp_bed_envelope(
+                    (sx1, sy1, sx2, sy2), b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
+                )
+            else:
+                stable_box = env
             self._bed_envelope_bbox = stable_box
             self._bed_envelope_ts = now
             vis_box = self._clip_bed_bbox_by_occluders(stable_box, obs, occluders)
@@ -690,11 +826,14 @@ class PoseTracker:
             )
 
         alpha_steady = 0.15
-        steady_box = (
-            env[0] * (1.0 - alpha_steady) + obs.bbox_norm[0] * alpha_steady,
-            env[1] * (1.0 - alpha_steady) + obs.bbox_norm[1] * alpha_steady,
-            env[2] * (1.0 - alpha_steady) + obs.bbox_norm[2] * alpha_steady,
-            env[3] * (1.0 - alpha_steady) + obs.bbox_norm[3] * alpha_steady,
+        steady_raw = (
+            env[0] * (1.0 - alpha_steady) + obs_clamped[0] * alpha_steady,
+            env[1] * (1.0 - alpha_steady) + obs_clamped[1] * alpha_steady,
+            env[2] * (1.0 - alpha_steady) + obs_clamped[2] * alpha_steady,
+            env[3] * (1.0 - alpha_steady) + obs_clamped[3] * alpha_steady,
+        )
+        steady_box = self._clamp_bed_envelope(
+            steady_raw, b_min_x, b_max_x, b_min_y, b_max_y, anchor_pt=anchor_pt
         )
         self._bed_envelope_bbox = steady_box
         self._bed_envelope_ts = now
@@ -726,10 +865,14 @@ class PoseTracker:
         h, w = frame_bgr.shape[:2]
         rx1, ry1, rx2, ry2 = win
         bed_crop = np.ascontiguousarray(frame_bgr[ry1:ry2, rx1:rx2])
+        has_existing_on_bed = any(
+            is_person_on_bed(ex, zones.bed_polygon, zones=zones) for ex in existing_obs
+        )
+        roi_min_conf = eff_conf if has_existing_on_bed else 0.07
         trt_kw = {"rect": False} if self._loaded_is_engine else {}
         roi_results = roi_model.predict(
             source=bed_crop,
-            conf=0.07,
+            conf=roi_min_conf,
             imgsz=640,
             device=device_arg,
             verbose=False,
@@ -758,6 +901,9 @@ class PoseTracker:
         best_cand: PoseObservation | None = None
 
         for i in range(len(r_boxes)):
+            cand_conf = float(r_confs[i])
+            if has_existing_on_bed and cand_conf < eff_conf:
+                continue
             lx1, ly1, lx2, ly2 = r_xyxy[i]
             bbox_norm = (
                 max(0.0, min(1.0, float(rx1 + lx1) * inv_w)),
@@ -786,7 +932,7 @@ class PoseTracker:
                 PoseObservation(
                     track_id=candidate_track_id,
                     bbox_norm=bbox_norm,
-                    conf=float(r_confs[i]),
+                    conf=cand_conf,
                     keypoints_norm=tuple(pts_list),
                 ),
                 zones.bed_polygon,
@@ -1137,6 +1283,22 @@ class PoseTracker:
         )
 
         if has_bed and zones is not None:
+            # Если прикреплённый к кровати трек реально сошёл с кровати (наблюдается вне bed_polygon),
+            # немедленно сбрасываем пиннинг ID и кэш ROI, чтобы ID не телепортировался обратно на пустой матрас.
+            if self._last_bed_seen_ts > 0.0 and any(
+                o.track_id == self._last_bed_track_id
+                and not is_person_on_bed(o, zones.bed_polygon, zones=zones)
+                for o in observations
+            ):
+                self._reset_bed_pinning()
+            elif self._cached_roi_obs is not None and any(
+                o.track_id == self._cached_roi_obs.track_id
+                and not is_person_on_bed(o, zones.bed_polygon, zones=zones)
+                for o in observations
+            ):
+                self._cached_roi_obs = None
+                self._cached_roi_ts = 0.0
+
             reclining_tracks = [o for o in observations if self._is_reclining_in_bed(o, zones.bed_polygon)]
             if reclining_tracks:
                 max_bed_conf = max(o.conf for o in reclining_tracks)
@@ -1221,6 +1383,9 @@ class PoseTracker:
                 self._cached_roi_ts = now
             else:
                 existing_ids = {o.track_id for o in observations}
+                has_existing_on_bed = any(
+                    is_person_on_bed(o, zones.bed_polygon, zones=zones) for o in observations
+                )
                 roi_tid = self._allocate_bed_roi_track_id(existing_ids)
                 someone_else_present = len(observations) > 0
                 recently_in_bed = self._last_bed_seen_ts > 0.0 and (now - self._last_bed_seen_ts) <= 30.0
@@ -1240,6 +1405,16 @@ class PoseTracker:
                 if cache_motion_broken:
                     self._cached_roi_obs = None
                     self._cached_roi_ts = 0.0
+                can_use_cached_roi = (
+                    self._cached_roi_obs is not None
+                    and not (
+                        has_existing_on_bed
+                        and (
+                            self._cached_roi_obs.conf < eff_conf
+                            or self._cached_roi_obs.track_id in existing_ids
+                        )
+                    )
+                )
                 if first_probe or cache_motion_broken or (now - self._last_roi_probe_ts) >= needed_interval:
                     self._last_roi_probe_ts = now
                     roi_cand = self._infer_bed_roi_fallback(
@@ -1265,7 +1440,8 @@ class PoseTracker:
                         self._last_bed_seen_ts = now
                         observations.append(roi_cand)
                     elif (
-                        self._cached_roi_obs is not None
+                        can_use_cached_roi
+                        and self._cached_roi_obs is not None
                         and not cache_motion_broken
                         and frame_bgr is not None
                         and int(np.ptp(frame_bgr)) >= 8
@@ -1287,8 +1463,10 @@ class PoseTracker:
                     else:
                         self._cached_roi_obs = None
                         self._cached_roi_ts = 0.0
-                elif self._cached_roi_obs is not None and (now - self._cached_roi_ts) <= max(
-                    0.75, needed_interval + 0.25
+                elif (
+                    can_use_cached_roi
+                    and self._cached_roi_obs is not None
+                    and (now - self._cached_roi_ts) <= max(0.75, needed_interval + 0.25)
                 ):
                     cached = self._cached_roi_obs
                     if cached.track_id in existing_ids:

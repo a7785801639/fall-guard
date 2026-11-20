@@ -111,6 +111,11 @@ def _coerce_role(role: Role | str) -> Role | None:
     return None
 
 
+def _is_synthetic_bed_roi_id(track_id: int) -> bool:
+    """Синтетический спальный Bed ROI трек (9000..9999); не затрагивает anon (>=10001) и длинный ByteTrack."""
+    return 9000 <= int(track_id) < 10_000
+
+
 @dataclass
 class TrackIdentity:
     track_id: int
@@ -607,36 +612,67 @@ class FaceRegistry:
         return fcx, fcy
 
     @staticmethod
-    def _build_head_and_upper_crops(
+    def _build_head_and_upper_crops_with_origin(
         frame_bgr: np.ndarray,
         obs: PoseObservation,
-    ) -> list[tuple[np.ndarray, bool]]:
-        """Формирует кропы головы и верха бокса для ручной регистрации эталона (enroll_from_frame)."""
-        h, w = frame_bgr.shape[:2]
-        crops: list[tuple[np.ndarray, bool]] = []
+        crop_origin_px: tuple[int, int] = (0, 0),
+        full_frame_shape: tuple[int, int] | None = None,
+    ) -> list[tuple[np.ndarray, tuple[int, int], bool]]:
+        """
+        Формирует кропы головы и верха бокса с пиксельным смещением origin_px в координатах полного кадра
+        для пространственной проверки владения лицом при enroll_from_frame.
+        """
+        ch, cw = frame_bgr.shape[:2]
+        full_h, full_w = full_frame_shape if full_frame_shape is not None else (ch, cw)
+        ox, oy = int(crop_origin_px[0]), int(crop_origin_px[1])
+        crops: list[tuple[np.ndarray, tuple[int, int], bool]] = []
         bx1, by1, bx2, by2 = obs.bbox_norm
         bw = max(0.05, bx2 - bx1)
         bh = max(0.05, by2 - by1)
         angle = obs.torso_angle_from_vertical_deg()
         allow_rot = angle is None or angle >= 42.0 or obs.bbox_height <= 0.34
 
+        def _append_norm_rect(nx1: float, ny1: float, nx2: float, ny2: float, rot: bool) -> None:
+            lx1 = max(0, int(nx1 * full_w) - ox)
+            lx2 = min(cw, int(nx2 * full_w) - ox)
+            ly1 = max(0, int(ny1 * full_h) - oy)
+            ly2 = min(ch, int(ny2 * full_h) - oy)
+            if (lx2 - lx1) >= 32 and (ly2 - ly1) >= 32:
+                crops.append((frame_bgr[ly1:ly2, lx1:lx2], (ox + lx1, oy + ly1), rot))
+
         hc = obs.head_center
         if hc is not None:
             rad = max(0.075, min(0.20, max(bw * 0.45, min(bh, 0.32) * 0.34)))
-            hx1 = int(max(0, (hc[0] - rad) * w))
-            hx2 = int(min(w, (hc[0] + rad) * w))
-            hy1 = int(max(0, (hc[1] - rad) * h))
-            hy2 = int(min(h, (hc[1] + rad) * h))
-            if (hx2 - hx1) >= 32 and (hy2 - hy1) >= 32:
-                crops.append((frame_bgr[hy1:hy2, hx1:hx2], allow_rot))
+            _append_norm_rect(hc[0] - rad, hc[1] - rad, hc[0] + rad, hc[1] + rad, allow_rot)
 
-        cx1 = int(max(0, (bx1 - bw * 0.14) * w))
-        cx2 = int(min(w, (bx2 + bw * 0.14) * w))
-        cy1 = int(max(0, (by1 - bh * 0.10) * h))
-        cy2 = int(min(h, (by1 + min(bh * 0.48, 0.28)) * h))
-        if (cx2 - cx1) >= 32 and (cy2 - cy1) >= 32:
-            crops.append((frame_bgr[cy1:cy2, cx1:cx2], allow_rot))
+        _append_norm_rect(
+            bx1 - bw * 0.14,
+            by1 - bh * 0.10,
+            bx2 + bw * 0.14,
+            by1 + min(bh * 0.48, 0.28),
+            allow_rot,
+        )
+        if allow_rot:
+            _append_norm_rect(
+                bx1 - bw * 0.12,
+                by1 - bh * 0.10,
+                bx2 + bw * 0.12,
+                by2 + bh * 0.10,
+                True,
+            )
         return crops
+
+    @classmethod
+    def _build_head_and_upper_crops(
+        cls,
+        frame_bgr: np.ndarray,
+        obs: PoseObservation,
+    ) -> list[tuple[np.ndarray, bool]]:
+        """Формирует кропы головы и верха бокса для ручной регистрации эталона (enroll_from_frame)."""
+        return [
+            (region, allow_rot)
+            for region, _, allow_rot in cls._build_head_and_upper_crops_with_origin(frame_bgr, obs)
+        ]
 
     @staticmethod
     def _build_strict_match_crops(
@@ -697,6 +733,34 @@ class FaceRegistry:
                         loaded[img_path.name] = emb
                 self._embeddings[role_key] = loaded
 
+    def _check_cross_gallery_collision(
+        self,
+        parsed_role: Role,
+        emb: np.ndarray,
+    ) -> tuple[bool, str]:
+        """
+        Cross-gallery guard (Волна 15): отклоняет сохранение лица в группу parsed_role,
+        если оно слишком похоже на противоположную галерею:
+        sim_other >= 0.56 ИЛИ (sim_other >= 0.48 и sim_other >= sim_own + 0.08).
+        """
+        other_role = Role.VISITOR if parsed_role == Role.PATIENT else Role.PATIENT
+        sim_own = max(
+            (cosine_sim(emb, ref) for ref in self._embeddings[parsed_role.value].values()),
+            default=0.0,
+        )
+        sim_other = max(
+            (cosine_sim(emb, ref) for ref in self._embeddings[other_role.value].values()),
+            default=0.0,
+        )
+        if sim_other >= 0.56 or (sim_other >= 0.48 and sim_other >= sim_own + 0.08):
+            other_ru = "«Свой»" if other_role == Role.VISITOR else "«Бабушка»"
+            return (
+                False,
+                f"Лицо совпадает с противоположной группой {other_ru} "
+                f"(sim_other={sim_other:.2f}, sim_own={sim_own:.2f}) — сохранение отклонено",
+            )
+        return True, ""
+
     def add_photo(self, role: Role | str, filename: str, raw_bytes: bytes) -> tuple[bool, str]:
         parsed_role = _coerce_role(role)
         if parsed_role is None:
@@ -708,9 +772,14 @@ class FaceRegistry:
             img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if img is None:
                 return False, "Файл не является корректным изображением"
-            emb, _, oriented_img = self._detect_face_with_rotations(img, allow_rotations=True)
-            if emb is None:
+            emb, face_rect, oriented_img = self._detect_face_with_rotations(img, allow_rotations=True)
+            if emb is None or face_rect is None:
                 return False, "На фото не обнаружено чёткое лицо — выберите более крупный снимок анфас"
+            if int(face_rect[2]) < 36 or int(face_rect[3]) < 36:
+                return False, "Лицо на фото слишком мелкое (< 36 px) — выберите более крупный снимок анфас"
+            ok_cross, cross_msg = self._check_cross_gallery_collision(parsed_role, emb)
+            if not ok_cross:
+                return False, cross_msg
             safe_stem = "".join(c for c in Path(filename).stem if c.isalnum() or c in ("-", "_"))[:32] or "face"
             out_name = f"{safe_stem}_{int(time.time() * 1000) % 1_000_000}.jpg"
             out_path = self._faces_dir / parsed_role.value / out_name
@@ -726,6 +795,11 @@ class FaceRegistry:
         role: Role | str,
         frame_bgr: np.ndarray | None,
         obs: PoseObservation | None = None,
+        other_observations: Sequence[PoseObservation] | None = None,
+        zones: ZonesConfig | None = None,
+        latched_patient_bed_bbox: tuple[float, float, float, float] | None = None,
+        crop_origin_px: tuple[int, int] = (0, 0),
+        full_frame_shape: tuple[int, int] | None = None,
     ) -> tuple[bool, str]:
         """Захватывает эталон лица («Бабушка» или «Свой») прямо с живого кадра камеры."""
         parsed_role = _coerce_role(role)
@@ -733,54 +807,80 @@ class FaceRegistry:
             return False, "Допустимы только группы patient или visitor"
         if frame_bgr is None or frame_bgr.ndim != 3 or min(frame_bgr.shape[:2]) < 32:
             return False, "Кадр с камеры пуст или ещё не получен"
+        if obs is not None and self._is_back_turned_posture(obs):
+            return False, "Человек отвёрнут спиной к камере — лицо не сохранено"
 
         with self._lock:
             if not self.ensure_models():
                 return False, "Модели распознавания лиц недоступны"
 
-            h, w = frame_bgr.shape[:2]
-            candidate_crops: list[tuple[np.ndarray, bool]] = []
+            ch, cw = frame_bgr.shape[:2]
+            full_h, full_w = full_frame_shape if full_frame_shape is not None else (ch, cw)
+            candidate_crops: list[tuple[np.ndarray, tuple[int, int], bool]] = []
 
             if obs is not None:
-                candidate_crops.extend(self._build_head_and_upper_crops(frame_bgr, obs))
-                bx1, by1, bx2, by2 = obs.bbox_norm
-                bw = max(0.05, bx2 - bx1)
-                bh = max(0.05, by2 - by1)
-                fx1 = int(max(0, (bx1 - bw * 0.20) * w))
-                fx2 = int(min(w, (bx2 + bw * 0.20) * w))
-                fy1 = int(max(0, (by1 - bh * 0.15) * h))
-                fy2 = int(min(h, (by2 + bh * 0.15) * h))
-                if (fx2 - fx1) >= 32 and (fy2 - fy1) >= 32:
-                    candidate_crops.append((frame_bgr[fy1:fy2, fx1:fx2], True))
-
-            candidate_crops.append((frame_bgr, False))
+                candidate_crops.extend(
+                    self._build_head_and_upper_crops_with_origin(
+                        frame_bgr,
+                        obs,
+                        crop_origin_px=crop_origin_px,
+                        full_frame_shape=(full_h, full_w),
+                    )
+                )
+            else:
+                candidate_crops.append((frame_bgr, (int(crop_origin_px[0]), int(crop_origin_px[1])), False))
 
             chosen_img: np.ndarray | None = None
             chosen_emb: np.ndarray | None = None
 
-            for region, allow_rot in candidate_crops:
-                emb, face_rect, oriented_region = self._detect_face_with_rotations(
+            for region, origin_px, allow_rot in candidate_crops:
+                emb, face_rect, oriented_region, rot_code = self._detect_face_with_rot_code(
                     region, allow_rotations=allow_rot
                 )
-                if emb is not None and face_rect is not None:
-                    rx, ry, rw, rh = face_rect
-                    rh_img, rw_img = oriented_region.shape[:2]
-                    px1 = int(max(0, rx - rw * 0.55))
-                    py1 = int(max(0, ry - rh * 0.55))
-                    px2 = int(min(rw_img, rx + rw * 1.55))
-                    py2 = int(min(rh_img, ry + rh * 1.55))
-                    portrait = oriented_region[py1:py2, px1:px2]
-                    chosen_img = (
-                        portrait if (portrait.shape[0] >= 48 and portrait.shape[1] >= 48) else oriented_region
+                if emb is None or face_rect is None:
+                    continue
+                rx, ry, rw, rh = face_rect
+                if int(rw) < 36 or int(rh) < 36:
+                    continue
+                if obs is not None:
+                    fcx, fcy = self._map_face_center_to_frame_norm(
+                        rect=face_rect,
+                        rot_code=rot_code,
+                        crop_shape=(region.shape[0], region.shape[1]),
+                        crop_origin_px=origin_px,
+                        frame_shape=(full_h, full_w),
                     )
-                    chosen_emb = emb
-                    break
+                    if not self._is_face_spatially_owned(
+                        fcx=fcx,
+                        fcy=fcy,
+                        obs=obs,
+                        allow_rot=allow_rot,
+                        other_observations=other_observations,
+                        zones=zones,
+                        latched_patient_bed_bbox=latched_patient_bed_bbox,
+                    ):
+                        continue
+                rh_img, rw_img = oriented_region.shape[:2]
+                px1 = int(max(0, rx - rw * 0.55))
+                py1 = int(max(0, ry - rh * 0.55))
+                px2 = int(min(rw_img, rx + rw * 1.55))
+                py2 = int(min(rh_img, ry + rh * 1.55))
+                portrait = oriented_region[py1:py2, px1:px2]
+                chosen_img = (
+                    portrait if (portrait.shape[0] >= 48 and portrait.shape[1] >= 48) else oriented_region
+                )
+                chosen_emb = emb
+                break
 
             if chosen_emb is None or chosen_img is None:
                 return (
                     False,
                     "На текущем кадре камеры не видно открытого лица — повернитесь лицом к камере или добавьте свет",
                 )
+
+            ok_cross, cross_msg = self._check_cross_gallery_collision(parsed_role, chosen_emb)
+            if not ok_cross:
+                return False, cross_msg
 
             out_name = f"cam_{parsed_role.value}_{int(time.time() * 1000) % 1_000_000}.jpg"
             out_path = self._faces_dir / parsed_role.value / out_name
@@ -888,6 +988,8 @@ class FaceRegistry:
                 return Role.UNKNOWN, 0.0
             if not self._embeddings[Role.PATIENT.value] and not self._embeddings[Role.VISITOR.value]:
                 return Role.UNKNOWN, 0.0
+            if obs.conf < 0.25 or (_is_synthetic_bed_roi_id(obs.track_id) and obs.conf < 0.35):
+                return Role.UNKNOWN, 0.0
             if self._is_back_turned_posture(obs):
                 return Role.UNKNOWN, 0.0
 
@@ -946,15 +1048,17 @@ class FaceRegistry:
 
             if zones is not None and zones.has_bed:
                 if on_bed_hint:
+                    if matched_face_w < 32:
+                        return Role.UNKNOWN, max(best_patient, best_visitor)
                     eff_pat_thr = max(self._threshold, 0.42)
                     if best_patient >= eff_pat_thr and best_patient >= best_visitor + 0.04:
                         return Role.PATIENT, best_patient
 
-                    # Лежащий/полулежащий на матрасе трек, спальный ROI-трек (>= 9000) или повернутый ±90° кроп
+                    # Лежащий/полулежащий на матрасе трек, спальный ROI-трек (9000..9999) или повернутый ±90° кроп
                     # НИКОГДА не может получить Role.VISITOR ("face_visitor")!
                     angle_bed = obs.torso_angle_from_vertical_deg()
                     upright_frontal_on_bed = (
-                        obs.track_id < 9000
+                        not _is_synthetic_bed_roi_id(obs.track_id)
                         and matched_rot_code is None
                         and angle_bed is not None
                         and angle_bed < 40.0
@@ -974,7 +1078,7 @@ class FaceRegistry:
 
                 if (
                     matched_rot_code is None
-                    and obs.track_id < 9000
+                    and not _is_synthetic_bed_roi_id(obs.track_id)
                     and best_visitor >= self._threshold
                     and best_visitor >= best_patient + 0.02
                 ):
@@ -1000,7 +1104,7 @@ class FaceRegistry:
 
             if (
                 matched_rot_code is None
-                and obs.track_id < 9000
+                and not _is_synthetic_bed_roi_id(obs.track_id)
                 and best_visitor >= self._threshold
                 and best_visitor >= best_patient + 0.02
             ):
@@ -2080,8 +2184,13 @@ class PatientIdentifier:
                 return False
             for tid, tr in self._tracks.items():
                 if tid != track_id and tr.role == Role.PATIENT:
-                    tr.role = Role.VISITOR
-                    tr.reason = "demoted_by_manual_override"
+                    if _is_synthetic_bed_roi_id(tid):
+                        tr.role = Role.UNKNOWN
+                        tr.reason = "synthetic_roi_yielded"
+                        tr.confirmed_second_track = False
+                    else:
+                        tr.role = Role.VISITOR
+                        tr.reason = "demoted_by_manual_override"
             target.role = Role.PATIENT
             target.reason = "manual_override"
             target.has_moved = True
@@ -2532,21 +2641,50 @@ class PatientIdentifier:
                 pat_in_door and pat_sim < 0.78
             ):
                 bed_tr = self._tracks[best_bed_obs.track_id]
-                pat_tr.role = Role.VISITOR
-                pat_tr.reason = "id_switch_demoted_visitor"
-                pat_tr.confirmed_second_track = True
+                if _is_synthetic_bed_roi_id(current_patient_obs.track_id):
+                    pat_tr.role = Role.UNKNOWN
+                    pat_tr.reason = "synthetic_roi_yielded"
+                    pat_tr.confirmed_second_track = False
+                else:
+                    pat_tr.role = Role.VISITOR
+                    pat_tr.reason = "id_switch_demoted_visitor"
+                    pat_tr.confirmed_second_track = True
                 bed_tr.role = Role.PATIENT
                 bed_tr.reason = "id_switch_recovered"
                 logger.info(
-                    "Перехвачен перескок ID: бабушка возвращена на трек #%d (sim=%.2f), уходящий #%d -> visitor (sim=%.2f)",
+                    "Перехвачен перескок ID: бабушка возвращена на трек #%d (sim=%.2f), уходящий #%d -> %s (sim=%.2f)",
                     best_bed_obs.track_id,
                     best_bed_sim,
                     current_patient_obs.track_id,
+                    pat_tr.role.value,
                     pat_sim,
                 )
                 return best_bed_obs.track_id
 
         return current_patient_obs.track_id
+
+    def _is_empty_bed_low_conf_phantom(
+        self,
+        obs: PoseObservation,
+        tr: TrackIdentity,
+        zones: ZonesConfig,
+    ) -> bool:
+        """
+        Волна 15 (Защита пустой кровати после ухода):
+        После видимого ухода пациента с кровати (_ever_locked_patient and not _patient_in_bed_latched)
+        неподвижный трек с conf < 0.35 без таза (mid_hip is None) на матрасе (смятое одеяло)
+        не может заново захватывать bed_sleep_lock / reid_bed_position / face_patient.
+        Не затрагивает первичный сон (deep_sleeper conf=0.077) и удержание при _patient_in_bed_latched=True.
+        """
+        return bool(
+            self._ever_locked_patient
+            and not self._patient_in_bed_latched
+            and zones.has_bed
+            and is_person_on_bed(obs, zones.bed_polygon, zones=zones)
+            and obs.conf < 0.35
+            and obs.mid_hip is None
+            and not tr.has_moved
+        )
 
     def _score_patient_candidate(
         self,
@@ -2562,6 +2700,8 @@ class PatientIdentifier:
             return 100.0
         if tr.reason == "manual_visitor_override":
             return -100.0
+        if tr.reason == "far_hallway_pending" or self._is_empty_bed_low_conf_phantom(obs, tr, zones):
+            return -50.0
 
         score = 0.0
         if tr.reason == "face_patient":
@@ -2608,7 +2748,12 @@ class PatientIdentifier:
 
         if reclining_bed:
             score += 7.5
-            if obs.track_id >= 9000 and not tr.spawned_in_door:
+            if (
+                _is_synthetic_bed_roi_id(obs.track_id)
+                and not tr.spawned_in_door
+                and obs.conf >= 0.48
+                and self._door_visit_active
+            ):
                 score += 3.0
         elif has_other_reclining_sleeper:
             # Когда в кровати уже лежит спящая бабушка, вертикально присевший с краю матраса или стоящий человек — гость!
@@ -2666,6 +2811,12 @@ class PatientIdentifier:
             obs.track_id
             for obs in observations
             if self._is_sleeping_or_reclining_on_bed(obs, self._tracks[obs.track_id], zones)
+            and not self._is_empty_bed_low_conf_phantom(obs, self._tracks[obs.track_id], zones)
+            and not (
+                _is_synthetic_bed_roi_id(obs.track_id)
+                and obs.conf < 0.48
+                and not self._door_visit_active
+            )
             and (
                 not self._tracks[obs.track_id].spawned_in_door
                 or self._tracks[obs.track_id].reason == "id_switch_recovered"
@@ -2720,17 +2871,18 @@ class PatientIdentifier:
                 best_tr.reason = "multi_person_bed_arbitration"
                 self._ever_locked_patient = True
             for s_val, other_obs, other_tr in scored[1:]:
+                if _is_synthetic_bed_roi_id(other_obs.track_id):
+                    other_tr.role = Role.UNKNOWN
+                    other_tr.reason = "synthetic_roi_yielded"
+                    other_tr.confirmed_second_track = False
+                    continue
+                if other_tr.reason == "far_hallway_pending":
+                    continue
                 if other_tr.role != Role.VISITOR:
-                    other_on_bed_edge_with_sleeper = (
-                        sole_reclining_sleeper
-                        and zones.has_bed
-                        and is_person_on_bed(other_obs, zones.bed_polygon, zones=zones)
-                    )
                     if (
                         allow_non_door_visitor
                         or other_tr.spawned_in_door
                         or other_tr.reason in _HARD_VISITOR_REASONS
-                        or other_on_bed_edge_with_sleeper
                     ):
                         other_tr.role = Role.VISITOR
                         other_tr.reason = "co_present_with_patient"
@@ -2741,7 +2893,12 @@ class PatientIdentifier:
         # Если ни один из нескольких людей не похож на пациента (например, 2 гостя при пустой кровати)
         if allow_non_door_visitor:
             for s_val, obs_item, tr_item in scored:
-                if s_val <= -2.0 and tr_item.role == Role.UNKNOWN:
+                if (
+                    not _is_synthetic_bed_roi_id(obs_item.track_id)
+                    and tr_item.reason != "far_hallway_pending"
+                    and s_val <= -2.0
+                    and tr_item.role == Role.UNKNOWN
+                ):
                     tr_item.role = Role.VISITOR
                     tr_item.reason = "multi_person_visitor_score"
         return None
@@ -2779,24 +2936,142 @@ class PatientIdentifier:
         now: float,
     ) -> list[PoseObservation]:
         """
-        Отсекает фантомные дублирующие боксы на одной спящей под одеялом бабушке
-        (второй полнокадровый бокс с высоким IoU или горизонтальный фрагмент ног/одеяла на односпальном матрасе),
-        чтобы они никогда не получали Role.VISITOR и не зажигали ложный caregiver_nearby / door_visit_active.
+        Отсекает фантомные дублирующие боксы на одной спящей/сидящей бабушке:
+        1) при закрытой двери (door_visit_active=False) подавляет синтетические Bed ROI треки (9000..9999),
+           если на кровати уже есть реальный не-гостевой полнокадровый трек (b07d, 6020, d8b9);
+        2) при закрытой двери дедупит перекрывающийся второй бокс на одной сидящей бабушке (d627);
+        3) отсекает дубликаты спящей под одеялом / складки одеяла на односпальном матрасе.
         """
         if not zones.has_bed or len(observations) < 2:
             return list(observations)
 
         _, bed_max_y = polygon_y_bounds(zones.bed_polygon)
+        obs_work = list(observations)
+
+        def _is_hard_vis_obs(o: PoseObservation) -> bool:
+            ex = self._tracks.get(o.track_id)
+            if ex is not None and (
+                ex.spawned_in_door
+                or ex.reason in ("door_entry", "face_visitor", "manual_visitor_override")
+            ):
+                return True
+            if zones.has_door and (
+                self._is_touching_door(o, zones)
+                or self._liveness_gate.is_spawned_in_door(o.track_id)
+                or (
+                    o.spawn_center_hint is not None
+                    and point_in_polygon(o.spawn_center_hint, zones.door_polygon)
+                )
+            ):
+                return True
+            return False
+
+        def _walked_from_outside_bed(o: PoseObservation) -> bool:
+            out_d = max(
+                float(o.outside_bed_disp),
+                self._liveness_gate.get_outside_bed_displacement(o.track_id),
+            )
+            if out_d >= 0.045:
+                return True
+            sp = o.spawn_center_hint or self._liveness_gate.get_spawn_center(o.track_id)
+            if sp is not None and polygon_distance_norm(sp, zones.bed_polygon) < -0.08:
+                return True
+            return False
+
+        def _drop_bed_dup(o: PoseObservation) -> None:
+            self._recent_visitors.pop(o.track_id, None)
+            cand_tr = self._tracks.get(o.track_id)
+            if cand_tr is not None and (
+                _is_synthetic_bed_roi_id(o.track_id)
+                or (
+                    cand_tr.role != Role.PATIENT
+                    and cand_tr.reason
+                    not in (
+                        "manual_override",
+                        "manual_visitor_override",
+                        "face_visitor",
+                        "door_entry",
+                    )
+                )
+            ):
+                if cand_tr.reason != "manual_override":
+                    self._tracks.pop(o.track_id, None)
+
+        # Шаг 1: при door_visit_active=False подавляем дубль синтетического Bed ROI (9000..9999),
+        # если на матрасе уже присутствует реальный (не-ROI, не-гостевой) трек
+        if not self._door_visit_active:
+            has_real_bed_track = any(
+                not _is_synthetic_bed_roi_id(o.track_id)
+                and not _is_hard_vis_obs(o)
+                and is_person_on_bed(o, zones.bed_polygon, zones=zones)
+                for o in obs_work
+            )
+            if has_real_bed_track:
+                filtered_no_roi: list[PoseObservation] = []
+                for o in obs_work:
+                    if _is_synthetic_bed_roi_id(o.track_id):
+                        _drop_bed_dup(o)
+                        continue
+                    filtered_no_roi.append(o)
+                obs_work = filtered_no_roi
+                if len(obs_work) < 2:
+                    return obs_work
+
+            # Шаг 2: при door_visit_active=False дедупим перекрывающиеся боксы на одной сидящей/полулежащей бабушке (d627)
+            bed_cands = [
+                o
+                for o in obs_work
+                if not _is_hard_vis_obs(o) and is_person_on_bed(o, zones.bed_polygon, zones=zones)
+            ]
+            if len(bed_cands) >= 2:
+                def _bed_primary_priority(o: PoseObservation) -> tuple[int, int, int, int, float, float]:
+                    ex = self._tracks.get(o.track_id)
+                    return (
+                        1 if (ex is not None and ex.role == Role.PATIENT) else 0,
+                        1 if o.track_id == self._last_patient_track_id else 0,
+                        0 if _is_synthetic_bed_roi_id(o.track_id) else 1,
+                        o.valid_keypoint_count(0.30),
+                        ex.bed_accum_sec if ex is not None else 0.0,
+                        o.conf,
+                    )
+
+                def _clip_to_bed_y(box: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+                    x1, y1, x2, y2 = box
+                    cy2 = max(y1 + 0.02, min(y2, bed_max_y + 0.03))
+                    return (x1, y1, x2, cy2)
+
+                prim_bed = max(bed_cands, key=_bed_primary_priority)
+                prim_bed_clip = _clip_to_bed_y(prim_bed.bbox_norm)
+                dedup_bed: list[PoseObservation] = []
+                for o in obs_work:
+                    if o.track_id == prim_bed.track_id or _is_hard_vis_obs(o) or _walked_from_outside_bed(o):
+                        dedup_bed.append(o)
+                        continue
+                    if is_person_on_bed(o, zones.bed_polygon, zones=zones):
+                        o_bed_clip = _clip_to_bed_y(o.bbox_norm)
+                        heads_far_apart = (
+                            o.head_center is not None
+                            and prim_bed.head_center is not None
+                            and math.hypot(
+                                o.head_center[0] - prim_bed.head_center[0],
+                                o.head_center[1] - prim_bed.head_center[1],
+                            )
+                            > 0.16
+                        )
+                        if not heads_far_apart and self._mattress_boxes_overlap(o_bed_clip, prim_bed_clip):
+                            _drop_bed_dup(o)
+                            continue
+                    dedup_bed.append(o)
+                obs_work = dedup_bed
+                if len(obs_work) < 2:
+                    return obs_work
+
         reclining_ids: set[int] = set()
         reclining_cands: list[PoseObservation] = []
-        for o in observations:
-            existing = self._tracks.get(o.track_id)
-            if existing is not None and existing.reason in (
-                "door_entry",
-                "face_visitor",
-                "manual_visitor_override",
-            ):
+        for o in obs_work:
+            if _is_hard_vis_obs(o):
                 continue
+            existing = self._tracks.get(o.track_id)
             probe_tr = existing or TrackIdentity(
                 track_id=o.track_id,
                 first_seen=now,
@@ -2808,7 +3083,7 @@ class PatientIdentifier:
                 reclining_cands.append(o)
 
         if not reclining_cands:
-            return list(observations)
+            return obs_work
 
         def _primary_priority(o: PoseObservation) -> tuple[int, int, float, float]:
             ex = self._tracks.get(o.track_id)
@@ -2821,16 +3096,11 @@ class PatientIdentifier:
 
         primary = max(reclining_cands, key=_primary_priority)
         kept: list[PoseObservation] = []
-        for o in observations:
+        for o in obs_work:
             if o.track_id == primary.track_id:
                 kept.append(o)
                 continue
-            cand_tr = self._tracks.get(o.track_id)
-            if cand_tr is not None and cand_tr.reason in (
-                "door_entry",
-                "face_visitor",
-                "manual_visitor_override",
-            ):
+            if _is_hard_vis_obs(o):
                 kept.append(o)
                 continue
             if (
@@ -2857,14 +3127,7 @@ class PatientIdentifier:
                 )
                 <= 0.20
             ):
-                self._recent_visitors.pop(o.track_id, None)
-                if cand_tr is not None and cand_tr.role != Role.PATIENT and cand_tr.reason not in (
-                    "manual_override",
-                    "manual_visitor_override",
-                    "face_visitor",
-                    "door_entry",
-                ):
-                    self._tracks.pop(o.track_id, None)
+                _drop_bed_dup(o)
                 continue
 
             kept.append(o)
@@ -2877,15 +3140,22 @@ class PatientIdentifier:
         zones: ZonesConfig,
         now: float,
     ) -> int | None:
-        for o in observations:
-            ex = self._tracks.get(o.track_id)
-            if ex is not None and ex.role == Role.PATIENT:
-                return o.track_id
+        pat_obs = [
+            o
+            for o in observations
+            if (ex := self._tracks.get(o.track_id)) is not None and ex.role == Role.PATIENT
+        ]
+        if pat_obs:
+            pat_obs.sort(
+                key=lambda o: (0 if _is_synthetic_bed_roi_id(o.track_id) else 1, o.conf),
+                reverse=True,
+            )
+            return pat_obs[0].track_id
         for o in observations:
             if o.track_id in rescued_sit_ids:
                 return o.track_id
         if zones.has_bed:
-            bed_cands: list[tuple[tuple[int, int, float, float], int]] = []
+            bed_cands: list[tuple[tuple[int, int, int, int, float, float], int]] = []
             for o in observations:
                 if not is_person_on_bed(o, zones.bed_polygon, zones=zones):
                     continue
@@ -2898,12 +3168,18 @@ class PatientIdentifier:
                     track_id=o.track_id,
                     first_seen=now,
                     last_seen=now,
-                    has_moved=True,
+                    has_moved=self._liveness_gate.is_track_moved(o.track_id) or o.liveness_verified,
+                )
+                not_empty_phantom = 0 if self._is_empty_bed_low_conf_phantom(o, probe, zones) else 1
+                not_low_roi = (
+                    0
+                    if (_is_synthetic_bed_roi_id(o.track_id) and o.conf < 0.48 and not self._door_visit_active)
+                    else 1
                 )
                 recl = 1 if self._is_sleeping_or_reclining_on_bed(o, probe, zones) else 0
                 is_last = 1 if o.track_id == self._last_patient_track_id else 0
                 accum = ex.bed_accum_sec if ex is not None else 0.0
-                bed_cands.append(((recl, is_last, accum, o.conf), o.track_id))
+                bed_cands.append(((not_empty_phantom, not_low_roi, recl, is_last, accum, o.conf), o.track_id))
             if bed_cands:
                 bed_cands.sort(key=lambda item: item[0], reverse=True)
                 return bed_cands[0][1]
@@ -2924,6 +3200,7 @@ class PatientIdentifier:
         confirmed_frames >= 4 И реальное пространственное смещение центра >= 0.045
         строго ВНЕ матраса и ВНЕ ignore_polygons, прежде чем попадёт в tracks / caregiver_nearby.
         Мимолётные тени, складки одеяла и спинка кровати за 1–3 кадра бесследно отсекаются.
+        Синтетические Bed ROI треки (9000..9999) НИКОГДА не обходят 4-кадровый гейт в роли второго трека.
         """
         if not observations:
             return []
@@ -2941,6 +3218,13 @@ class PatientIdentifier:
                 continue
 
             ex = self._tracks.get(o.track_id)
+            if _is_synthetic_bed_roi_id(o.track_id):
+                # Синтетический Bed ROI трек никогда не может обходить 4-кадровый гейт как второй трек
+                self._recent_visitors.pop(o.track_id, None)
+                if ex is not None and ex.reason != "manual_override":
+                    self._tracks.pop(o.track_id, None)
+                continue
+
             if ex is not None and (
                 ex.confirmed_second_track
                 or ex.role == Role.PATIENT
@@ -3140,6 +3424,8 @@ class PatientIdentifier:
                             rescued_sit_ids.add(v_obs.track_id)
                             continue
                         v_on_bed = is_person_on_bed(v_obs, zones.bed_polygon, zones=zones)
+                        if not self._patient_in_bed_latched and v_obs.conf < 0.35 and v_obs.mid_hip is None:
+                            continue
                         if last_pat_obs_live is not None and not v_on_bed:
                             continue
                         v_near_bed_wakeup = (
@@ -3241,6 +3527,8 @@ class PatientIdentifier:
             # 2. Регистрация живых треков, 3D-замер пола, биометрия лица и расчёт дескрипторов одежды
             for obs in observations:
                 tr = self._tracks.get(obs.track_id)
+                is_new_track = tr is None
+                is_synth_roi = _is_synthetic_bed_roi_id(obs.track_id)
                 on_bed = is_person_on_bed(obs, zones.bed_polygon, zones=zones) if zones.has_bed else False
                 in_door = self._is_touching_door(obs, zones)
                 moved_flag = (
@@ -3255,6 +3543,23 @@ class PatientIdentifier:
                 out_disp = max(
                     float(obs.outside_bed_disp),
                     self._liveness_gate.get_outside_bed_displacement(obs.track_id),
+                )
+                obs_floor_xy_cm: tuple[float, float] | None = None
+                obs_height_cm: float | None = None
+                if homography.is_valid:
+                    m3d = homography.measure_pose(
+                        obs,
+                        bed_polygon=zones.bed_polygon if zones.has_bed else None,
+                    )
+                    obs_floor_xy_cm = m3d.floor_xy_cm
+                    obs_height_cm = m3d.height_cm
+
+                is_far_hallway_outside_door = bool(
+                    homography.calibrated
+                    and obs_floor_xy_cm is not None
+                    and obs_floor_xy_cm[1] < -25.0
+                    and obs_floor_xy_cm[0] < -40.0
+                    and obs.bbox_norm[3] < 0.80
                 )
 
                 if tr is None:
@@ -3325,7 +3630,8 @@ class PatientIdentifier:
                     )
 
                     fg_seated_companion = (
-                        origin_outside_bed
+                        not is_synth_roi
+                        and origin_outside_bed
                         and is_confident_foreground_seated_person(
                             obs,
                             zones.bed_polygon if zones.has_bed else None,
@@ -3353,30 +3659,46 @@ class PatientIdentifier:
                         first_seen=now,
                         last_seen=now,
                         spawned_outside_bed=origin_outside_bed,
-                        spawned_in_door=bool(origin_in_door or near_door_portal_entry),
+                        spawned_in_door=bool(not is_synth_roi and (origin_in_door or near_door_portal_entry)),
                         has_moved=moved_flag,
                         was_on_bed=False,
                         last_center=obs.body_center,
                         confirmed_second_track=bool(
-                            origin_in_door
-                            or near_door_portal_entry
-                            or fg_seated_companion
-                            or (frames_seen >= 4 and out_disp >= 0.045)
+                            not is_synth_roi
+                            and not is_far_hallway_outside_door
+                            and (
+                                origin_in_door
+                                or near_door_portal_entry
+                                or fg_seated_companion
+                                or (frames_seen >= 4 and out_disp >= 0.045)
+                            )
                         ),
                     )
-                    if (origin_in_door or near_door_portal_entry) and origin_outside_bed:
-                        tr.role = Role.VISITOR
-                        tr.reason = "door_entry"
-                        tr.spawned_in_door = True
-                        tr.confirmed_second_track = True
-                        self._activate_door_visit(now, from_door=True)
+                    if is_synth_roi:
+                        pass
+                    elif (origin_in_door or near_door_portal_entry) and origin_outside_bed:
+                        if is_far_hallway_outside_door:
+                            tr.role = Role.UNKNOWN
+                            tr.reason = "far_hallway_pending"
+                            tr.spawned_in_door = True
+                            tr.confirmed_second_track = False
+                        else:
+                            tr.role = Role.VISITOR
+                            tr.reason = "door_entry"
+                            tr.spawned_in_door = True
+                            tr.confirmed_second_track = True
+                            self._activate_door_visit(now, from_door=True)
                     elif fg_seated_companion:
                         tr.role = Role.VISITOR
                         tr.reason = "foreground_seated_companion"
                         tr.confirmed_second_track = True
                         self._activate_door_visit(now)
                     elif not strict_door_track:
-                        if in_left_door_corridor and origin_outside_bed:
+                        if is_far_hallway_outside_door:
+                            tr.role = Role.UNKNOWN
+                            tr.reason = "far_hallway_pending"
+                            tr.confirmed_second_track = False
+                        elif in_left_door_corridor and origin_outside_bed:
                             tr.role = Role.VISITOR
                             tr.reason = "border_standing_entry"
                         elif confirmed_patient_id is not None and confirmed_patient_id != obs.track_id:
@@ -3416,24 +3738,28 @@ class PatientIdentifier:
                 tr.last_center = obs.body_center
                 if moved_flag:
                     tr.has_moved = True
-                if frames_seen >= 4 and out_disp >= 0.045:
+                defer_far_hallway = bool(
+                    is_far_hallway_outside_door
+                    and (is_new_track or (now - tr.first_seen) < 0.6)
+                )
+                if not is_synth_roi and not defer_far_hallway and frames_seen >= 4 and out_disp >= 0.045:
                     tr.confirmed_second_track = True
 
                 if homography.is_valid:
-                    m3d = homography.measure_pose(
-                        obs,
-                        bed_polygon=zones.bed_polygon if zones.has_bed else None,
-                    )
-                    tr.floor_xy_cm = m3d.floor_xy_cm
-                    tr.height_cm = m3d.height_cm
+                    tr.floor_xy_cm = obs_floor_xy_cm
+                    tr.height_cm = obs_height_cm
 
                 reclining_on_bed = self._is_sleeping_or_reclining_on_bed(obs, tr, zones)
                 if reclining_on_bed:
                     tr.was_on_bed = True
-                if (reclining_on_bed or obs.track_id >= 9000) and tr.reason == "face_visitor":
+                if (reclining_on_bed or is_synth_roi) and tr.reason == "face_visitor":
                     tr.role = Role.UNKNOWN
                     tr.reason = "cleared_reclining_face_visitor"
                     tr.face_score = 0.0
+                if is_synth_roi and tr.role == Role.VISITOR and tr.reason != "manual_visitor_override":
+                    tr.role = Role.UNKNOWN
+                    tr.reason = "synthetic_roi_yielded"
+                    tr.confirmed_second_track = False
                 tall_floor_stander = self._is_tall_floor_stander(
                     obs,
                     tr,
@@ -3441,7 +3767,9 @@ class PatientIdentifier:
                     hom_calibrated=homography.calibrated,
                 )
                 outside_companion_guard = (
-                    zones.has_bed
+                    not is_synth_roi
+                    and not defer_far_hallway
+                    and zones.has_bed
                     and not on_bed
                     and tr.bed_accum_sec < 1.0
                     and not tr.was_on_bed
@@ -3480,7 +3808,9 @@ class PatientIdentifier:
                 # Вход через полигон двери на первых секундах жизни трека -> железный Role.VISITOR ("door_entry")
                 in_door_portal_now = zones.has_door and in_door
                 if (
-                    in_door_portal_now
+                    not is_synth_roi
+                    and not defer_far_hallway
+                    and (in_door_portal_now or tr.reason == "far_hallway_pending")
                     and not on_bed
                     and tr.role != Role.PATIENT
                     and not tr.was_on_bed
@@ -3547,7 +3877,9 @@ class PatientIdentifier:
                 # НИКОГДА не применяется к реально лежащему в кровати человеку (reclining_on_bed),
                 # а door_visit_active взводится строго только на подтверждённо двигающемся человеке ВНЕ кровати!
                 if (
-                    not reclining_on_bed
+                    not is_synth_roi
+                    and not defer_far_hallway
+                    and not reclining_on_bed
                     and tr_mode_vec is not None
                     and tr.reason
                     not in (
@@ -3581,7 +3913,9 @@ class PatientIdentifier:
 
                 # Перехват перескока track_id у сидящего/стоящего гостя (НИКОГДА не трогает лежащего в кровати!)
                 if (
-                    not strict_outfit_guard
+                    not is_synth_roi
+                    and not defer_far_hallway
+                    and not strict_outfit_guard
                     and not reclining_on_bed
                     and tr.role == Role.UNKNOWN
                     and (now - tr.first_seen) <= 2.0
@@ -3602,24 +3936,29 @@ class PatientIdentifier:
                         self._recent_visitors.pop(matched_vis_tid, None)
 
                 # Слой 2: Биометрия лица (не чаще 1 раза в секунду на трек)
-                # Перепроверка уже назначенных ролей (раз в 2 с): гость вне кровати может оказаться
-                # бабушкой, а «бабушка» вне кровати — родственником. Смена роли только по двум
-                # подряд уверенным совпадениям лица, чтобы единичный шум не переворачивал роли.
+                # Перепроверка уже назначенных ролей (раз в 2 с): гость (в т.ч. на кровати!) может оказаться
+                # бабушкой, а не-лежащая «бабушка» (в т.ч. face_patient при not reclining_on_bed) — родственником.
+                # Смена роли только по двум подряд уверенным совпадениям лица, чтобы единичный шум не переворачивал роли.
+                empty_bed_low_conf_phantom = self._is_empty_bed_low_conf_phantom(obs, tr, zones)
                 face_recheck_role = (
-                    tr.role == Role.VISITOR and not on_bed
+                    tr.role == Role.VISITOR
                 ) or (
-                    tr.role == Role.PATIENT and not reclining_on_bed and tr.reason != "face_patient"
+                    tr.role == Role.PATIENT and not reclining_on_bed
+                )
+                allow_face_match = not (
+                    obs.conf < 0.25
+                    or (is_synth_roi and obs.conf < 0.35)
+                    or empty_bed_low_conf_phantom
+                    or defer_far_hallway
                 )
                 role_before_face = tr.role
                 if (
                     frame_bgr is not None
                     and self._face_registry is not None
+                    and allow_face_match
                     and tr.reason not in ("manual_override", "manual_visitor_override")
                     and (
-                        (
-                            (now - tr.last_face_check) >= 1.0
-                            and (tr.role == Role.UNKNOWN or (tr.role == Role.VISITOR and on_bed))
-                        )
+                        ((now - tr.last_face_check) >= 1.0 and tr.role == Role.UNKNOWN)
                         or (face_recheck_role and (now - tr.last_face_check) >= 2.0)
                     )
                 ):
@@ -3670,13 +4009,31 @@ class PatientIdentifier:
                         and role_before_face == Role.VISITOR
                         and tr.face_patient_hits >= 2
                     )
+                    face_double_confirmed_visitor = (
+                        face_recheck_role
+                        and role_before_face == Role.PATIENT
+                        and tr.face_visitor_hits >= 2
+                    )
+                    has_other_reclining_patient = any(
+                        o2.track_id != obs.track_id
+                        and (tr2 := self._tracks.get(o2.track_id)) is not None
+                        and tr2.role == Role.PATIENT
+                        and self._is_sleeping_or_reclining_on_bed(o2, tr2, zones)
+                        for o2 in observations
+                    )
+                    door_entry_vs_reclining_patient = (
+                        (tr.spawned_in_door or tr.reason == "door_entry")
+                        and not reclining_on_bed
+                        and has_other_reclining_patient
+                    )
                     if (
                         matched_role == Role.VISITOR
                         and not reclining_on_bed
-                        and obs.track_id < 9000
+                        and not is_synth_roi
                         and (
                             not strict_outfit_guard
                             or (score >= 0.48 and not on_bed and has_door_or_second_person_context)
+                            or face_double_confirmed_visitor
                         )
                     ):
                         tr.role = Role.VISITOR
@@ -3688,15 +4045,30 @@ class PatientIdentifier:
                     elif (
                         matched_role == Role.PATIENT
                         and not tall_floor_stander
+                        and not door_entry_vs_reclining_patient
+                        and not empty_bed_low_conf_phantom
                         and (not outside_companion_guard or face_double_confirmed_patient)
                     ):
                         tr.face_visitor_hits = 0
                         if confirmed_patient_id is not None and confirmed_patient_id != obs.track_id:
                             old_pat = self._tracks.get(confirmed_patient_id)
                             if old_pat is not None:
-                                old_pat.role = Role.VISITOR
-                                old_pat.reason = "id_switch_demoted_visitor"
-                                old_pat.confirmed_second_track = True
+                                if _is_synthetic_bed_roi_id(confirmed_patient_id):
+                                    old_pat.role = Role.UNKNOWN
+                                    old_pat.reason = "synthetic_roi_yielded"
+                                    old_pat.confirmed_second_track = False
+                                elif (
+                                    strict_outfit_guard
+                                    and not old_pat.spawned_in_door
+                                    and old_pat.reason not in _HARD_VISITOR_REASONS
+                                ):
+                                    old_pat.role = Role.UNKNOWN
+                                    old_pat.reason = "blocked_no_door_entry"
+                                    old_pat.confirmed_second_track = False
+                                else:
+                                    old_pat.role = Role.VISITOR
+                                    old_pat.reason = "id_switch_demoted_visitor"
+                                    old_pat.confirmed_second_track = True
                         tr.role = Role.PATIENT
                         tr.reason = "face_patient"
                         tr.face_score = score
@@ -3714,7 +4086,7 @@ class PatientIdentifier:
                     and reclining_on_bed
                     and not explicit_visitor_lock
                 )
-                if reclining_on_bed and (tr.role != Role.VISITOR or sole_sleeper_eligible):
+                if reclining_on_bed and not empty_bed_low_conf_phantom and (tr.role != Role.VISITOR or sole_sleeper_eligible):
                     tr.bed_accum_sec += dt
                 elif not reclining_on_bed and tr.role == Role.UNKNOWN:
                     tr.bed_accum_sec = max(0.0, tr.bed_accum_sec - dt * 0.5)
@@ -3746,11 +4118,13 @@ class PatientIdentifier:
                     or (tr.reason == "manual_visitor_override" and (now - tr.manual_assigned_at) <= 28800.0)
                     or tr.reason == "visitor_outfit_match"
                 )
+                empty_bed_low_conf_phantom = self._is_empty_bed_low_conf_phantom(obs, tr, zones)
 
                 # 4.0. Самоисцеление sole_bed_sleeper_recovery: 1 человек в комнате реально спит на матрасе (<= 3.0 с)
                 if (
                     len(observations) == 1
                     and reclining_on_bed
+                    and not empty_bed_low_conf_phantom
                     and not explicit_visitor_lock
                     and tr.role == Role.VISITOR
                     and confirmed_patient_id is None
@@ -3787,6 +4161,8 @@ class PatientIdentifier:
                     confirmed_patient_id is None
                     and self._ever_locked_patient
                     and can_rehabilitate
+                    and not empty_bed_low_conf_phantom
+                    and tr.reason != "far_hallway_pending"
                     and not tr.spawned_in_door
                     and not is_static_coat
                     and not tall_floor_stander
@@ -3924,7 +4300,7 @@ class PatientIdentifier:
                             confirmed_patient_id = obs.track_id
 
                 # Слой 1: Bed-Origin Lock для лежащего/полулежащего в кровати + Аксиома 1 («на кровати без двери = Бабушка»)
-                if reclining_on_bed and tr.role != Role.VISITOR:
+                if reclining_on_bed and not empty_bed_low_conf_phantom and tr.role != Role.VISITOR:
                     if len(observations) == 1 and not explicit_visitor_lock and not tr.spawned_in_door:
                         needed = (
                             self._initial_bed_lock_sec
@@ -3948,6 +4324,7 @@ class PatientIdentifier:
                         self._ever_locked_patient = True
                 elif (
                     tr.role == Role.UNKNOWN
+                    and not empty_bed_low_conf_phantom
                     and not self._door_visit_active
                     and zones.has_bed
                     and on_bed
@@ -3999,15 +4376,40 @@ class PatientIdentifier:
             # 5. Единственность PATIENT + расчёт Caregiver Co-Presence и строгий гейт записи раздельных якорей
             patient_obs: PoseObservation | None = None
             other_obs: list[PoseObservation] = []
+            patient_candidates = [
+                obs for obs in observations if self._tracks[obs.track_id].role == Role.PATIENT
+            ]
+            if patient_candidates:
+                patient_candidates.sort(
+                    key=lambda o: (
+                        0 if _is_synthetic_bed_roi_id(o.track_id) else 1,
+                        1 if self._tracks[o.track_id].reason in ("manual_override", "face_patient") else 0,
+                        o.conf,
+                    ),
+                    reverse=True,
+                )
+                patient_obs = patient_candidates[0]
             for obs in observations:
+                if patient_obs is not None and obs.track_id == patient_obs.track_id:
+                    continue
                 tr = self._tracks[obs.track_id]
-                if tr.role == Role.PATIENT and patient_obs is None:
-                    patient_obs = obs
-                else:
-                    if tr.role == Role.PATIENT:
+                if tr.role == Role.PATIENT:
+                    if _is_synthetic_bed_roi_id(obs.track_id):
+                        tr.role = Role.UNKNOWN
+                        tr.reason = "synthetic_roi_yielded"
+                        tr.confirmed_second_track = False
+                    elif (
+                        strict_door_now
+                        and not tr.spawned_in_door
+                        and tr.reason not in _HARD_VISITOR_REASONS
+                    ):
+                        tr.role = Role.UNKNOWN
+                        tr.reason = "blocked_no_door_entry"
+                        tr.confirmed_second_track = False
+                    else:
                         tr.role = Role.VISITOR
                         tr.reason = "duplicate_patient_guard"
-                    other_obs.append(obs)
+                other_obs.append(obs)
 
             caregiver_nearby = False
             patient_occluded_by_other = False
@@ -4015,9 +4417,13 @@ class PatientIdentifier:
                 px, py = patient_obs.body_center
                 reach = max(0.32, patient_obs.bbox_height * 1.6)
                 for other in other_obs:
+                    if _is_synthetic_bed_roi_id(other.track_id):
+                        continue
                     if not is_valid_human_pose(other, min_kp_conf=0.30, min_valid_kps=4, min_box_conf=0.48, zones=zones):
                         continue
                     other_tr = self._tracks.get(other.track_id)
+                    if other_tr is not None and other_tr.reason == "far_hallway_pending":
+                        continue
                     if (
                         not strict_door_now
                         and other_tr is not None
@@ -4047,6 +4453,8 @@ class PatientIdentifier:
                 # Защита от окклюзии спиной родственника у кровати: подтверждённый VISITOR
                 # внутри или ближе 0.18 к контуру кровати означает активный уход рядом с постелью
                 for other in other_obs:
+                    if _is_synthetic_bed_roi_id(other.track_id):
+                        continue
                     if not is_valid_human_pose(other, min_kp_conf=0.30, min_valid_kps=4, min_box_conf=0.48, zones=zones):
                         continue
                     other_tr = self._tracks.get(other.track_id)
@@ -4107,11 +4515,18 @@ class PatientIdentifier:
                         and (
                             pat_tr.was_on_bed
                             or pat_tr.bed_accum_sec >= 1.0
-                            or pat_tr.reason == "manual_override"
+                            or pat_tr.reason in ("manual_override", "face_patient")
+                            or patient_obs.track_id == self._latched_patient_track_id
                             or (
-                                not self._door_visit_active
-                                and not homography.calibrated
-                                and patient_obs.track_id == self._latched_patient_track_id
+                                pat_tr.has_moved
+                                and pat_tr.reason
+                                in (
+                                    "reid_appearance",
+                                    "reid_persisted_anchor",
+                                    "spatiotemporal_bed_continuity",
+                                    "id_switch_recovered",
+                                    "reid_bed_position",
+                                )
                             )
                         )
                     ) or (
@@ -4213,21 +4628,28 @@ class PatientIdentifier:
                         reason=tr.reason,
                     )
 
-            # Контроль редкого ухода единственного человека из комнаты через дверь без визита гостей
-            if not self._door_visit_active and zones.has_door:
+            # Контроль видимого ухода пациента из комнаты через дверь (как одного, так и в сопровождении сиделки)
+            if zones.has_door:
+                has_departing_patient_obs = False
                 if observations:
                     for obs_s in observations:
                         tr_s = self._tracks.get(obs_s.track_id)
                         if tr_s is None or tr_s.spawned_in_door or tr_s.role == Role.VISITOR:
                             continue
+                        if self._door_visit_active and tr_s.role != Role.PATIENT:
+                            continue
                         on_bed_s = is_person_on_bed(obs_s, zones.bed_polygon, zones=zones) if zones.has_bed else False
                         if not on_bed_s and self._is_touching_door(obs_s, zones):
                             self._sole_mover_at_door_ts = now
                             self._sole_mover_last_seen_ts = now
+                            has_departing_patient_obs = True
                         elif not on_bed_s and self._sole_mover_at_door_ts > 0.0:
                             self._sole_mover_last_seen_ts = now
-                elif (
-                    self._patient_in_bed_latched
+                            has_departing_patient_obs = True
+                if (
+                    not has_departing_patient_obs
+                    and not any_obs_on_bed
+                    and self._patient_in_bed_latched
                     and self._sole_mover_at_door_ts > 0.0
                     and (now - self._sole_mover_last_seen_ts) >= 2.0
                     and 0.0 <= (self._sole_mover_last_seen_ts - self._sole_mover_at_door_ts) <= 3.0
@@ -4256,7 +4678,12 @@ class PatientIdentifier:
             non_bed_obs_in_room = [
                 o
                 for o in valid_obs
-                if (
+                if not _is_synthetic_bed_roi_id(o.track_id)
+                and not (
+                    (tr_nb := self._tracks.get(o.track_id)) is not None
+                    and tr_nb.reason == "far_hallway_pending"
+                )
+                and (
                     o.track_id in live_obs_ids
                     or o.track_id in self._tracks
                     or self._liveness_gate.is_track_moved(o.track_id)
@@ -4441,12 +4868,13 @@ class PatientIdentifier:
                         0.0,
                         self._last_visitor_seen_at - self._door_visit_started_at,
                     )
+                    transient_idle_needed = 1.2 if visit_span_sec < 0.6 else 2.5
                     transient_door_passby = (
                         not non_bed_obs_in_room
                         and not self._visitor_spot_occupied
                         and not self._visitor_entered_interior
                         and visit_span_sec < 3.0
-                        and idle_sec >= 2.5
+                        and idle_sec >= transient_idle_needed
                         and not door_busy_now
                     )
                     timed_out = (

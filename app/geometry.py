@@ -621,7 +621,44 @@ def is_standing_in_front_of_bed(
                 and m.floor_xy_cm[1] >= 75.0
                 and obs.bbox_norm[3] >= (bed_max_y + 0.10)
             ):
-                return True
+                # Волна 15 (133538_a690 / 113940_bb27): не обходим 3D-проверку гомографии на сидящем
+                # на матрасе человеке со свешенными на коврик ногами (таз в глубине матраса Z=55 см
+                # или видимое колено внутри bed_polygon выше борта). Исключения — глубоко наклонившийся
+                # над кроватью стоящий человек (angle >= 48° с коленом ниже борта 103826 или выпрямленным
+                # бедром dy_hip_knee >= 0.125 как 130059) и сидящий на стуле далеко перед кроватью
+                # (hip_on_mattress_y > 20 см, 110430).
+                mh_m = obs.mid_hip
+                hip_on_mattress_xy = (
+                    hom.image_to_plane_z_cm(mh_m, hom.mattress_height_cm)
+                    if mh_m is not None
+                    else None
+                )
+                vis_knees_m = [
+                    kn
+                    for k_idx in (KP_L_KNEE, KP_R_KNEE)
+                    if (kn := obs.kp(k_idx, 0.45)) is not None
+                ]
+                has_knee_in_bed = any(
+                    kn[1] < bed_max_y and point_in_polygon(kn, bed_polygon)
+                    for kn in vis_knees_m
+                )
+                has_knee_below_bed = any(
+                    kn[1] >= bed_max_y and not point_in_polygon(kn, bed_polygon)
+                    for kn in vis_knees_m
+                )
+                leaning_standing_helper = angle >= 48.0 and (
+                    has_knee_below_bed
+                    or (mh_m is not None and any((kn[1] - mh_m[1]) >= 0.125 for kn in vis_knees_m))
+                )
+                hip_far_in_front = (
+                    hip_on_mattress_xy is not None and hip_on_mattress_xy[1] > 20.0
+                )
+                seated_on_mattress = not leaning_standing_helper and (
+                    (hip_on_mattress_xy is not None and hip_on_mattress_xy[1] < -15.0)
+                    or (has_knee_in_bed and not hip_far_in_front)
+                )
+                if not seated_on_mattress:
+                    return True
 
     # Наклонившийся над кроватью ухаживающий, стоящий ногами на полу (оба видимых колена глубоко ниже борта матраса)
     if obs.bbox_height >= 0.46 and obs.bbox_norm[3] >= (bed_max_y + 0.08):
@@ -1582,7 +1619,11 @@ class StaticObjectGate:
                     if obs.spawn_center_hint is not None and has_door and point_in_polygon(obs.spawn_center_hint, door_poly):
                         inh_in_door = True
 
-                    for prev_tid, prev_st in self._tracks.items():
+                    for prev_tid, prev_st in sorted(
+                        self._tracks.items(),
+                        key=lambda item: item[1].last_ts,
+                        reverse=True,
+                    ):
                         if prev_tid in current_ids or not prev_st.has_moved:
                             continue
                         # Матрасный трек сна НИКОГДА не передаёт статус движения соседним фантомам/складкам/спинке кровати!
@@ -1593,24 +1634,37 @@ class StaticObjectGate:
                             or (prev_st.frames_seen >= 4 and prev_st.max_outside_bed_disp >= 0.045)
                         ):
                             continue
-                        if not (0.0 <= (ts - prev_st.last_ts) <= max(self._ttl, 120.0)):
+                        dt_prev = ts - prev_st.last_ts
+                        if not (0.0 <= dt_prev <= max(self._ttl, 120.0)):
                             continue
                         if (
                             bbox_iou(obs.bbox_norm, prev_st.last_bbox) >= 0.35
                             or math.hypot(center[0] - prev_st.last_center[0], center[1] - prev_st.last_center[1]) <= 0.12
                         ):
                             inherited_moved = True
-                            if prev_st.spawned_in_door:
+                            # Волна 15 (687d): запрещаем вирусное наследование spawned_in_door в глубине комнаты
+                            # и спустя > 5 с — флаг двери передаётся только при быстром перескоке ID у порога.
+                            can_inherit_door = (
+                                prev_st.spawned_in_door
+                                and has_door
+                                and not sleeping_or_sitting_in_bed
+                                and 0.0 <= dt_prev <= 5.0
+                                and (
+                                    in_door
+                                    or polygon_distance_norm(center, door_poly) >= -0.10
+                                )
+                            )
+                            if can_inherit_door:
                                 inh_in_door = True
                             inh_frames = max(
                                 inh_frames,
                                 prev_st.frames_seen,
-                                4 if prev_st.spawned_in_door else 0,
+                                4 if can_inherit_door else 0,
                             )
                             inh_out_disp = max(
                                 inh_out_disp,
                                 prev_st.max_outside_bed_disp,
-                                0.05 if prev_st.spawned_in_door else 0.0,
+                                0.05 if can_inherit_door else 0.0,
                             )
                             if prev_st.outside_bed_spawn is not None:
                                 inh_out_spawn = prev_st.outside_bed_spawn

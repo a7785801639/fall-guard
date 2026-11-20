@@ -11,10 +11,13 @@ from typing import Any, Sequence
 
 from . import geometry as _geom_mod
 from .geometry import (
+    KP_L_ANKLE,
+    KP_R_ANKLE,
     PoseObservation,
     are_legs_hanging_outside_bed,
     is_hand_raised_for_help,
     is_person_on_bed,
+    point_in_polygon,
     polygon_distance_norm,
     polygon_y_bounds,
     sanitize_collapsed_bed_keypoints,
@@ -284,6 +287,7 @@ class FallStateMachine:
         self._caregiver_active_until: float = -1e9
         self._assisted_seated_latched: bool = False
         self._assisted_seated_on_chair: bool = False
+        self._assisted_seated_foreground_chair: bool = False
         self._assisted_solo_confirmed: bool = False
         self._assisted_seated_upper_y: float = 0.0
         self._assisted_seated_hip_y: float = 0.0
@@ -481,6 +485,7 @@ class FallStateMachine:
     def _clear_assisted_seated(self) -> None:
         self._assisted_seated_latched = False
         self._assisted_seated_on_chair = False
+        self._assisted_seated_foreground_chair = False
         self._assisted_solo_confirmed = False
         self._assisted_seated_upper_y = 0.0
         self._assisted_seated_hip_y = 0.0
@@ -916,6 +921,54 @@ class FallStateMachine:
             )
         )
 
+    @staticmethod
+    def _is_bottom_cropped_upright_torso(
+        obs: PoseObservation,
+        *,
+        max_angle: float = 48.0,
+        max_ar: float = 1.08,
+    ) -> bool:
+        """
+        Обрезанный нижним краем кадра вертикальный торс (кресло-туалет / стул ближнего плана):
+        нижняя граница бокса у среза кадра (y2 >= 0.985), ноги ниже кадра (нет видимых колен/лодыжек),
+        бокс не горизонтальный (ar < max_ar), спина вертикальна (angle is None или < max_angle),
+        и голова расположена выше плеч (head_y < shoulder_y).
+        """
+        if obs.bbox_norm[3] < 0.985:
+            return False
+        if obs.lower_limbs:
+            return False
+        if obs.aspect_ratio_wh >= max_ar:
+            return False
+        angle = obs.torso_angle_from_vertical_deg()
+        if angle is not None and angle >= max_angle:
+            return False
+        head = obs.head_center
+        ms = obs.mid_shoulder
+        if head is None or ms is None or head[1] >= ms[1]:
+            return False
+        return True
+
+    @staticmethod
+    def _has_ankle_below_bed_edge(obs: PoseObservation, zones: ZonesConfig) -> bool:
+        """
+        Проверяет, остаётся ли хотя бы одна уверенная лодыжка (conf >= 0.45)
+        ниже нижней кромки матраса (y >= bed_max_y + 0.02) вне bed_polygon.
+        """
+        if not zones.has_bed:
+            return False
+        _, bed_max_y = polygon_y_bounds(zones.bed_polygon)
+        threshold_y = bed_max_y + 0.02
+        for kp_idx in (KP_L_ANKLE, KP_R_ANKLE):
+            ak = obs.kp(kp_idx, 0.45)
+            if (
+                ak is not None
+                and ak[1] >= threshold_y
+                and not point_in_polygon(ak, zones.bed_polygon)
+            ):
+                return True
+        return False
+
     def _classify_calm_seated_pose(
         self,
         obs: PoseObservation,
@@ -928,29 +981,40 @@ class FallStateMachine:
         """
         upper = obs.upper_body_point
         angle = obs.torso_angle_from_vertical_deg()
+        foreground_chair = self._is_bottom_cropped_upright_torso(
+            obs,
+            max_angle=48.0,
+            max_ar=1.05,
+        )
         if (
-            upper[1] >= 0.64
+            (upper[1] >= 0.64 and not foreground_chair)
             or (angle is not None and angle >= 48.0)
             or obs.aspect_ratio_wh >= 1.05
             or self._has_rapid_drop(now)
         ):
             return False, False
 
-        sitting_bed, _ = self._is_sitting_or_exiting_bed(obs, zones)
-        if sitting_bed:
-            fallen_now, _ = self._check_fallen_or_slumped(obs, zones, now)
-            if not fallen_now:
-                return True, False
-            return False, False
+        if upper[1] < 0.64:
+            sitting_bed, _ = self._is_sitting_or_exiting_bed(obs, zones)
+            if sitting_bed:
+                fallen_now, _ = self._check_fallen_or_slumped(obs, zones, now)
+                if not fallen_now:
+                    return True, False
+                return False, False
 
         on_bed = zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones)
         if zones.has_bed and not on_bed:
             upright_standing = self._is_upright_standing_pose(obs, zones, now)
             if (
-                angle is not None
-                and angle < 40.0
-                and obs.aspect_ratio_wh < 0.95
-                and upper[1] < 0.64
+                (
+                    (
+                        angle is not None
+                        and angle < 40.0
+                        and obs.aspect_ratio_wh < 0.95
+                        and upper[1] < 0.64
+                    )
+                    or foreground_chair
+                )
                 and not (upright_standing and obs.bbox_height >= 0.54)
                 and polygon_distance_norm(obs.body_center, zones.bed_polygon) >= -0.35
             ):
@@ -966,6 +1030,9 @@ class FallStateMachine:
         upper_y = obs.upper_body_point[1]
         hip_y = (obs.mid_hip or obs.body_center)[1]
         bc = obs.body_center
+        foreground_chair = bool(
+            on_chair and self._is_bottom_cropped_upright_torso(obs)
+        )
         if not solo_confirmed:
             # Исключаем из истории скольжения стоячие высоты во время усаживания с родственником,
             # чтобы после его ухода сползание отсчитывалось строго от сидячей позы, а не от стояния.
@@ -977,9 +1044,15 @@ class FallStateMachine:
                 ((ts_i, max(hy_i, hip_y - 0.04)) for ts_i, hy_i in self._hip_y_history),
                 maxlen=self._hip_y_history.maxlen,
             )
-        if not self._assisted_seated_latched:
+        seat_changed = (
+            not self._assisted_seated_latched
+            or self._assisted_seated_on_chair != on_chair
+            or self._assisted_seated_foreground_chair != foreground_chair
+        )
+        if seat_changed:
             self._assisted_seated_latched = True
             self._assisted_seated_on_chair = on_chair
+            self._assisted_seated_foreground_chair = foreground_chair
             self._assisted_solo_confirmed = solo_confirmed
             self._assisted_seated_upper_y = upper_y
             self._assisted_seated_hip_y = hip_y
@@ -987,6 +1060,7 @@ class FallStateMachine:
             self._reclining_clear_timer = 0.0
         else:
             self._assisted_seated_on_chair = on_chair
+            self._assisted_seated_foreground_chair = foreground_chair
             self._assisted_solo_confirmed = solo_confirmed
             self._assisted_seated_upper_y = 0.7 * self._assisted_seated_upper_y + 0.3 * upper_y
             self._assisted_seated_hip_y = 0.7 * self._assisted_seated_hip_y + 0.3 * hip_y
@@ -1051,10 +1125,19 @@ class FallStateMachine:
                 return True, "Обнаружено горизонтальное положение на полу после сидения на стуле."
             if angle is not None and angle >= 48.0:
                 return True, "Сильный наклон корпуса / падение со стула вне кровати."
-            if upper[1] >= 0.66:
+            is_fg_chair_latch = (
+                self._assisted_seated_foreground_chair
+                or self._assisted_seated_upper_y >= 0.64
+            )
+            fg_chair_upright = (
+                is_fg_chair_latch
+                and self._is_bottom_cropped_upright_torso(obs)
+            )
+            if upper[1] >= 0.66 and not fg_chair_upright:
                 return True, "Осела или сползла со стула на пол вне кровати."
-            if (upper[1] - self._assisted_seated_upper_y) >= 0.095 or (
-                (mh[1] - self._assisted_seated_hip_y) >= 0.095
+            rel_slump_thr = 0.085 if is_fg_chair_latch else 0.095
+            if (upper[1] - self._assisted_seated_upper_y) >= rel_slump_thr or (
+                (mh[1] - self._assisted_seated_hip_y) >= rel_slump_thr
                 and (upper[1] - self._assisted_seated_upper_y) >= 0.06
             ):
                 return True, "Медленное сползание / оседание со стула на пол."
@@ -1187,6 +1270,8 @@ class FallStateMachine:
         if angle is None and ar >= 1.15:
             return True
         if ar >= 0.68 and obs.bbox_height <= 0.34:
+            if FallStateMachine._is_bottom_cropped_upright_torso(obs):
+                return False
             low_floor_band = (not zones.has_bed) or (obs.bbox_norm[1] >= (bed_max_y - 0.04))
             if low_floor_band and (angle is None or angle >= 42.0 or obs.bbox_height <= 0.28):
                 return True
@@ -1734,12 +1819,28 @@ class FallStateMachine:
                     )
                     angle_now = patient_obs.torso_angle_from_vertical_deg()
                     upright_standing = self._is_upright_standing_pose(patient_obs, zones, now)
+                    foreground_chair_now = (
+                        (
+                            self._assisted_seated_foreground_chair
+                            or self._assisted_seated_upper_y >= 0.64
+                        )
+                        and self._is_bottom_cropped_upright_torso(
+                            patient_obs,
+                            max_angle=48.0,
+                            max_ar=1.08,
+                        )
+                    )
                     calmly_on_same_chair = (
                         not on_bed_now
-                        and angle_now is not None
-                        and angle_now < 42.0
-                        and patient_obs.aspect_ratio_wh < 0.98
-                        and upper_pt[1] < 0.65
+                        and (
+                            (
+                                angle_now is not None
+                                and angle_now < 42.0
+                                and patient_obs.aspect_ratio_wh < 0.98
+                                and upper_pt[1] < 0.65
+                            )
+                            or foreground_chair_now
+                        )
                         and dist_from_seat <= 0.14
                         and not (
                             upright_standing
@@ -1792,15 +1893,21 @@ class FallStateMachine:
             # Приоритет №5: Спокойно лежит в кровати (и калибрует эталон сна baseline_in_bed)
             if zones.has_bed and is_person_on_bed(patient_obs, zones.bed_polygon, zones=zones):
                 self._was_monitored_recently = True
+                ankles_below_bed = self._has_ankle_below_bed_edge(patient_obs, zones)
                 bed_anchor_pt = patient_obs.mid_hip or patient_obs.upper_body_point
                 self._last_seen_deep_in_bed = (
                     polygon_distance_norm(bed_anchor_pt, zones.bed_polygon) >= 0.025
                     and not are_legs_hanging_outside_bed(patient_obs, zones.bed_polygon, zones=zones)
+                    and not (self._state == PatientState.SITTING_UP and ankles_below_bed)
                 )
                 self._leave_timer = 0.0
                 self._clear_away_tracking()
                 self._fall_unacknowledged = False
                 if self._state == PatientState.SITTING_UP:
+                    if ankles_below_bed:
+                        self._sit_clear_timer = 0.0
+                        self._state = PatientState.SITTING_UP
+                        return None
                     self._sit_clear_timer += dt
                     if self._sit_clear_timer < 3.5:
                         self._state = PatientState.SITTING_UP
