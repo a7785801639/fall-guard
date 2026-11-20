@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 from app.devices import AlertFeed, DeviceStore
 from app.engine import FallGuardEngine
+from app.geometry import PoseObservation
 from app.notifier import TelegramNotifier, _build_reply_keyboard
 from app.patient_id import Role, TrackIdentity
 from app.state_machine import AlertEvent, AlertSeverity, FallStateMachine, PatientState
 from app.web import create_web_app
+from app.zones import ZonesConfig
 
 from test_fallguard import BED_ZONE, make_pose
 from test_web_api import _build_test_settings
@@ -37,8 +39,8 @@ def _standing(tid: int):
 
 # --- Страховка падения от путаницы ролей ---------------------------------------------
 
-def test_fall_is_alerted_when_visit_is_only_latched_and_nobody_is_visible() -> None:
-    """Визит «защёлкнут» (caregiver_nearby), но в кадре помощника нет — падение не глушится."""
+def test_fall_is_suppressed_when_visit_is_latched_in_room_even_if_caregiver_not_visible() -> None:
+    """Пока «Свой» находится в комнате (визит защёлкнут), падение не тревожит, даже если гость временно вне видимости."""
     fsm = FallStateMachine(fall_confirm_seconds=1.0)
     roles = {1: _ident(1, Role.PATIENT)}
     t = 0.0
@@ -46,16 +48,30 @@ def test_fall_is_alerted_when_visit_is_only_latched_and_nobody_is_visible() -> N
         t += 0.25
         assert fsm.step([_in_bed()], roles, False, BED_ZONE, now=t) is None
 
+    for _ in range(20):
+        t += 0.25
+        ev = fsm.step([_on_floor(1)], roles, True, BED_ZONE, now=t, caregiver_visible=False)
+        assert ev is None
+    assert fsm.state == PatientState.CAREGIVER_ASSIST
+    assert fsm.fall_unacknowledged is False
+
+    # После выхода «Своего» из комнаты падение на полу штатно поднимает тревогу
     events = []
     for _ in range(16):
         t += 0.25
-        ev = fsm.step([_on_floor(1)], roles, True, BED_ZONE, now=t, caregiver_visible=False)
+        ev = fsm.step([_on_floor(1)], roles, False, BED_ZONE, now=t, caregiver_visible=False)
         if ev is not None:
             events.append(ev)
     assert len(events) == 1
     assert events[0].state == PatientState.FALLEN
     assert events[0].severity == AlertSeverity.CRITICAL
     assert fsm.fall_unacknowledged is True
+
+    # Повторный вход «Своего» с перекрытием пациента снимает активную тревогу
+    t += 0.25
+    assert fsm.step([], {}, True, BED_ZONE, now=t, caregiver_visible=False) is None
+    assert fsm.fall_unacknowledged is False
+    assert fsm.state == PatientState.CAREGIVER_ASSIST
 
 
 def test_fall_stays_suppressed_while_caregiver_is_really_visible() -> None:
@@ -70,13 +86,13 @@ def test_fall_stays_suppressed_while_caregiver_is_really_visible() -> None:
 
 
 def test_person_down_safety_net_alerts_even_when_role_is_not_patient() -> None:
-    """Бабушку приняли за «своего»: она неподвижно лежит на полу одна — тревога всё равно есть."""
+    """Бабушку приняли за «своего»: она неподвижно лежит на полу одна (никого из своих в комнате нет) — тревога есть."""
     fsm = FallStateMachine(fall_confirm_seconds=1.0)
     roles = {5: _ident(5, Role.VISITOR)}
     t, events = 0.0, []
     for _ in range(40):
         t += 0.25
-        ev = fsm.step([_on_floor(5)], roles, True, BED_ZONE, now=t, caregiver_visible=True)
+        ev = fsm.step([_on_floor(5)], roles, False, BED_ZONE, now=t, caregiver_visible=False)
         if ev is not None:
             events.append((t, ev))
     assert len(events) == 1
@@ -90,6 +106,125 @@ def test_person_down_safety_net_alerts_even_when_role_is_not_patient() -> None:
     for _ in range(60):
         t += 0.25
         assert fsm.step([_on_floor(5)], roles, False, BED_ZONE, now=t) is None
+
+
+def test_no_fall_alerts_when_caregiver_in_room_including_incident_113218() -> None:
+    """Страховка, боевой кейс 20261120_113218_fallen_b632 и пауза не поднимают падение, пока свой в комнате."""
+    # 1. _check_person_down при Role.VISITOR на полу, когда в комнате активен дверной визит
+    fsm_cov = FallStateMachine(fall_confirm_seconds=1.0)
+    roles_5 = {5: _ident(5, Role.VISITOR)}
+    t = 0.0
+    for _ in range(40):
+        t += 0.25
+        assert fsm_cov.step([_on_floor(5)], roles_5, True, BED_ZONE, now=t, caregiver_visible=False) is None
+    assert fsm_cov.state == PatientState.CAREGIVER_ASSIST
+
+    # 2. Воспроизведение координат инцидента 20261120_113218_fallen_b632 (11:32:18)
+    zones_21 = ZonesConfig(
+        bed_polygon=[
+            [0.59805, 0.79135], [0.60234, 0.65649], [0.66389, 0.64504], [0.69395, 0.56997],
+            [0.6689, 0.41858], [0.30964, 0.40458], [0.2574, 0.57888], [0.27815, 0.7888],
+        ],
+        door_polygon=[[0.20659, 0.19211], [0.26885, 0.82188], [0.21947, 0.99746], [0.18297, 0.99746], [0.06847, 0.26845]],
+        floor_polygon=[[0.265, 0.81], [0.635, 0.82], [0.685, 0.97], [0.215, 0.96]],
+        floor_width_cm=200.0,
+        floor_depth_cm=120.0,
+        mattress_height_cm=55.0,
+    )
+    obs_patient_18413 = make_pose(18413, (0.3418, 0.4658, 0.5567, 0.8023), (0.39, 0.62), (0.50, 0.64))
+    obs_visitor_18445 = PoseObservation(
+        track_id=18445,
+        bbox_norm=(0.4315, 0.4130, 0.5623, 0.9087),
+        conf=0.95,
+        keypoints_norm=(
+            (0.5117, 0.4848, 0.996), (0.5158, 0.4736, 0.937), (0.5043, 0.4760, 0.997),
+            (0.0, 0.0, 0.0), (0.4897, 0.4743, 0.989), (0.5334, 0.5143, 0.999),
+            (0.4707, 0.5215, 0.999), (0.5431, 0.5947, 0.991), (0.4530, 0.6074, 0.996),
+            (0.5431, 0.6757, 0.989), (0.4450, 0.6797, 0.994), (0.5159, 0.6616, 1.0),
+            (0.4750, 0.6633, 1.0), (0.5218, 0.7634, 0.999), (0.4782, 0.7611, 0.999),
+            (0.5046, 0.8550, 0.993), (0.4726, 0.8457, 0.992),
+        ),
+    )
+    obs_corner_18435 = PoseObservation(
+        track_id=18435,
+        bbox_norm=(0.6321, 0.8014, 0.7671, 0.9952),
+        conf=0.80,
+        keypoints_norm=(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+            (0.6772, 0.9154, 0.797), (0.0, 0.0, 0.0), (0.6601, 0.9772, 0.565),
+            (0.7290, 0.9349, 0.835), (0.0, 0.0, 0.0), (0.6917, 0.8974, 0.609),
+            (0.0, 0.0, 0.0), (0.6713, 0.8992, 0.480), (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+        ),
+    )
+    roles_inc = {
+        18413: _ident(18413, Role.PATIENT),
+        18445: _ident(18445, Role.VISITOR),
+        18435: _ident(18435, Role.VISITOR),
+    }
+
+    fsm_sup = FallStateMachine(fall_confirm_seconds=1.8, suppress_sitting_when_caregiver=True)
+    t = 0.0
+    for _ in range(10):
+        t += 0.25
+        assert fsm_sup.step(
+            [obs_patient_18413, obs_visitor_18445, obs_corner_18435],
+            roles_inc,
+            True,
+            zones_21,
+            now=t,
+            patient_in_bed_latched=True,
+            caregiver_visible=True,
+        ) is None
+    for _ in range(40):
+        t += 0.25
+        assert fsm_sup.step(
+            [obs_visitor_18445, obs_corner_18435],
+            {18445: roles_inc[18445], 18435: roles_inc[18435]},
+            True,
+            zones_21,
+            now=t,
+            patient_in_bed_latched=True,
+            caregiver_visible=True,
+        ) is None
+    assert fsm_sup.state == PatientState.CAREGIVER_ASSIST
+
+    # Даже с отключённым подавлением ухода стоящий VISITOR у кровати и пациентка на кровати исключают _check_person_down
+    for latched in (True, False):
+        fsm_nosup = FallStateMachine(fall_confirm_seconds=1.8, suppress_sitting_when_caregiver=False)
+        t = 0.0
+        for _ in range(40):
+            t += 0.25
+            batch = (
+                [obs_visitor_18445, obs_corner_18435]
+                if latched
+                else [obs_patient_18413, obs_visitor_18445, obs_corner_18435]
+            )
+            assert fsm_nosup.step(
+                batch,
+                roles_inc,
+                True,
+                zones_21,
+                now=t,
+                patient_in_bed_latched=latched,
+                caregiver_visible=True,
+            ) is None
+        assert fsm_nosup.state != PatientState.FALLEN
+
+    # 3. В паузе («Я рядом») при защёлкнутом присутствии своего в комнате новое падение также не тревожит
+    fsm_pause = FallStateMachine(fall_confirm_seconds=1.0)
+    roles_1 = {1: _ident(1, Role.PATIENT)}
+    t = 0.0
+    for _ in range(8):
+        t += 0.25
+        fsm_pause.step([_in_bed()], roles_1, False, BED_ZONE, now=t)
+    fsm_pause.acknowledge_and_pause(now=t, pause_seconds=900.0)
+    for _ in range(20):
+        t += 0.25
+        assert fsm_pause.step([_on_floor(1)], roles_1, True, BED_ZONE, now=t, caregiver_visible=False) is None
+    assert fsm_pause.state == PatientState.PAUSED
+    assert fsm_pause.pause_remaining_sec(t) > 0.0
 
 
 def test_person_down_safety_net_ignores_helped_moving_or_disabled_cases() -> None:

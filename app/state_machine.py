@@ -1198,6 +1198,7 @@ class FallStateMachine:
         identities: dict[int, TrackIdentity],
         zones: ZonesConfig,
         now: float,
+        patient_in_bed_latched: bool = False,
     ) -> AlertEvent | None:
         """
         Страховка от путаницы ролей: если ЛЮБОЙ человек (гость / неопознанный) неподвижно
@@ -1206,13 +1207,23 @@ class FallStateMachine:
         """
         if not self._floor_safety_net:
             return None
+        if patient_in_bed_latched and zones.has_bed:
+            if self._down_alerting and self._state == PatientState.FALLEN:
+                self._state = PatientState.IN_BED
+                self._status_reason = "спит в кровати · укрыта одеялом"
+            self._clear_person_down()
+            return None
 
         candidate: PoseObservation | None = None
         helper_present = False
+        patient_on_bed_now = False
         for obs in observations:
             ident = identities.get(obs.track_id)
             if ident is None:
                 continue
+            on_bed = zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones)
+            if ident.role == Role.PATIENT and on_bed:
+                patient_on_bed_now = True
             if self._is_lying_on_floor(obs, zones):
                 dismissed_spot = (
                     self._down_dismissed_center is not None
@@ -1230,12 +1241,11 @@ class FallStateMachine:
                 ):
                     candidate = obs
                 continue
-            on_bed = zones.has_bed and is_person_on_bed(obs, zones.bed_polygon, zones=zones)
             angle = obs.torso_angle_from_vertical_deg()
-            if not on_bed and obs.bbox_height >= 0.22 and (angle is None or angle < 55.0):
+            if (not on_bed or ident.role == Role.VISITOR) and obs.bbox_height >= 0.22 and (angle is None or angle < 55.0):
                 helper_present = True
 
-        if candidate is None or helper_present:
+        if candidate is None or helper_present or patient_on_bed_now:
             if self._down_alerting and self._state == PatientState.FALLEN:
                 self._state = PatientState.IDLE
                 self._status_reason = "ожидание в кадре"
@@ -1379,9 +1389,10 @@ class FallStateMachine:
         caregiver_visible: bool | None = None,
     ) -> AlertEvent | None:
         """
-        caregiver_visible — помощник реально виден в кадре сейчас (None = считать равным
-        caregiver_nearby). Если визит только «защёлкнут» по двери, а в кадре никого нет,
-        падение пациента НЕ подавляется.
+        Пока «Свой» находится в комнате (`caregiver_nearby == True`, включая активный дверной визит
+        `door_visit_active`, либо соприсутствие `Role.VISITOR` в кадре вместе с пациентом) и включён
+        `suppress_sitting_when_caregiver`, любые тревоги падения (`FALLEN`, включая `floor_safety_net`
+        и паузу) подавляются. `caregiver_visible` оставлен для обратной совместимости вызовов.
         """
         with self._lock:
             if caregiver_visible is None:
@@ -1394,36 +1405,7 @@ class FallStateMachine:
             if patient_in_bed_latched and zones.has_bed:
                 self._was_monitored_recently = True
 
-            if now < self._paused_until:
-                self._caregiver_active_until = max(self._caregiver_active_until, now + 8.0)
-                self._state = PatientState.PAUSED
-                self._status_reason = "ручная пауза («Я рядом»)"
-                self._clear_away_tracking()
-                self._clear_immobility_tracking()
-                self._clear_person_down()
-                self._unattended_fall_timer = 0.0
-                return self._watch_fall_during_pause(observations, identities, zones, now, dt, bool(caregiver_visible))
-            if self._state == PatientState.PAUSED:
-                if zones.has_bed and (
-                    patient_in_bed_latched
-                    or (self._last_seen_deep_in_bed and zones.has_door and self._missing_confirm >= 8.0)
-                ):
-                    self._state = PatientState.IN_BED
-                    self._status_reason = "спит в кровати · укрыта одеялом"
-                    self._was_monitored_recently = True
-                    self._last_seen_deep_in_bed = True
-                else:
-                    self._state = PatientState.IDLE
-                    self._status_reason = "ожидание в кадре"
-
-            # Страховка «человек на полу» — раньше любых подавлений по ролям и визитам
-            down_ev = self._check_person_down(observations, identities, zones, now)
-            if down_ev is not None:
-                return down_ev
-            if self._down_alerting:
-                return None
-
-            # Ищем наблюдение подтверждённой бабушки (Role.PATIENT)
+            # Ищем наблюдение подтверждённой бабушки (Role.PATIENT) и проверяем присутствие «Своего» в комнате
             patient_obs: PoseObservation | None = None
             for obs in observations:
                 ident = identities.get(obs.track_id)
@@ -1440,6 +1422,64 @@ class FallStateMachine:
                     )
                     break
 
+            has_co_present_visitor = (
+                patient_obs is not None
+                and any(
+                    obs.track_id != patient_obs.track_id
+                    and identities.get(obs.track_id) is not None
+                    and identities[obs.track_id].role == Role.VISITOR
+                    for obs in observations
+                )
+            )
+            caregiver_in_room = bool(caregiver_nearby or has_co_present_visitor)
+            suppress_for_caregiver = bool(caregiver_in_room and self._suppress_with_caregiver)
+
+            if now < self._paused_until:
+                self._caregiver_active_until = max(self._caregiver_active_until, now + 8.0)
+                self._state = PatientState.PAUSED
+                self._status_reason = "ручная пауза («Я рядом»)"
+                self._clear_away_tracking()
+                self._clear_immobility_tracking()
+                self._clear_person_down()
+                self._unattended_fall_timer = 0.0
+                return self._watch_fall_during_pause(
+                    observations,
+                    identities,
+                    zones,
+                    now,
+                    dt,
+                    bool(suppress_for_caregiver or caregiver_visible),
+                )
+            if self._state == PatientState.PAUSED:
+                if zones.has_bed and (
+                    patient_in_bed_latched
+                    or (self._last_seen_deep_in_bed and zones.has_door and self._missing_confirm >= 8.0)
+                ):
+                    self._state = PatientState.IN_BED
+                    self._status_reason = "спит в кровати · укрыта одеялом"
+                    self._was_monitored_recently = True
+                    self._last_seen_deep_in_bed = True
+                else:
+                    self._state = PatientState.IDLE
+                    self._status_reason = "ожидание в кадре"
+
+            # Страховка «человек на полу» — срабатывает только когда в комнате никого из своих нет
+            if suppress_for_caregiver:
+                self._clear_person_down()
+                self._unattended_fall_timer = 0.0
+            else:
+                down_ev = self._check_person_down(
+                    observations,
+                    identities,
+                    zones,
+                    now,
+                    patient_in_bed_latched=patient_in_bed_latched,
+                )
+                if down_ev is not None:
+                    return down_ev
+                if self._down_alerting:
+                    return None
+
             # Случай 1: Бабушки нет в кадре (или временно перекрыта ухаживающим родственником у кровати / одеялом)
             if patient_obs is None:
                 self._help_timer = 0.0
@@ -1449,10 +1489,13 @@ class FallStateMachine:
                 self._fall_timer = 0.0
                 self._clear_immobility_tracking()
 
-                if caregiver_nearby and self._suppress_with_caregiver:
+                if suppress_for_caregiver:
                     self._caregiver_active_until = max(self._caregiver_active_until, now + 8.0)
                     self._caregiver_was_present = True
                     self._missing_timer = 0.0
+                    self._unattended_fall_timer = 0.0
+                    self._clear_person_down()
+                    self._fall_unacknowledged = False
                     self._clear_away_tracking()
                     self._state = PatientState.CAREGIVER_ASSIST
                     self._status_reason = "рядом родственник · уход у кровати"
@@ -1528,7 +1571,7 @@ class FallStateMachine:
 
             # Бабушка в кадре — сбрасываем таймер пропажи и обновляем детектор микро-шевелений
             self._missing_timer = 0.0
-            self._caregiver_was_present = caregiver_nearby
+            self._caregiver_was_present = caregiver_in_room
             self._update_micro_movement(patient_obs, now)
 
             upper_pt = patient_obs.upper_body_point
@@ -1541,8 +1584,8 @@ class FallStateMachine:
             elif not pat_on_bed_step:
                 self._hip_y_history.append((now, patient_obs.body_center[1]))
 
-            # Приоритет №1: Если рядом помощник (Caregiver Co-Presence) — уход под присмотром, подавляем тревоги
-            if caregiver_nearby and self._suppress_with_caregiver:
+            # Приоритет №1: Если свой в комнате (Caregiver Co-Presence) — уход под присмотром, подавляем все тревоги
+            if suppress_for_caregiver:
                 self._caregiver_active_until = max(self._caregiver_active_until, now + 8.0)
                 calm_seated, on_chair = self._classify_calm_seated_pose(patient_obs, zones, now)
                 if calm_seated:
@@ -1559,35 +1602,9 @@ class FallStateMachine:
                 ):
                     self._clear_assisted_seated()
 
-                # Визит «защёлкнут», но помощника в кадре нет: падение пациента не подавляем
-                if not caregiver_visible:
-                    lone_fallen, lone_reason = self._check_fallen_or_slumped(patient_obs, zones, now)
-                    if lone_fallen:
-                        self._unattended_fall_timer += dt
-                        if self._unattended_fall_timer >= max(self._fall_confirm * 1.5, self._fall_confirm + 1.0):
-                            self._clear_assisted_seated()
-                            self._last_seen_deep_in_bed = False
-                            prev = self._state
-                            self._state = PatientState.FALLEN
-                            self._status_reason = lone_reason.rstrip(".")
-                            if prev != PatientState.FALLEN or not self._fall_unacknowledged:
-                                return self._emit_if_cooled_down(
-                                    PatientState.FALLEN,
-                                    AlertSeverity.CRITICAL,
-                                    "Падение / сползание вне кровати!",
-                                    f"{lone_reason} Помощника в кадре нет. "
-                                    "Нажмите «Я подошёл», чтобы отключить повтор сигнала.",
-                                    now,
-                                    patient_obs.track_id,
-                                )
-                            return None
-                    else:
-                        self._unattended_fall_timer = max(0.0, self._unattended_fall_timer - dt * 1.5)
-                    if self._state == PatientState.FALLEN and self._fall_unacknowledged and lone_fallen:
-                        return None
-                else:
-                    self._unattended_fall_timer = 0.0
+                self._unattended_fall_timer = 0.0
                 self._fall_timer = 0.0
+                self._clear_person_down()
                 self._help_timer = 0.0
                 self._sit_timer = 0.0
                 self._sit_clear_timer = 0.0
